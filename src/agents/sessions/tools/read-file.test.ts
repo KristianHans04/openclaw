@@ -9,6 +9,7 @@ import { createSpawnBrokerHost } from "../../../process/spawn-broker/host.js";
 import { readLocalFile } from "./read-file.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const exited = { code: 0, signal: null, killed: false, termination: "exit" as const };
 let root: string;
 const file = (...parts: string[]) => path.join(root, ...parts);
 const write = (name: string, text = "live state") => fs.writeFileSync(file(name), text);
@@ -24,12 +25,9 @@ beforeEach(() => {
   fs.mkdirSync(file("state"));
   vi.stubEnv("OPENCLAW_STATE_DIR", file("state"));
   vi.spyOn(command, "runCommandBuffered").mockResolvedValue({
+    ...exited,
     stdout: serialize({ buffer: Buffer.from("isolated bytes") }),
     stderr: Buffer.alloc(0),
-    code: 0,
-    signal: null,
-    killed: false,
-    termination: "exit",
   });
 });
 
@@ -63,23 +61,19 @@ it.each([
   await expectIsolated(name);
 });
 
-it("isolates state files reached through a directory alias", async () => {
+it.each([false, true])("isolates aliased state (root: %s)", async (rootAlias) => {
   linkState("alias");
   write("state/custom-storage");
-  await expectIsolated("alias/custom-storage");
+  if (rootAlias) {
+    vi.stubEnv("OPENCLAW_STATE_DIR", file("alias"));
+  }
+  await expectIsolated(rootAlias ? "state/custom-storage" : "alias/custom-storage");
 });
 
 it("isolates renamed hardlinks to database files", async () => {
   write("agent.sqlite-shm");
   fs.linkSync(file("agent.sqlite-shm"), file("notes.txt"));
   await expectIsolated("notes.txt");
-});
-
-it("resolves a symlinked state root before classifying its files", async () => {
-  linkState("state-alias");
-  vi.stubEnv("OPENCLAW_STATE_DIR", file("state-alias"));
-  write("state/custom-storage");
-  await expectIsolated("state/custom-storage");
 });
 
 it("reuses the broker for isolated reads, preserving bytes, failures, and cancellation", async () => {

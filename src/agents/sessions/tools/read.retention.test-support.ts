@@ -9,17 +9,11 @@ const gc = globalThis.gc;
 assert.ok(gc, "The retention child requires --expose-gc");
 const inputUnits = 2 * 1024 * 1024;
 
-function line(index: number) {
-  return `${String.fromCharCode(65 + index).repeat(1020)}\ud800x🦞\udc00`;
-}
+const line = (index: number) => `${String.fromCharCode(65 + index).repeat(1020)}\ud800x🦞\udc00`;
 
 async function makeResults(mode: Mode, tool: ReturnType<typeof createReadToolDefinition>) {
-  const input = {
-    path: "synthetic-large.txt",
-    offset: mode === "eof" ? 2 : 1,
-    limit: 1,
-    ...(mode === "cursor" ? { cursor: 10 } : {}),
-  };
+  const page = mode === "eof" ? { offset: 2 } : { offset: 1, cursor: 10 };
+  const input = { path: "synthetic-large.txt", limit: 1, ...page };
   const results = [];
   for (let index = 0; index < 8; index++) {
     results.push(await tool.execute(`read-${index}`, input, undefined, undefined, {} as never));
@@ -44,8 +38,7 @@ async function runMode(mode: Mode) {
       decodeText: ({ buffer }) => buffer.toString("utf16le"),
       readFile: async () => {
         const index = readIndex++ % 8;
-        const bytes = Buffer.alloc(inputUnits * 2);
-        bytes.fill(Buffer.from([65 + index, 0]));
+        const bytes = Buffer.alloc(inputUnits * 2, Buffer.from([65 + index, 0]));
         const text = mode === "eof" ? `\n${line(index)}` : `${line(index)}\n`.repeat(3);
         bytes.write(text, mode === "eof" ? bytes.length - text.length * 2 : 0, "utf16le");
         return bytes;

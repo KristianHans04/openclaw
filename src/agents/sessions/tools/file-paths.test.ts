@@ -33,6 +33,7 @@ function fixture(remote?: string) {
   const edits = [{ oldText: "written", newText: "edited" }];
   return {
     file,
+    expectFile: (name: string, content: string) => expectFile(file(name), content),
     read: async (name: string) => (await read.execute("read", { path: name })).content,
     write: async (name: string, content: string) =>
       (await write.execute("write", { path: name, content })).details,
@@ -41,11 +42,8 @@ function fixture(remote?: string) {
   };
 }
 const text = (value: string) => [{ type: "text", text: value }];
-async function expectFiles(entries: [string, string][]) {
-  expect(await Promise.all(entries.map(([file]) => fs.readFile(file, "utf8")))).toEqual(
-    entries.map(([, content]) => content),
-  );
-}
+const expectFile = (file: string, content: string) =>
+  expect(fs.readFile(file, "utf8")).resolves.toBe(content);
 
 it("preserves literal @ paths and shorthand across file operations", async () => {
   const f = fixture();
@@ -60,14 +58,12 @@ it("preserves literal @ paths and shorthand across file operations", async () =>
   expect(await f.read("@a.txt")).toEqual(text("before\n"));
   expect(await f.write("@a.txt", "written\n")).toMatchObject({ changed: true, created: false });
   expect(await f.edit("@a.txt")).toMatchObject({ changed: true });
-  await expectFiles([
-    [f.file("@a.txt"), "edited\n"],
-    [f.file("a.txt"), "sibling\n"],
-  ]);
+  await f.expectFile("@a.txt", "edited\n");
+  await f.expectFile("a.txt", "sibling\n");
   await fs.mkdir(f.file("@dir"));
   expect(await f.write("@dir/new.txt", "child\n")).toMatchObject({ changed: true, created: true });
   expect(await f.list("@dir")).toEqual(text('"new.txt"'));
-  await expectFiles([[f.file("@dir/new.txt"), "child\n"]]);
+  await f.expectFile("@dir/new.txt", "child\n");
   await expect(fs.stat(f.file("dir"))).rejects.toMatchObject({ code: "ENOENT" });
 });
 
@@ -80,9 +76,7 @@ it("keeps injected paths independent of colliding local @ files", async () => {
   expect(await f.read("@target.txt")).toEqual(text("before\n"));
   await f.write("@target.txt", "written\n");
   await f.edit("@target.txt");
-  await expectFiles([
-    [target, "edited\n"],
-    [f.file("@target.txt"), "local\n"],
-  ]);
+  await expectFile(target, "edited\n");
+  await f.expectFile("@target.txt", "local\n");
   await expect(fs.stat(path.join(remote, "@target.txt"))).rejects.toMatchObject({ code: "ENOENT" });
 });
