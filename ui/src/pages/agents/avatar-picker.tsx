@@ -305,7 +305,7 @@ export function AvatarPicker(props: AvatarPickerProps) {
           </div>
         </Show>
         <Show when={busy() && mode() === "bot"}>
-          <p class="avatar-picker__status" role="status">
+          <p class="avatar-picker__status sr-only" role="status">
             {t("agents.identity.avatarPreparing")}
           </p>
         </Show>

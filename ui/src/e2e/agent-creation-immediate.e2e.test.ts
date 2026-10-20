@@ -17,6 +17,65 @@ const previousMessage = "Synthetic Harbor conversation before agent creation.";
 const pendingSelector = 'openclaw-pending-session-create[aria-hidden="false"]';
 
 suite.define(() => {
+  it("keeps the creation dialog stable when selecting Blobster presets", async () => {
+    await suite.withPage(
+      { locale: "en-US", serviceWorkers: "block", viewport: { width: 1440, height: 1000 } },
+      async ({ page }) => {
+        await installMockGateway(page, {
+          assistantName: "Harbor",
+          methodResponses: { "config.get": { exists: true, valid: true, sourceConfig: {} } },
+        });
+        await page.goto(`${suite.server.baseUrl}chat`);
+        await waitForControlUiRoute(page, { routeId: "chat" });
+        const sidebar = page.locator("openclaw-app-sidebar");
+        await sidebar.locator(".sidebar-agent-card__main").click();
+        await sidebar.locator('[data-value="command:new-agent"]').click();
+        const dialog = page.locator(".agent-create-dialog");
+        await dialog.waitFor({ state: "visible" });
+        const presets = dialog.locator(".avatar-picker__preset");
+        await presets.first().click();
+        await expect.poll(() => presets.first().getAttribute("aria-pressed")).toBe("true");
+        await page.waitForTimeout(250); // Let the opening animation finish before measuring selection.
+
+        const [frames] = await Promise.all([
+          page.evaluate(
+            () =>
+              new Promise<Array<{ top: number; height: number; status: boolean }>>((resolve) => {
+                const samples: Array<{ top: number; height: number; status: boolean }> = [];
+                const started = performance.now();
+                const sample = () => {
+                  const modal = document.querySelector(".agent-create-dialog")!;
+                  const bounds = modal.getBoundingClientRect();
+                  samples.push({
+                    top: Math.round(bounds.top),
+                    height: Math.round(bounds.height),
+                    status: modal.querySelector('.avatar-picker__status[role="status"]') !== null,
+                  });
+                  if (performance.now() - started < 500) {
+                    requestAnimationFrame(sample);
+                  } else {
+                    resolve(samples);
+                  }
+                };
+                requestAnimationFrame(sample);
+              }),
+          ),
+          presets.nth(1).click(),
+        ]);
+        await expect.poll(() => presets.nth(1).getAttribute("aria-pressed")).toBe("true");
+        expect(frames.some((frame) => frame.status)).toBe(true);
+        expect(
+          Math.max(...frames.map((frame) => frame.height)) -
+            Math.min(...frames.map((frame) => frame.height)),
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.max(...frames.map((frame) => frame.top)) -
+            Math.min(...frames.map((frame) => frame.top)),
+        ).toBeLessThanOrEqual(1);
+      },
+    );
+  });
+
   it("prepares creation from the cold selector and immediately previews its own chat before admission", async () => {
     await suite.withPage(
       { locale: "en-US", serviceWorkers: "block", viewport: { width: 1440, height: 1000 } },
