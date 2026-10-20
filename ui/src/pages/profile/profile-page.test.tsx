@@ -1,10 +1,8 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import {
-  GIT_COAUTHOR_PREFERENCE_KEY,
-  type UserProfile,
-} from "../../../../packages/gateway-protocol/src/index.ts";
+import type { UserProfile } from "../../../../packages/gateway-protocol/src/index.ts";
+import { GIT_COAUTHOR_PREFERENCE_KEY } from "../../../../packages/gateway-protocol/src/schema/user-profile-constants.ts";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { createApplicationConfigCapability } from "../../app/config.ts";

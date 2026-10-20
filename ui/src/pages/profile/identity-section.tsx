@@ -1,8 +1,6 @@
 import { createMemo, Show } from "solid-js";
-import {
-  GATEWAY_OWNER_PROFILE_ID,
-  type UserProfile,
-} from "../../../../packages/gateway-protocol/src/index.ts";
+import type { UserProfile } from "../../../../packages/gateway-protocol/src/index.ts";
+import { GATEWAY_OWNER_PROFILE_ID } from "../../../../packages/gateway-protocol/src/schema/user-profile-constants.ts";
 import type { ApplicationConfigCapability } from "../../app/config.ts";
 import {
   SettingsRow,

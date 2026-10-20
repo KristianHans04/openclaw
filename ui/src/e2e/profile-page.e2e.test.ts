@@ -3,10 +3,8 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Locator, type Page } from "playwright/test";
 import { beforeEach, it } from "vitest";
-import {
-  GIT_COAUTHOR_PREFERENCE_KEY,
-  type UserModelAccount,
-} from "../../../packages/gateway-protocol/src/index.ts";
+import type { UserModelAccount } from "../../../packages/gateway-protocol/src/index.ts";
+import { GIT_COAUTHOR_PREFERENCE_KEY } from "../../../packages/gateway-protocol/src/schema/user-profile-constants.ts";
 import {
   buildControlUiCspHeader,
   computeInlineScriptHashes,

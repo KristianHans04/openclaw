@@ -9,7 +9,7 @@ import {
   GATEWAY_OWNER_PROFILE_ID,
   GIT_COAUTHOR_PREFERENCE_KEY,
   isGitCoauthorCreditEnabled,
-} from "../../../../packages/gateway-protocol/src/index.ts";
+} from "../../../../packages/gateway-protocol/src/schema/user-profile-constants.ts";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { subtitleForRoute, titleForRoute } from "../../app-navigation.ts";
 import type { ApplicationContext, ApplicationGatewaySnapshot } from "../../app/context-types.ts";
