@@ -18,6 +18,17 @@ import "../../styles.css";
 import "../../styles/settings.css";
 
 const prefix = "plugins.entries.fixture.config";
+const configPath = (...parts: string[]) => ["plugins", "entries", "fixture", "config", ...parts];
+const getField = (root: ParentNode, label: string) =>
+  root.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+function typeInto(input: HTMLInputElement, value: string) {
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+const textContents = (root: ParentNode, selector: string) =>
+  [...root.querySelectorAll(selector)].map((element) => element.textContent?.trim());
+const findElement = <T extends Element = HTMLElement>(root: ParentNode, selector: string) =>
+  root.querySelector<T>(selector)!;
 const configValue = (config: Record<string, unknown>) => ({
   plugins: { entries: { fixture: { config } } },
 });
@@ -70,7 +81,7 @@ async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
   const host = document.createElement("div");
   document.body.append(host);
   mountSolid(() => <PluginSettingsEditor {...props()} />, { container: host });
-  const editor = host.querySelector<HTMLElement>("openclaw-plugin-settings-editor")!;
+  const editor = findElement(host, "openclaw-plugin-settings-editor");
   const update = async (next: Partial<PluginSettingsEditorProps>) => {
     setProps((current) => ({ ...current, ...next }));
     await settle();
@@ -78,11 +89,10 @@ async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
   await settle();
   return { editor, model, update };
 }
-async function searchSettings(editor: HTMLElement, query: string) {
-  const input = editor.querySelector<HTMLInputElement>('input[type="search"]')!;
+async function searchSettings(editor: HTMLElement, search: string) {
+  const input = findElement<HTMLInputElement>(editor, 'input[type="search"]');
   expect(input).not.toBeNull();
-  input.value = query;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  typeInto(input, search);
   await settle();
 }
 async function settle() {
@@ -145,11 +155,10 @@ describe("grouped plugin settings", () => {
       { wrapper: provider.wrapper },
     );
     await settle();
-    const input = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Label"]')!;
+    const input = getField(mounted.container, "Label");
     input.focus();
     for (const text of ["a", "ab"]) {
-      input.value = text;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
+      typeInto(input, text);
       await settle();
       expect(document.activeElement).toBe(input);
       expect(input.value).toBe(text);
@@ -170,34 +179,28 @@ describe("grouped plugin settings", () => {
       },
       onConfigPatch,
     });
-    const host = editor.querySelector<HTMLInputElement>('input[aria-label="Host"]')!;
+    const host = getField(editor, "Host");
     host.focus();
-    host.value = "gateway.local";
-    host.dispatchEvent(new Event("input", { bubbles: true }));
+    typeInto(host, "gateway.local");
     host.blur();
     await settle();
     expect(onConfigPatch).not.toHaveBeenCalled();
 
     await update({ model: { ...model } });
-    expect(editor.querySelector<HTMLInputElement>('input[aria-label="Host"]')?.value).toBe(
-      "gateway.local",
-    );
-    const port = editor.querySelector<HTMLInputElement>('input[aria-label="Port"]')!;
+    expect(getField(editor, "Host").value).toBe("gateway.local");
+    const port = getField(editor, "Port");
     port.focus();
-    port.value = "18789";
-    port.dispatchEvent(new Event("input", { bubbles: true }));
+    typeInto(port, "18789");
     port.blur();
     await settle();
-    expect(onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-      ["plugins", "entries", "fixture", "config"],
-      { host: "gateway.local", port: 18789 },
-    );
+    expect(onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath(), {
+      host: "gateway.local",
+      port: 18789,
+    });
     expect(
       editor.querySelector('.cfg-structured-draft__error [role="alert"]')?.textContent,
     ).toContain("draft is still here");
-    expect(editor.querySelector<HTMLInputElement>('input[aria-label="Host"]')?.value).toBe(
-      "gateway.local",
-    );
+    expect(getField(editor, "Host").value).toBe("gateway.local");
   });
   it("navigates authored sections without hiding settings and omits the rail for flat schemas", async () => {
     const { editor, model, update } = await mount();
@@ -207,19 +210,15 @@ describe("grouped plugin settings", () => {
       "Capture",
       "Other",
     ]);
-    const target = editor.querySelector<HTMLElement>(links[1]!.getAttribute("href")!)!;
+    const target = findElement(editor, links[1]!.getAttribute("href")!);
     const scroll = vi.spyOn(target, "scrollIntoView");
     links[1]!.click();
     expect(scroll).toHaveBeenCalledOnce();
     expect(document.activeElement).toBe(target);
     expect(editor.querySelectorAll("[data-setting]")).toHaveLength(4);
     expect(editor.querySelector("h1")).toBeNull();
-    expect([...editor.querySelectorAll("h2")].map((e) => e.textContent?.trim())).toEqual([
-      "Data storage",
-      "Capture",
-      "Other",
-    ]);
-    const back = editor.querySelector<HTMLAnchorElement>(".plugins-settings-breadcrumb__parent")!;
+    expect(textContents(editor, "h2")).toEqual(["Data storage", "Capture", "Other"]);
+    const back = findElement<HTMLAnchorElement>(editor, ".plugins-settings-breadcrumb__parent");
     expect(back.getAttribute("href")).toBe("/settings/plugins/fixture");
     back.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     expect(model.onBack).toHaveBeenCalledOnce();
@@ -258,7 +257,7 @@ describe("grouped plugin settings", () => {
     async ({ overrides, fields }) => {
       const { editor, model } = await mount(overrides);
       for (const { label, value, placeholder } of fields) {
-        const input = editor.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+        const input = getField(editor, label);
         expect(input.value).toBe(value);
         if (placeholder !== undefined) {
           expect(input.placeholder).toBe(placeholder);
@@ -274,8 +273,8 @@ describe("grouped plugin settings", () => {
     overrides: Partial<PluginSettingsEditorModel>;
     selector: string;
     index?: number;
-    initial: string;
-    replacement: string;
+    initial?: string;
+    replacement?: string;
     path: string[];
     value: unknown;
     search?: string;
@@ -286,8 +285,6 @@ describe("grouped plugin settings", () => {
       name: "an inherited nested value without losing its sibling",
       overrides: {},
       selector: 'input[aria-label="Storage: Path"]',
-      initial: "original",
-      replacement: "changed",
       path: ["storage"],
       value: { path: "changed", mode: "keep" },
     },
@@ -305,8 +302,6 @@ describe("grouped plugin settings", () => {
         }),
       },
       selector: 'input[aria-label="Directory"]',
-      initial: "original",
-      replacement: "changed",
       search: "directory",
       path: ["storage", "path"],
       value: "changed",
@@ -350,49 +345,34 @@ describe("grouped plugin settings", () => {
       path: ["model.name"],
       value: "second",
     },
-  ])(
-    "edits $name on blur",
-    async ({
-      overrides,
-      selector,
-      index = 0,
-      initial,
-      replacement,
-      path,
-      value,
-      search,
-      array,
-      flat,
-    }) => {
-      const { editor, model } = await mount(overrides);
-      if (search) {
-        await searchSettings(editor, search);
-      }
-      if (array) {
-        const row = editor.querySelector<HTMLElement>('[data-setting="tags"]')!;
-        expect(
-          [...row.querySelectorAll<HTMLInputElement>("input")].map((input) => input.value),
-        ).toEqual(["alpha", "beta"]);
-        expect(row.textContent).not.toContain("2 items");
-      }
-      if (flat) {
-        expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
-        expect(editor.querySelectorAll("h2")).toHaveLength(0);
-      }
-      const input = editor.querySelectorAll<HTMLInputElement>(selector).item(index)!;
-      expect(input).not.toBeNull();
-      expect(input.value).toBe(initial);
-      input.focus();
-      input.value = replacement;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      expect(model.onConfigPatch).not.toHaveBeenCalled();
-      input.blur();
-      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-        ["plugins", "entries", "fixture", "config", ...path],
-        value,
-      );
-    },
-  );
+  ])("edits $name on blur", async (entry) => {
+    const { editor, model } = await mount(entry.overrides);
+    if (entry.search) {
+      await searchSettings(editor, entry.search);
+    }
+    if (entry.array) {
+      const row = findElement(editor, '[data-setting="tags"]');
+      expect(
+        [...row.querySelectorAll<HTMLInputElement>("input")].map((input) => input.value),
+      ).toEqual(["alpha", "beta"]);
+      expect(row.textContent).not.toContain("2 items");
+    }
+    if (entry.flat) {
+      expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
+      expect(editor.querySelectorAll("h2")).toHaveLength(0);
+    }
+    const input = editor.querySelectorAll<HTMLInputElement>(entry.selector).item(entry.index ?? 0)!;
+    expect(input).not.toBeNull();
+    expect(input.value).toBe(entry.initial ?? "original");
+    input.focus();
+    typeInto(input, entry.replacement ?? "changed");
+    expect(model.onConfigPatch).not.toHaveBeenCalled();
+    input.blur();
+    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
+      configPath(...entry.path),
+      entry.value,
+    );
+  });
   it("keeps object array inputs aligned beside removal and finds their descendants", async () => {
     const { editor, model } = await mount({
       configHints: {},
@@ -411,7 +391,7 @@ describe("grouped plugin settings", () => {
     const inputs = [...editor.querySelectorAll<HTMLInputElement>(".cfg-array__item input")];
     expect(inputs).toHaveLength(2);
     const bounds = inputs.map((input) => input.getBoundingClientRect());
-    const remove = editor.querySelector<HTMLButtonElement>('button[aria-label="Remove item"]')!;
+    const remove = findElement<HTMLButtonElement>(editor, 'button[aria-label="Remove item"]');
     const removeBounds = remove.getBoundingClientRect();
     expect(bounds[0]!.left).toBe(bounds[1]!.left);
     expect(bounds[1]!.top).toBeGreaterThan(bounds[0]!.bottom);
@@ -420,10 +400,7 @@ describe("grouped plugin settings", () => {
     await searchSettings(editor, "directory");
     expect(editor.querySelectorAll(".cfg-array__item input")).toHaveLength(2);
     remove.click();
-    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-      ["plugins", "entries", "fixture", "config", "targets"],
-      [],
-    );
+    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("targets"), []);
   });
   it.each([
     { schema: { type: "string" }, value: REDACTED_SENTINEL, replacement: "replacement-key" },
@@ -488,20 +465,19 @@ describe("grouped plugin settings", () => {
             : undefined,
       });
       await vi.waitFor(() => expect(editor.textContent).not.toContain("Loading"));
-      const credential = editor.querySelector("openclaw-plugin-credential-editor")!;
+      const credential = findElement(editor, "openclaw-plugin-credential-editor");
       expect(credential).not.toBeNull();
       expect(editor.textContent).not.toContain(REDACTED_SENTINEL);
       expect(editor.querySelector('input[aria-label="Search: Mode"]')).not.toBeNull();
       if (typeof replacement === "string") {
-        const input = credential.querySelector<HTMLInputElement>("input")!;
-        input.value = replacement;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
+        const input = findElement<HTMLInputElement>(credential, "input");
+        typeInto(input, replacement);
         flush();
         input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
       } else {
-        credential.querySelector<HTMLButtonElement>("button")!.click();
+        findElement<HTMLButtonElement>(credential, "button").click();
         await settle();
-        const select = credential.querySelector<HTMLSelectElement>("select")!;
+        const select = findElement<HTMLSelectElement>(credential, "select");
         select.value = replacement.source;
         select.dispatchEvent(new Event("change", { bubbles: true }));
         flush();
@@ -509,8 +485,7 @@ describe("grouped plugin settings", () => {
           ".plugin-credential__dialog input",
         );
         for (const [index, next] of [replacement.provider, replacement.id].entries()) {
-          inputs[index]!.value = next;
-          inputs[index]!.dispatchEvent(new Event("input", { bubbles: true }));
+          typeInto(inputs[index]!, next);
           flush();
         }
         [...credential.querySelectorAll("button")]
@@ -518,7 +493,7 @@ describe("grouped plugin settings", () => {
           .click();
       }
       expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-        ["plugins", "entries", "fixture", "config", "search", "apiKey"],
+        configPath("search", "apiKey"),
         replacement,
       );
     },
@@ -527,8 +502,8 @@ describe("grouped plugin settings", () => {
     "toggles from the checkbox %s once and ignores non-editing clicks",
     async (target) => {
       const { editor, model, update } = await mount();
-      const row = editor.querySelector<HTMLElement>('[data-setting="enabled"]')!;
-      const input = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+      const row = findElement(editor, '[data-setting="enabled"]');
+      const input = findElement<HTMLInputElement>(row, 'input[type="checkbox"]');
       expect(row).not.toBeNull();
       expect(input).not.toBeNull();
       const range = document.createRange();
@@ -539,18 +514,15 @@ describe("grouped plugin settings", () => {
       row.click();
       expect(model.onConfigPatch).not.toHaveBeenCalled();
       getSelection()!.removeAllRanges();
-      row.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click();
+      findElement<HTMLButtonElement>(row, 'button[aria-haspopup="menu"]').click();
       expect(model.onConfigPatch).not.toHaveBeenCalled();
       await settle();
-      const menu = row.querySelector<HTMLElement>('[role="menu"]')!;
+      const menu = findElement(row, '[role="menu"]');
       expect(menu.matches(":popover-open")).toBe(true);
       menu.click();
       expect(model.onConfigPatch).not.toHaveBeenCalled();
       (target === "row" ? row : input).click();
-      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-        ["plugins", "entries", "fixture", "config", "enabled"],
-        false,
-      );
+      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("enabled"), false);
       vi.mocked(model.onConfigPatch).mockClear();
       await update({ model: { ...model, canEditConfig: false } });
       row.click();
@@ -577,7 +549,7 @@ describe("grouped editor field discovery", () => {
       },
     });
     for (const name of ["Enabled", "Timeout", "Storage: Path"]) {
-      const input = editor.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
+      const input = getField(editor, name);
       const ids = input.getAttribute("aria-describedby")?.trim().split(/\s+/u) ?? [];
       const instructions = input
         .closest(".plugin-editor__row")
@@ -648,11 +620,10 @@ describe("plugin map layout", () => {
     });
     editor.style.width = width > 768 ? "880px" : "100%";
     try {
-      expect(
-        [...editor.querySelectorAll(".plugin-editor__title")].map((title) =>
-          title.textContent?.trim(),
-        ),
-      ).toEqual(["Empty overrides", "Populated overrides"]);
+      expect(textContents(editor, ".plugin-editor__title")).toEqual([
+        "Empty overrides",
+        "Populated overrides",
+      ]);
       expect(editor.querySelector(".cfg-map > .settings-row .settings-row__title")).toBeNull();
       for (const add of editor.querySelectorAll<HTMLButtonElement>(
         ".cfg-map > .settings-row button",
@@ -663,22 +634,19 @@ describe("plugin map layout", () => {
         expect(bounds.height).toBeLessThan(48);
         expect(bounds.right).toBeLessThanOrEqual(mapBounds.right);
       }
-      const key = editor.querySelector<HTMLInputElement>('input[aria-label="Key: first"]')!;
+      const key = getField(editor, "Key: first");
       expect(key.getBoundingClientRect().width).toBeGreaterThan(100);
-      const value = editor.querySelector<HTMLInputElement>(
+      const value = findElement<HTMLInputElement>(
+        editor,
         '[data-setting="populated"] input[type="number"]',
-      )!;
+      );
       expect(value.getBoundingClientRect().width).toBeGreaterThan(100);
       expect(editor.scrollWidth).toBeLessThanOrEqual(editor.clientWidth);
-      editor
-        .querySelector<HTMLButtonElement>(
-          '[data-setting="populated"] button[aria-label="Remove entry"]',
-        )!
-        .click();
-      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-        ["plugins", "entries", "fixture", "config", "populated"],
-        {},
-      );
+      findElement<HTMLButtonElement>(
+        editor,
+        '[data-setting="populated"] button[aria-label="Remove entry"]',
+      ).click();
+      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("populated"), {});
     } finally {
       await page.viewport(800, 600);
     }

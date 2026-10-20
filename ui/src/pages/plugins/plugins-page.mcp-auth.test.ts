@@ -26,6 +26,13 @@ describe("plugin MCP sign-in", () => {
   });
   afterEach(resetPluginsPageTestState);
 
+  const inspectionWithAuth = (state: "requires-authorization" | "authorized" | "unauthenticated") =>
+    createInspectResult({ mcpAuth: [{ serverName: "workboard-mcp", state }] });
+  const connectButton = (page: ParentNode) =>
+    page.querySelector<HTMLButtonElement>('[aria-label="Connect workboard-mcp"]');
+  const calls = (request: ReturnType<typeof createClient>["request"], method: string) =>
+    request.mock.calls.filter(([name]) => name === method);
+
   async function setup(
     handler: (method: string, params: unknown) => Promise<unknown>,
     advertiseMcpLogin = true,
@@ -96,11 +103,7 @@ describe("plugin MCP sign-in", () => {
     let completed = false;
     const { page, context, request } = await setup(async (method) => {
       if (method === "plugins.inspect") {
-        return completed
-          ? refreshed.promise
-          : createInspectResult({
-              mcpAuth: [{ serverName: "workboard-mcp", state: "requires-authorization" }],
-            });
+        return completed ? refreshed.promise : inspectionWithAuth("requires-authorization");
       }
       if (method === "mcp.authLogin") {
         completed = true;
@@ -108,7 +111,7 @@ describe("plugin MCP sign-in", () => {
       }
       throw new Error(`Unexpected method ${method}`);
     });
-    page.querySelector<HTMLButtonElement>('[aria-label="Connect workboard-mcp"]')!.click();
+    connectButton(page)!.click();
     await waitForSolid(() =>
       expect(request).toHaveBeenCalledWith(
         "mcp.authLogin",
@@ -116,16 +119,10 @@ describe("plugin MCP sign-in", () => {
         { timeoutMs: null },
       ),
     );
-    await waitForSolid(() =>
-      expect(request.mock.calls.filter(([method]) => method === "plugins.inspect")).toHaveLength(2),
-    );
-    expect(page.querySelector('[aria-label="Connect workboard-mcp"]')).not.toBeNull();
-    refreshed.resolve(
-      createInspectResult({ mcpAuth: [{ serverName: "workboard-mcp", state: "authorized" }] }),
-    );
-    await waitForSolid(() =>
-      expect(page.querySelector('[aria-label="Connect workboard-mcp"]')).toBeNull(),
-    );
+    await waitForSolid(() => expect(calls(request, "plugins.inspect")).toHaveLength(2));
+    expect(connectButton(page)).not.toBeNull();
+    refreshed.resolve(inspectionWithAuth("authorized"));
+    await waitForSolid(() => expect(connectButton(page)).toBeNull());
     expect(page.querySelector(".plugin-capabilities")?.textContent).toContain("Connected");
     page.querySelector<HTMLButtonElement>('[aria-label="Edit workboard-mcp connection"]')!.click();
     expect(context.navigate).toHaveBeenCalledWith("mcp");
@@ -136,16 +133,14 @@ describe("plugin MCP sign-in", () => {
       async (method) =>
         method === "mcp.authLogin"
           ? { done: true, status: "done" }
-          : createInspectResult({
-              mcpAuth: [{ serverName: "workboard-mcp", state: "requires-authorization" }],
-            }),
+          : inspectionWithAuth("requires-authorization"),
       false,
     );
-    const button = page.querySelector<HTMLButtonElement>('[aria-label="Connect workboard-mcp"]')!;
+    const button = connectButton(page)!;
     expect.soft(button.disabled).toBe(true);
     button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await page.updateComplete;
-    expect(request.mock.calls.filter(([method]) => method === "mcp.authLogin")).toHaveLength(0);
+    expect(calls(request, "mcp.authLogin")).toHaveLength(0);
     expect(window.open).not.toHaveBeenCalled();
   });
 
@@ -155,9 +150,7 @@ describe("plugin MCP sign-in", () => {
       const admission = createDeferred<unknown>();
       const { page, request, route, emit, client } = await setup(async (method) => {
         if (method === "plugins.inspect") {
-          return createInspectResult({
-            mcpAuth: [{ serverName: "workboard-mcp", state: "unauthenticated" }],
-          });
+          return inspectionWithAuth("unauthenticated");
         }
         if (method === "mcp.authLogin") {
           return admission.promise;
@@ -170,7 +163,7 @@ describe("plugin MCP sign-in", () => {
         }
         throw new Error(`Unexpected method ${method}`);
       });
-      page.querySelector<HTMLButtonElement>('[aria-label="Connect workboard-mcp"]')!.click();
+      connectButton(page)!.click();
       const start = request.mock.calls.find(([method]) => method === "mcp.authLogin")!;
       if (change === "navigation") {
         page.routeData = { ...route, location: createPluginsRouteLocation("/settings/plugins") };
@@ -187,10 +180,8 @@ describe("plugin MCP sign-in", () => {
         ),
       );
       admission.resolve({ done: false, status: "running" });
-      await waitForSolid(() =>
-        expect(request.mock.calls.filter(([method]) => method === "wizard.cancel")).toHaveLength(2),
-      );
-      expect(request.mock.calls.some(([method]) => method === "wizard.next")).toBe(false);
+      await waitForSolid(() => expect(calls(request, "wizard.cancel")).toHaveLength(2));
+      expect(calls(request, "wizard.next")).toHaveLength(0);
       expect(window.open).toHaveBeenCalledTimes(1);
     },
   );

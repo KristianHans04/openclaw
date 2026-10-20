@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { createRoot, onCleanup } from "solid-js";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import { createDeferred as deferred } from "../../../../test/helpers/promise.js";
 import {
   GatewayRequestError,
@@ -35,7 +35,8 @@ beforeEach(() => i18n.setLocale("en"));
 function createConsentHarness(
   client: GatewayBrowserClient,
   initialResult: PluginListResult,
-  refreshConfig: ReturnType<typeof createContext>["runtimeConfig"]["refresh"],
+  refreshConfig: ReturnType<typeof createContext>["runtimeConfig"]["refresh"] = async () =>
+    undefined,
 ) {
   const { gateway: applicationGateway } = createGateway(client);
   const gateway = new GatewayPageBinding(vi.fn(), {
@@ -90,6 +91,7 @@ function createConsentHarness(
     });
     return stop;
   });
+  onTestFinished(dispose);
   return {
     consent,
     get messages() {
@@ -97,7 +99,6 @@ function createConsentHarness(
     },
     refreshCatalog,
     applyMutationResult,
-    dispose,
   };
 }
 
@@ -125,6 +126,12 @@ const runtimeFailure = {
   committed: false,
 };
 const persistence = { operation: "install", pluginId: available.id };
+const activity = (requestId: string, status = "started") => ({
+  requestId,
+  activityId: "activity",
+  stage: "dependencies",
+  status,
+});
 
 it("correlates concurrent install progress and retires listeners on success and failure", async () => {
   const listeners = new Set<GatewayEventListener>();
@@ -147,7 +154,7 @@ it("correlates concurrent install progress and retires listeners on success and 
     listeners.add(listener);
     return () => listeners.delete(listener);
   };
-  const fixture = createConsentHarness(client, createResult(available), async () => undefined);
+  const fixture = createConsentHarness(client, createResult(available));
   const firstIdentity = "npm:one";
   const secondIdentity = "npm:two";
   const one = fixture.consent.install({ source: "npm", spec: "one" }, firstIdentity);
@@ -157,49 +164,35 @@ it("correlates concurrent install progress and retires listeners on success and 
       listener({
         type: "event",
         event: "plugins.install.progress",
-        payload: { requestId, activityId: "activity", stage: "dependencies", status },
+        payload: activity(requestId, status),
       });
     }
   };
-  try {
-    emit("request-1");
-    expect(fixture.consent.read().installProgress.get(firstIdentity)?.activities).toEqual([]);
-    expect(fixture.consent.read().installProgress.get(secondIdentity)?.activities).toEqual([
-      {
-        requestId: "request-1",
-        activityId: "activity",
-        stage: "dependencies",
-        status: "started",
-      },
-    ]);
-    emit("request-0");
-    emit("request-0", "invented");
-    expect(fixture.consent.read().installProgress.get(firstIdentity)?.activities).toEqual([
-      {
-        requestId: "request-0",
-        activityId: "activity",
-        stage: "dependencies",
-        status: "started",
-      },
-    ]);
-    const result: PluginMutationResult = {
-      ok: true,
-      plugin: createPlugin({ id: "one" }),
-      restartRequired: false,
-    };
-    firstResponse.resolve(result);
-    await one;
-    expect(fixture.applyMutationResult).toHaveBeenCalledWith(result);
-    emit("request-0", "completed");
-    expect(fixture.consent.read().installProgress.has(firstIdentity)).toBe(false);
-    expect(listeners.size).toBe(1);
-    secondResponse.reject(new Error("registry unavailable"));
-    await two;
-    expect(fixture.messages[secondIdentity]?.text).toContain("registry unavailable");
-    expect(listeners.size).toBe(0);
-  } finally {
-    fixture.dispose();
-  }
+  emit("request-1");
+  expect(fixture.consent.read().installProgress.get(firstIdentity)?.activities).toEqual([]);
+  expect(fixture.consent.read().installProgress.get(secondIdentity)?.activities).toEqual([
+    activity("request-1"),
+  ]);
+  emit("request-0");
+  emit("request-0", "invented");
+  expect(fixture.consent.read().installProgress.get(firstIdentity)?.activities).toEqual([
+    activity("request-0"),
+  ]);
+  const result: PluginMutationResult = {
+    ok: true,
+    plugin: createPlugin({ id: "one" }),
+    restartRequired: false,
+  };
+  firstResponse.resolve(result);
+  await one;
+  expect(fixture.applyMutationResult).toHaveBeenCalledWith(result);
+  emit("request-0", "completed");
+  expect(fixture.consent.read().installProgress.has(firstIdentity)).toBe(false);
+  expect(listeners.size).toBe(1);
+  secondResponse.reject(new Error("registry unavailable"));
+  await two;
+  expect(fixture.messages[secondIdentity]?.text).toContain("registry unavailable");
+  expect(listeners.size).toBe(0);
 });
 
 it("blocks repeat install when saved-state reads fail, then reconciles aliases and later removal", async () => {
@@ -242,54 +235,48 @@ it("blocks repeat install when saved-state reads fail, then reconciles aliases a
     }),
   );
   const { consent } = fixture;
-  try {
-    const alias = "clawhub:community-calendar";
-    await consent.install(installRequest, alias);
-    expect(fixture.messages[rowKey]?.text).toContain("Plugin startup failed");
-    expect(fixture.messages[rowKey]?.text).toContain("Config refresh unavailable");
-    expect(fixture.messages[alias]?.savedInstall).toBe(available.id);
-    expect(fixture.messages[alias]?.installPolicyWarning).toBeUndefined();
-    await consent.install(installRequest, alias);
-    await consent.install(installRequest, rowKey);
-    expect(
-      gatewayRequest.mock.calls.filter(([method]) => method === "plugins.install"),
-    ).toHaveLength(1);
-    const otherIdentity = "npm:another-plugin";
-    const installingOther = consent.install(otherRequest, otherIdentity);
-    await waitForSolid(() => {
-      expect(consent.read().installProgress.has(otherIdentity)).toBe(true);
-    });
-    expect(consent.read().installProgress.get(alias)?.finishedAt).toBeTypeOf("number");
-    expect(consent.read().installProgress.get(alias)?.canRetry).toBe(false);
-    inventoryFails = false;
-    await fixture.refreshCatalog();
-    flush();
-    expect(consent.read().installProgress.has(alias)).toBe(false);
+  const alias = "clawhub:community-calendar";
+  await consent.install(installRequest, alias);
+  expect(fixture.messages[rowKey]?.text).toContain("Plugin startup failed");
+  expect(fixture.messages[rowKey]?.text).toContain("Config refresh unavailable");
+  expect(fixture.messages[alias]?.savedInstall).toBe(available.id);
+  expect(fixture.messages[alias]?.installPolicyWarning).toBeUndefined();
+  await consent.install(installRequest, alias);
+  await consent.install(installRequest, rowKey);
+  expect(gatewayRequest.mock.calls.filter(([method]) => method === "plugins.install")).toHaveLength(
+    1,
+  );
+  const otherIdentity = "npm:another-plugin";
+  const installingOther = consent.install(otherRequest, otherIdentity);
+  await waitForSolid(() => {
     expect(consent.read().installProgress.has(otherIdentity)).toBe(true);
-    expect(consent.read().installProgress.get(otherIdentity)?.finishedAt).toBeUndefined();
-    expect(fixture.messages[alias]).toBeUndefined();
-    expect(fixture.messages[rowKey]?.text).toContain("Plugin startup failed");
-    present = false;
-    await fixture.refreshCatalog();
-    flush();
-    expect(fixture.messages[rowKey]).toBeUndefined();
-    await consent.install(installRequest, alias);
-    expect(
-      gatewayRequest.mock.calls.filter(([method]) => method === "plugins.install"),
-    ).toHaveLength(3);
-    otherInstall.reject(new Error("Another registry is unavailable"));
-    await installingOther;
-    flush();
-    expect(fixture.messages[otherIdentity]?.text).toContain("Another registry is unavailable");
-    expect(fixture.messages[otherIdentity]?.text).toContain(
-      "Reconnect and check installed plugins",
-    );
-    expect(consent.read().installProgress.get(otherIdentity)?.failure?.title).toBe(
-      "Installation status unknown",
-    );
-    expect(consent.read().installProgress.get(otherIdentity)?.canRetry).toBe(false);
-    expect(consent.read().installProgress.get(otherIdentity)?.finishedAt).toBeTypeOf("number");
-  } finally {
-    fixture.dispose();
-  }
+  });
+  expect(consent.read().installProgress.get(alias)?.finishedAt).toBeTypeOf("number");
+  expect(consent.read().installProgress.get(alias)?.canRetry).toBe(false);
+  inventoryFails = false;
+  await fixture.refreshCatalog();
+  flush();
+  expect(consent.read().installProgress.has(alias)).toBe(false);
+  expect(consent.read().installProgress.has(otherIdentity)).toBe(true);
+  expect(consent.read().installProgress.get(otherIdentity)?.finishedAt).toBeUndefined();
+  expect(fixture.messages[alias]).toBeUndefined();
+  expect(fixture.messages[rowKey]?.text).toContain("Plugin startup failed");
+  present = false;
+  await fixture.refreshCatalog();
+  flush();
+  expect(fixture.messages[rowKey]).toBeUndefined();
+  await consent.install(installRequest, alias);
+  expect(gatewayRequest.mock.calls.filter(([method]) => method === "plugins.install")).toHaveLength(
+    3,
+  );
+  otherInstall.reject(new Error("Another registry is unavailable"));
+  await installingOther;
+  flush();
+  expect(fixture.messages[otherIdentity]?.text).toContain("Another registry is unavailable");
+  expect(fixture.messages[otherIdentity]?.text).toContain("Reconnect and check installed plugins");
+  expect(consent.read().installProgress.get(otherIdentity)?.failure?.title).toBe(
+    "Installation status unknown",
+  );
+  expect(consent.read().installProgress.get(otherIdentity)?.canRetry).toBe(false);
+  expect(consent.read().installProgress.get(otherIdentity)?.finishedAt).toBeTypeOf("number");
 });
