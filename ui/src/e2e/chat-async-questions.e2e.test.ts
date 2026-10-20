@@ -9,6 +9,7 @@ import {
 import { readStoredQuestionDrafts } from "./chat-async-questions.test-support.ts";
 import {
   captureUiProof,
+  captureUiProofEnabled,
   controlUiSessionUrl,
   createChatFlowE2eSuite,
   expectRequestCountStable,
@@ -368,13 +369,15 @@ suite.define(() => {
       try {
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
         await page.locator(".chat-thread").getByText(title, { exact: true }).waitFor();
-        const artifactDir = createControlUiE2eArtifactDir(
-          `async-question-${active ? "active" : "idle"}`,
-        );
-        await page.screenshot({
-          path: path.join(artifactDir, "initial.png"),
-          animations: "disabled",
-        });
+        const artifactDir = captureUiProofEnabled
+          ? createControlUiE2eArtifactDir(`async-question-${active ? "active" : "idle"}`)
+          : null;
+        if (artifactDir) {
+          await page.screenshot({
+            path: path.join(artifactDir, "initial.png"),
+            animations: "disabled",
+          });
+        }
         const card = page.locator(".agent-chat__question-dock openclaw-chat-question-panel");
         await expect.poll(() => card.count()).toBe(1);
         await card.getByRole("radio", { name: /Engineers/ }).waitFor();
@@ -404,6 +407,8 @@ suite.define(() => {
         await expect
           .poll(() => freeText.evaluate((element) => getComputedStyle(element).overflowY))
           .toBe("hidden");
+        // Keep font readiness explicit when diagnostic screenshots are disabled.
+        await page.evaluate(() => document.fonts.ready);
         const initialAnswerHeight = (await freeText.boundingBox())!.height;
         await freeText.press("End");
         await freeText.press("Enter");
@@ -463,10 +468,12 @@ suite.define(() => {
           expect(await expand.textContent()).toContain(followUpTitle);
           expect(await card.getByRole("textbox").count()).toBe(0);
         }
-        await page.screenshot({
-          path: path.join(artifactDir, "minimized.png"),
-          animations: "disabled",
-        });
+        if (artifactDir) {
+          await page.screenshot({
+            path: path.join(artifactDir, "minimized.png"),
+            animations: "disabled",
+          });
+        }
         await expand.click();
         expect(await freeText.inputValue()).toBe(
           "Include one practical example.\nKeep the next steps separate.",
@@ -474,10 +481,12 @@ suite.define(() => {
         await card.getByRole("button", { name: "Back", exact: true }).click();
         expect(await custom.inputValue()).toBe("/stop is an example for the whole team");
         await card.getByRole("button", { name: "Next", exact: true }).click();
-        await page.screenshot({
-          path: path.join(artifactDir, "question.png"),
-          animations: "disabled",
-        });
+        if (artifactDir) {
+          await page.screenshot({
+            path: path.join(artifactDir, "question.png"),
+            animations: "disabled",
+          });
+        }
         await card.getByRole("button", { name: "Submit", exact: true }).click();
         const request = await gateway.waitForRequest("chat.send");
         const params = requireRecord(request.params);
@@ -514,10 +523,12 @@ suite.define(() => {
             }),
           ).toHaveCount(1);
           await expectRequestCountStable(gateway, "chat.send", 0);
-          await page.screenshot({
-            path: path.join(artifactDir, "submitted-after-reload.png"),
-            animations: "disabled",
-          });
+          if (artifactDir) {
+            await page.screenshot({
+              path: path.join(artifactDir, "submitted-after-reload.png"),
+              animations: "disabled",
+            });
+          }
         }
       } finally {
         await suite.closeBrowserContext(context);
@@ -654,7 +665,9 @@ suite.define(() => {
       const gateway = await installMockGateway(page, {
         historyMessages: [deliveryQuestion],
       });
-      const artifactDir = createControlUiE2eArtifactDir(`async-question-delivery-${confirmation}`);
+      const artifactDir = captureUiProofEnabled
+        ? createControlUiE2eArtifactDir(`async-question-delivery-${confirmation}`)
+        : null;
       const answer = confirmation === "discard" ? "Engineers" : "The customer support team";
       try {
         await page.goto(`${suite.server.baseUrl}chat`);
@@ -674,10 +687,12 @@ suite.define(() => {
           .locator(".chat-thread .chat-question-summary")
           .filter({ hasText: title });
         await expectBrowser(summary).toContainText("Sending answer");
-        await page.screenshot({
-          path: path.join(artifactDir, "sending.png"),
-          animations: "disabled",
-        });
+        if (artifactDir) {
+          await page.screenshot({
+            path: path.join(artifactDir, "sending.png"),
+            animations: "disabled",
+          });
+        }
         await gateway.resolveDeferred("chat.send", {
           __mockError: { code: "UNAVAILABLE", message: "Synthetic send rejection" },
         });
@@ -690,10 +705,12 @@ suite.define(() => {
         await retry.waitFor();
         await expectBrowser(summary).toContainText("Answer not sent");
         await expectBrowser(summary).toContainText("Synthetic send rejection");
-        await page.screenshot({
-          path: path.join(artifactDir, "failed.png"),
-          animations: "disabled",
-        });
+        if (artifactDir) {
+          await page.screenshot({
+            path: path.join(artifactDir, "failed.png"),
+            animations: "disabled",
+          });
+        }
         expect(await failedSend.getAttribute("title")).toBe("Synthetic send rejection");
         const queued = await readOutboxQueue(page);
         expect(queued).toHaveLength(1);
@@ -767,10 +784,12 @@ suite.define(() => {
           ).toBeVisible();
           await expectBrowser(summary).toContainText("Answer not sent");
           await failedSend.getByRole("button", { name: "Discard", exact: true }).click();
-          await page.screenshot({
-            path: path.join(artifactDir, "discard-after-completion.png"),
-            animations: "disabled",
-          });
+          if (artifactDir) {
+            await page.screenshot({
+              path: path.join(artifactDir, "discard-after-completion.png"),
+              animations: "disabled",
+            });
+          }
           await expectBrowser(card).toBeVisible();
           await expectBrowser(card.getByRole("radio", { name: /Engineers/ })).toHaveAttribute(
             "aria-checked",
@@ -813,10 +832,12 @@ suite.define(() => {
         } else {
           await expectBrowser(summary).toContainText("Sending answer");
         }
-        await page.screenshot({
-          path: path.join(artifactDir, "retrying.png"),
-          animations: "disabled",
-        });
+        if (artifactDir) {
+          await page.screenshot({
+            path: path.join(artifactDir, "retrying.png"),
+            animations: "disabled",
+          });
+        }
         await gateway.resolveDeferred("chat.send");
         if (confirmation !== "legacy") {
           await expectBrowser(summary).toContainText("Awaiting delivery confirmation");
@@ -834,10 +855,12 @@ suite.define(() => {
           expect(await userMessages.count()).toBe(1);
           expect(await readOutboxQueue(page)).toEqual([]);
           await expectRequestCountStable(gateway, "chat.send", 0);
-          await page.screenshot({
-            path: path.join(artifactDir, "sent-after-reload.png"),
-            animations: "disabled",
-          });
+          if (artifactDir) {
+            await page.screenshot({
+              path: path.join(artifactDir, "sent-after-reload.png"),
+              animations: "disabled",
+            });
+          }
           return;
         }
         const runId = String(requireRecord(retried.params).idempotencyKey);
@@ -858,7 +881,12 @@ suite.define(() => {
           message: savedAnswer,
         });
         await expectBrowser(summary).toContainText("Answer sent");
-        await page.screenshot({ path: path.join(artifactDir, "sent.png"), animations: "disabled" });
+        if (artifactDir) {
+          await page.screenshot({
+            path: path.join(artifactDir, "sent.png"),
+            animations: "disabled",
+          });
+        }
         await failedSend.waitFor({ state: "detached" });
         expect(await userMessages.count()).toBe(1);
         expect(await card.getByRole("button", { name: "Submit", exact: true }).count()).toBe(0);
