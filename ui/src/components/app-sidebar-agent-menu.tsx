@@ -6,6 +6,7 @@ import type { ApplicationNavigationOptions } from "../app/context.ts";
 import { currentThemeBranding } from "../app/theme-branding.ts";
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../lib/external-link.ts";
 import { openExternalUrlSafe } from "../lib/open-external-url.ts";
+import { COMMUNITY_DISCORD_URL, OFFICIAL_SUPPORT_URL } from "../lib/product-links.ts";
 import { t } from "../lib/reactive/i18n.ts";
 import { SidebarDropdown, renderSidebarMenuAction } from "./app-sidebar-nav-menus.tsx";
 import type { IconName } from "./icon-data.ts";
@@ -31,11 +32,11 @@ const IDENTITY_MENU_LINKS: ReadonlyArray<{
 }> = [
   { href: "https://docs.openclaw.ai", icon: "book", label: () => t("common.docs") },
   {
-    href: "https://docs.openclaw.ai/help",
+    href: OFFICIAL_SUPPORT_URL,
     icon: "messageSquare",
     label: () => t("agentChip.getHelp"),
   },
-  { href: "https://discord.gg/clawd", icon: "users", label: () => t("agentChip.discord") },
+  { href: COMMUNITY_DISCORD_URL, icon: "users", label: () => t("agentChip.discord") },
   {
     href: "https://docs.openclaw.ai/releases",
     icon: "scrollText",

@@ -40,6 +40,7 @@ class SettingsScreensTest {
 
   @Test
   fun aboutAndPermissionFallbacksLocalizeOnlyControlledLabels() {
+    assertEquals("Support", aboutLinkTitle("Support"))
     assertEquals("Website", aboutLinkTitle("Website"))
     assertEquals("Docs", aboutLinkTitle("Docs"))
     assertEquals("GitHub", aboutLinkTitle("GitHub"))

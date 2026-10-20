@@ -22,6 +22,12 @@ struct RootSidebarTypographyTests {
 }
 
 struct OpenClawTypographyTests {
+    @Test func `About support links use the branded shared row`() throws {
+        let settings = try String(contentsOf: Self.sourceURL("Design/SettingsProTabSections.swift"), encoding: .utf8)
+        #expect(settings.contains("title: \"Support\""))
+        #expect(settings.contains("Text(title)\n                        .font(OpenClawType.subheadSemiBold)"))
+    }
+
     @Test func `Access actions use native branded controls`() throws {
         let settings = try String(contentsOf: Self.sourceURL("Design/SettingsProTabSections.swift"), encoding: .utf8)
         for label in ["Cancel sign-in", "Sign in to Cloudflare Access", "Sign out of Cloudflare Access"] {
