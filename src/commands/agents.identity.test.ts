@@ -1,15 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { formatCliCommand } from "../cli/command-format.js";
 import { quoteCliArg } from "../cli/quote-cli-arg.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { defaultRuntime } from "../runtime.js";
 import { makeTempWorkspace } from "../test-helpers/workspace.js";
-import {
-  createCapturingTestRuntime,
-  createTestConfigSnapshot,
-  createTestRuntime,
-} from "./test-runtime-config-helpers.js";
+import { createTestConfigSnapshot, createTestRuntime } from "./test-runtime-config-helpers.js";
 
 const TEST_MAX_IDENTITY_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -58,9 +55,8 @@ function writtenAgent(id = "main") {
 }
 
 async function jsonIdentity(options: IdentityOptions) {
-  const capture = createCapturingTestRuntime();
-  await agentsSetIdentityCommand({ ...options, json: true }, capture.runtime);
-  const payload: unknown = JSON.parse(capture.logs.at(-1) ?? "{}");
+  await agentsSetIdentityCommand({ ...options, json: true });
+  const payload: unknown = JSON.parse(String(runtime.log.mock.calls.at(-1)?.[0] ?? "{}"));
   return payload;
 }
 
@@ -79,7 +75,7 @@ async function writeIdentityFile(workspace: string, lines: string[]) {
 
 async function expectIdentityCommandFailure(options: IdentityOptions, expected: string | RegExp) {
   const message = typeof expected === "string" ? expected : expect.stringMatching(expected);
-  await expect(agentsSetIdentityCommand(options, runtime)).rejects.toMatchObject({
+  await expect(agentsSetIdentityCommand(options)).rejects.toMatchObject({
     name: "ExpectedCliError",
     message,
     humanOutput: message,
@@ -91,8 +87,15 @@ async function expectIdentityCommandFailure(options: IdentityOptions, expected: 
 }
 
 describe("agents set-identity command", () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(defaultRuntime, "log").mockImplementation(runtime.log);
+    vi.spyOn(defaultRuntime, "error").mockImplementation(runtime.error);
+    vi.spyOn(defaultRuntime, "exit").mockImplementation(runtime.exit);
+    vi.spyOn(defaultRuntime, "writeJson").mockImplementation((value) =>
+      runtime.log(JSON.stringify(value, null, 2)),
+    );
     setAgents({ entries: { main: {} } });
   });
 
@@ -121,7 +124,7 @@ describe("agents set-identity command", () => {
   ])("$label", async ({ name, update, expectedName, expectedIdentity }) => {
     setAgents({ entries: { main: { name, identity: { name: "New Bot" } } } });
 
-    await agentsSetIdentityCommand({ agent: "main", ...update }, runtime);
+    await agentsSetIdentityCommand({ agent: "main", ...update });
 
     expect(writtenAgent()).toMatchObject({ name: expectedName, identity: expectedIdentity });
   });
@@ -134,7 +137,7 @@ describe("agents set-identity command", () => {
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(root);
 
     try {
-      await agentsSetIdentityCommand({ agent: "main", fromIdentity: true }, runtime);
+      await agentsSetIdentityCommand({ agent: "main", fromIdentity: true });
     } finally {
       cwdSpy.mockRestore();
     }
@@ -172,7 +175,7 @@ describe("agents set-identity command", () => {
   it("sanitizes identity echoes while preserving stored and JSON values", async () => {
     const name = "Operator\u001B]0;identity-injection\u0007🦞\r\nforged-row\tbadge";
 
-    await agentsSetIdentityCommand({ agent: "main", name }, runtime);
+    await agentsSetIdentityCommand({ agent: "main", name });
 
     const textOutput = runtime.log.mock.calls.flat().join("\n");
     expect(textOutput).not.toContain("\u001B");
@@ -216,7 +219,7 @@ describe("agents set-identity command", () => {
     });
 
     expect(writtenAgent()).toMatchObject({ workspace: storedWorkspace, identity });
-    await agentsSetIdentityCommand(options, runtime);
+    await agentsSetIdentityCommand(options);
     expect(runtime.log).toHaveBeenCalledWith(`Workspace: ${storedWorkspace}`);
     expect(runtime.log).toHaveBeenCalledWith(`Identity source: ${workspace}`);
     expect(runtime.log.mock.calls.flat().join("\n")).not.toContain("Relocate with");
@@ -286,7 +289,7 @@ describe("agents set-identity command", () => {
       workspace: storedWorkspace,
       identity: { name: "Worker" },
     });
-    await agentsSetIdentityCommand(options, runtime);
+    await agentsSetIdentityCommand(options);
     expect(runtime.log).toHaveBeenCalledWith(`Workspace: ${storedWorkspace}`);
     expect(runtime.log).toHaveBeenCalledWith(`Workspace locator: ${workspaceLocator}`);
     expect(runtime.log).toHaveBeenCalledWith(

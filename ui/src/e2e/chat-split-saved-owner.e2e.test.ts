@@ -111,7 +111,6 @@ suite.define(() => {
         const cells = page.locator(".chat-split-view__cell");
         const unbound = cells.first();
         const pane = unbound.locator("openclaw-chat-pane");
-        const composer = unbound.locator(composerSelector);
         await expect.poll(() => cells.count()).toBe(2);
         await page.locator(composerSelector).last().waitFor({ state: "visible" });
         await expectUnbound(unbound);

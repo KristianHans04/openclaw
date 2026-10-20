@@ -31,7 +31,7 @@ export function locationWithoutDraft(
   return { ...location, ...destination, search: search ? `?${search}` : "" };
 }
 
-export function draftRouteDataFromLocation(location: RouteLocation): RouteDraftHint {
+function draftRouteDataFromLocation(location: RouteLocation): RouteDraftHint {
   const search = new URLSearchParams(location.search);
   const focusComposer = search.get(SESSION_COMPOSER_FOCUS_PARAM) === "1";
   return {
