@@ -77,7 +77,10 @@ export function ChatThread(input: {
   const search = createMemo(() =>
     projectOwner(getTranscriptState(paneId()).search, (owner) => owner.snapshot, Object.is),
   );
-  const geometry = createMemo(() => projectOwner(input.transcript, (owner) => owner));
+  // Pane props refresh while the session owner stays the same. Keep its one
+  // geometry subscription alive across those refreshes.
+  const transcript = createMemo(() => input.transcript);
+  const geometry = createMemo(() => projectOwner(transcript(), (owner) => owner));
   const visibility = createMemo(() => projectPresentation(input.props.transcriptVisible ?? true));
   const geometryRevision = createParkedProjection(
     () => geometry().revision(),

@@ -1,17 +1,21 @@
 import { expectDefined } from "@openclaw/normalization-core";
-import { createMemo } from "solid-js";
-import { afterEach, expect, it, vi } from "vitest";
+import { createMemo, createSignal } from "solid-js";
+import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import type { ApplicationContext } from "../../../app/context.ts";
 import { projectOwner } from "../../../lib/reactive/projection.ts";
+import { mountSolid } from "../../../test-helpers/mount-solid.ts";
 import { createMountedPanes } from "../chat-pane-mounted.test-support.ts";
-import "../../../styles.css";
-import "../../../styles/chat.ts";
 import { ChatPaneRuntime } from "../chat-pane-render.ts";
 import { createPaneTestHost } from "../chat-pane.test-support.ts";
 import { handleChatScroll, lockChatScroll, saveChatSessionScrollPosition } from "../scroll.ts";
+import "../../../styles.css";
+import "../../../styles/chat.ts";
+import { ChatThread } from "./chat-thread-view.tsx";
+import { createChatTranscript } from "./chat-transcript-controller.ts";
 import type { TranscriptRow } from "./chat-transcript-layout.ts";
 import { subscribeTranscriptScroll } from "./chat-transcript-scroll-events.ts";
 import { ChatSessionVirtualizerHost } from "./chat-transcript-virtualizer-host.ts";
+import { threadProps } from "./chat-transcript.test-support.ts";
 
 // mock-isolation: Exercise runtime commit cadence without initializing the full pane renderer.
 vi.mock("../chat-pane-layout-view.tsx", () => import("../chat-pane-layout.test-support.tsx"));
@@ -140,6 +144,60 @@ async function mountPane(followEnd = false) {
   const viewport = expectDefined(session.scrollElement, "mounted transcript viewport");
   return { host: pane, session, viewport };
 }
+
+it("commits late row growth through the mounted thread without a parent render", async () => {
+  const transcript = createChatTranscript(() => "late-thread-growth");
+  const props = threadProps(
+    "late-thread-growth",
+    "agent:main:late-thread-growth",
+    Array.from({ length: 40 }, (_, index) => ({
+      role: index % 2 ? "assistant" : "user",
+      content: `Geometry message ${index}.\n\n` + "Transcript content.\n\n".repeat(3),
+      timestamp: index + 1,
+    })),
+  );
+  const parentRender = vi.fn();
+  const [frame, setFrame] = createSignal({ props, transcript });
+  transcript.start();
+  const mounted = mountSolid(() => {
+    parentRender();
+    return (
+      <div style="display: flex; flex-direction: column; width: 800px; height: 400px">
+        <ChatThread props={frame().props} transcript={frame().transcript} />
+      </div>
+    );
+  });
+  onTestFinished(() => {
+    mounted.unmount();
+    transcript.dispose();
+  });
+  await settleLayout();
+  for (let refresh = 0; refresh < 3; refresh++) {
+    setFrame({ props: { ...props }, transcript });
+    await settleLayout();
+  }
+  const viewport = expectDefined(transcript.scrollElement, "thread viewport");
+  const inner = expectDefined(
+    mounted.container.querySelector<HTMLElement>(".chat-thread-inner--virtual"),
+    "virtual extent",
+  );
+  const row = expectDefined(
+    mounted.container.querySelector<HTMLElement>(".chat-virtual-row:last-child"),
+    "tail row",
+  );
+  const content = expectDefined(row.querySelector<HTMLElement>(".chat-text"), "tail content");
+  const before = {
+    extent: inner.style.height,
+    scrollHeight: viewport.scrollHeight,
+    rowHeight: row.offsetHeight,
+  };
+  content.style.height = `${content.offsetHeight + 180}px`;
+  await settleLayout();
+  expect(parentRender).toHaveBeenCalledTimes(1);
+  expect(row.offsetHeight - before.rowHeight).toBe(180);
+  expect(viewport.scrollHeight - before.scrollHeight).toBe(180);
+  expect(Number.parseFloat(inner.style.height) - Number.parseFloat(before.extent)).toBe(180);
+});
 
 it("keeps the initial tail rows mounted while their estimated sizes settle", async () => {
   const mounted = new Map<string, Set<Element>>();
