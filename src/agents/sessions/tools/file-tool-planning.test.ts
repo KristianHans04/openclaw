@@ -8,6 +8,24 @@ import { createWriteTool } from "./write.js";
 
 afterEach(() => vi.restoreAllMocks());
 
+function storage(initial = "target\ntarget\n") {
+  let content = initial;
+  const operations = {
+    resolveQueueKey: (target: string) => target,
+    access: async () => {},
+    readFile: async () => Buffer.from(content),
+    writeFile: vi.fn(async (_path: string, value: string) => {
+      content = value;
+    }),
+    statFile: async () => ({ type: "file" as const, size: Buffer.byteLength(content), mtimeMs: 1 }),
+  };
+  return { operations, content: () => content };
+}
+const editInput = (oldText: string) => ({
+  path: "example.txt",
+  edits: [{ oldText, newText: "replacement" }],
+});
+
 it.each([
   { name: "missing", oldText: "absent", message: "Could not find the exact text" },
   { name: "ambiguous", oldText: "target", message: "Found 2 occurrences" },
@@ -16,21 +34,10 @@ it.each([
   "preserves trusted $name edit input errors across planning workers",
   async ({ oldText, message }) => {
     const content = "target\ntarget\n";
-    const writeFile = vi.fn(async () => {});
-    const tool = createEditTool("/workspace", {
-      operations: {
-        resolveQueueKey: (target) => target,
-        access: async () => {},
-        readFile: async () => Buffer.from(content),
-        writeFile,
-        statFile: async () => ({ type: "file", size: content.length, mtimeMs: 1 }),
-      },
-    });
+    const { operations } = storage(content);
+    const tool = createEditTool("/workspace", { operations });
     const error = await tool
-      .execute("invalid-edit", {
-        path: "example.txt",
-        edits: [{ oldText, newText: "replacement" }],
-      })
+      .execute("invalid-edit", editInput(oldText))
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(Error);
     expect(error).toHaveProperty("message", expect.stringContaining(message));
@@ -39,28 +46,24 @@ it.each([
       expect(error).toHaveProperty("message", expect.stringContaining(content));
       expect(error).toHaveProperty("cause.message", expect.not.stringContaining(content));
     }
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(operations.writeFile).not.toHaveBeenCalled();
   },
 );
 
 it("does not classify filesystem failures as edit input errors", async () => {
   const fileError = new Error("Synthetic storage unavailable");
+  const { operations } = storage("target\n");
   const tool = createEditTool("/workspace", {
     operations: {
-      resolveQueueKey: (target) => target,
+      ...operations,
       access: async () => {
         throw fileError;
       },
-      readFile: async () => Buffer.from("target\n"),
-      writeFile: async () => {},
       statFile: async () => null,
     },
   });
   const error = await tool
-    .execute("storage-error", {
-      path: "example.txt",
-      edits: [{ oldText: "target", newText: "replacement" }],
-    })
+    .execute("storage-error", editInput("target"))
     .catch((caught: unknown) => caught);
   expect(error).toHaveProperty("cause", fileError);
   expect(isTrustedToolInputError(error)).toBe(false);
@@ -93,23 +96,10 @@ it.each(
       );
     }
 
-    let content = "before\n";
-    const writeFile = vi.fn(async (_path: string, value: string) => {
-      content = value;
-    });
-    const mkdir = vi.fn(async () => {});
-    const operations = {
-      resolveQueueKey: (target: string) => target,
-      access: async () => {},
-      mkdir,
-      writeFile,
-      readFile: async () => Buffer.from(content),
-      statFile: async () => ({
-        type: "file" as const,
-        size: Buffer.byteLength(content),
-        mtimeMs: 1,
-      }),
-    };
+    const fixture = storage("before\n");
+    const content = fixture.content;
+    const operations = { ...fixture.operations, mkdir: vi.fn(async () => {}) };
+    const { mkdir, writeFile } = operations;
     const controller = new AbortController();
     let current = true;
     const budget = createAgentToolExecutionBudget({
@@ -135,7 +125,7 @@ it.each(
       await prepared.promise;
       expect(mkdir).not.toHaveBeenCalled();
       expect(writeFile).not.toHaveBeenCalled();
-      expect(content).toBe("before\n");
+      expect(content()).toBe("before\n");
       if (authority === "revoked") {
         current = false;
       } else if (authority === "aborted") {
@@ -145,7 +135,7 @@ it.each(
       if (authority === "active") {
         await expect(pending).resolves.toMatchObject({ details: { changed: true } });
         expect(writeFile).toHaveBeenCalledOnce();
-        expect(content).toBe("after\n");
+        expect(content()).toBe("after\n");
       } else {
         const abortedMessage = kind === "write" ? "Operation aborted" : "Planning cancelled";
         await expect(pending).rejects.toThrow(
@@ -153,7 +143,7 @@ it.each(
         );
         expect(mkdir).not.toHaveBeenCalled();
         expect(writeFile).not.toHaveBeenCalled();
-        expect(content).toBe("before\n");
+        expect(content()).toBe("before\n");
       }
     } finally {
       release.resolve();

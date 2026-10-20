@@ -8,12 +8,20 @@ import { runAgentHarnessToolInvocation } from "../../harness/tool-invocation.js"
 import { createEditTool } from "./edit.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const original = "alpha\nbefore\nomega\n";
+const pair = { oldText: "before", newText: "after" };
 
 async function createFixture() {
   const cwd = tempDirs.make("openclaw-edit-legacy-");
   const filePath = path.join(cwd, "example.txt");
-  await fs.writeFile(filePath, "alpha\nbefore\nomega\n");
-  return { tool: createEditTool(cwd), filePath };
+  await fs.writeFile(filePath, original);
+  const tool = createEditTool(cwd);
+  return {
+    tool,
+    filePath,
+    apply: (input: object) => tool.execute("edit", prepare(tool, { path: filePath, ...input })),
+    expectFile: (text = original) => expect(fs.readFile(filePath, "utf8")).resolves.toBe(text),
+  };
 }
 
 function prepare(tool: ReturnType<typeof createEditTool>, input: unknown) {
@@ -31,7 +39,7 @@ describe("legacy edit input", () => {
     { edits: "[{bad json", oldText: "before" },
     { edits: "[{bad json", oldText: 42, newText: "after" },
   ])("reports unparseable edits before execution: %j", async (args) => {
-    const { tool, filePath } = await createFixture();
+    const { tool, filePath, expectFile } = await createFixture();
     const execute = vi.spyOn(tool, "execute");
     const invocation = runAgentHarnessToolInvocation({
       tool,
@@ -53,68 +61,55 @@ describe("legacy edit input", () => {
       "Could not parse edits as JSON. Provide a complete JSON array of replacements.",
     );
     expect(execute).not.toHaveBeenCalled();
-    await expect(fs.readFile(filePath, "utf8")).resolves.toBe("alpha\nbefore\nomega\n");
+    await expectFile();
   });
 
   it.each(["after", ""])(
-    "uses a valid legacy pair with newText %j when serialized edits cannot be parsed",
+    "falls back from malformed edits to legacy newText %j",
     async (newText) => {
-      const { tool, filePath } = await createFixture();
-      const prepared = prepare(tool, {
-        path: filePath,
-        edits: "[{bad json",
-        oldText: "before",
-        newText,
-      });
-      await tool.execute("legacy-fallback", prepared, undefined);
-      await expect(fs.readFile(filePath, "utf8")).resolves.toBe(`alpha\n${newText}\nomega\n`);
+      const { apply, expectFile } = await createFixture();
+      await apply({ edits: "[{bad json", ...pair, newText });
+      await expectFile(`alpha\n${newText}\nomega\n`);
     },
   );
 
   it.each(["array", "serialized", "distinct"] as const)(
     "applies the batch and legacy pair once with %s edits",
     async (shape) => {
-      const { tool, filePath } = await createFixture();
+      const { apply, expectFile } = await createFixture();
       const edits = [
         { oldText: "alpha", newText: "ALPHA" },
-        ...(shape === "distinct"
-          ? []
-          : [{ oldText: "before", newText: "after", reason: "extra model metadata" }]),
+        ...(shape === "distinct" ? [] : [{ ...pair, reason: "extra model metadata" }]),
       ];
-      const prepared = prepare(tool, {
-        path: filePath,
+      await apply({
         edits: shape === "serialized" ? JSON.stringify(edits) : edits,
-        oldText: "before",
-        newText: "after",
+        ...pair,
       });
-      await tool.execute("legacy-duplicate", prepared, undefined);
-      await expect(fs.readFile(filePath, "utf8")).resolves.toBe("ALPHA\nafter\nomega\n");
+      await expectFile("ALPHA\nafter\nomega\n");
     },
   );
 
   it.each(["conflicting legacy pair", "duplicate batch entries"] as const)(
     "continues rejecting %s without writing",
     async (scenario) => {
-      const { tool, filePath } = await createFixture();
-      const pair = { oldText: "before", newText: "after" };
-      const prepared = prepare(tool, {
-        path: filePath,
-        edits: scenario === "duplicate batch entries" ? [pair, pair] : [pair],
-        oldText: "before",
-        newText: scenario === "conflicting legacy pair" ? "different" : "after",
-      });
-      await expect(tool.execute("legacy-overlap", prepared, undefined)).rejects.toThrow(/overlap/);
-      await expect(fs.readFile(filePath, "utf8")).resolves.toBe("alpha\nbefore\nomega\n");
+      const { apply, expectFile } = await createFixture();
+      await expect(
+        apply({
+          edits: scenario === "duplicate batch entries" ? [pair, pair] : [pair],
+          ...pair,
+          newText: scenario === "conflicting legacy pair" ? "different" : "after",
+        }),
+      ).rejects.toThrow(/overlap/);
+      await expectFile();
     },
   );
 
-  it("keeps malformed batch entries invalid when a valid legacy pair is supplied", async () => {
+  it("rejects malformed entries despite a valid legacy pair", async () => {
     const { tool, filePath } = await createFixture();
     const prepared = tool.prepareArguments?.({
       path: filePath,
       edits: [{ oldText: "before" }],
-      oldText: "before",
-      newText: "after",
+      ...pair,
     });
     expect(Value.Check(tool.parameters, prepared)).toBe(false);
   });

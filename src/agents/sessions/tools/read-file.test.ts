@@ -10,11 +10,19 @@ import { readLocalFile } from "./read-file.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 let root: string;
+const file = (...parts: string[]) => path.join(root, ...parts);
+const write = (name: string, text = "live state") => fs.writeFileSync(file(name), text);
+const linkState = (alias: string) =>
+  fs.symlinkSync(file("state"), file(alias), process.platform === "win32" ? "junction" : "dir");
+async function expectIsolated(name: string) {
+  await expect(readLocalFile(file(name))).resolves.toEqual(Buffer.from("isolated bytes"));
+  expect(command.runCommandBuffered).toHaveBeenCalledOnce();
+}
 
 beforeEach(() => {
   root = tempDirs.make("read-routing-");
-  fs.mkdirSync(path.join(root, "state"));
-  vi.stubEnv("OPENCLAW_STATE_DIR", path.join(root, "state"));
+  fs.mkdirSync(file("state"));
+  vi.stubEnv("OPENCLAW_STATE_DIR", file("state"));
   vi.spyOn(command, "runCommandBuffered").mockResolvedValue({
     stdout: serialize({ buffer: Buffer.from("isolated bytes") }),
     stderr: Buffer.alloc(0),
@@ -34,7 +42,7 @@ it("reads ordinary files in-process even when child spawning is unavailable", as
   vi.mocked(command.runCommandBuffered).mockRejectedValue(
     Object.assign(new Error("spawn failed"), { code: "EAGAIN" }),
   );
-  const filePath = path.join(root, "state-neighbor", "notes.txt");
+  const filePath = file("state-neighbor", "notes.txt");
   fs.mkdirSync(path.dirname(filePath));
   fs.writeFileSync(filePath, "ordinary bytes");
 
@@ -60,73 +68,49 @@ it.each([
   "agent.sqlite.memory-reindex-11111111-2222-3333-4444-555555555555-shm",
   "state/custom-storage",
 ])("isolates the SQLite-relevant target %s", async (name) => {
-  const filePath = path.join(root, name);
-  fs.writeFileSync(filePath, "must not open in this process");
-
-  await expect(readLocalFile(filePath)).resolves.toEqual(Buffer.from("isolated bytes"));
-  expect(command.runCommandBuffered).toHaveBeenCalledOnce();
+  write(name, "must not open in this process");
+  await expectIsolated(name);
 });
 
 it("isolates state files reached through a directory alias", async () => {
-  const alias = path.join(root, "alias");
-  fs.symlinkSync(
-    path.join(root, "state"),
-    alias,
-    process.platform === "win32" ? "junction" : "dir",
-  );
-  fs.writeFileSync(path.join(root, "state", "custom-storage"), "live state");
-
-  await expect(readLocalFile(path.join(alias, "custom-storage"))).resolves.toEqual(
-    Buffer.from("isolated bytes"),
-  );
-  expect(command.runCommandBuffered).toHaveBeenCalledOnce();
+  linkState("alias");
+  write("state/custom-storage");
+  await expectIsolated("alias/custom-storage");
 });
 
 it("isolates renamed hardlinks to database files", async () => {
-  const database = path.join(root, "agent.sqlite-shm");
-  const alias = path.join(root, "notes.txt");
-  fs.writeFileSync(database, "live state");
-  fs.linkSync(database, alias);
-
-  await expect(readLocalFile(alias)).resolves.toEqual(Buffer.from("isolated bytes"));
-  expect(command.runCommandBuffered).toHaveBeenCalledOnce();
+  write("agent.sqlite-shm");
+  fs.linkSync(file("agent.sqlite-shm"), file("notes.txt"));
+  await expectIsolated("notes.txt");
 });
 
 it("resolves a symlinked state root before classifying its files", async () => {
-  const alias = path.join(root, "state-alias");
-  fs.symlinkSync(
-    path.join(root, "state"),
-    alias,
-    process.platform === "win32" ? "junction" : "dir",
-  );
-  vi.stubEnv("OPENCLAW_STATE_DIR", alias);
-  const filePath = path.join(root, "state", "custom-storage");
-  fs.writeFileSync(filePath, "live state");
-
-  await expect(readLocalFile(filePath)).resolves.toEqual(Buffer.from("isolated bytes"));
-  expect(command.runCommandBuffered).toHaveBeenCalledOnce();
+  linkState("state-alias");
+  vi.stubEnv("OPENCLAW_STATE_DIR", file("state-alias"));
+  write("state/custom-storage");
+  await expectIsolated("state/custom-storage");
 });
 
 it("reuses the broker for isolated reads, preserving bytes, failures, and cancellation", async () => {
   const broker = createSpawnBrokerHost();
-  const filePath = path.join(root, "state", "notes.txt");
+  const filePath = file("state/notes.txt");
   const bytes = Buffer.alloc(1024 * 1024 + 13, 0xa7);
   fs.writeFileSync(filePath, bytes);
-  fs.writeFileSync(path.join(root, "state", "empty.txt"), "");
+  write("state/empty.txt", "");
   try {
     await broker.ready();
     await runWithSpawnBroker(broker, async () => {
       const results = await Promise.all([
         readLocalFile(filePath),
-        readLocalFile(path.join(root, "state", "empty.txt")),
+        readLocalFile(file("state/empty.txt")),
         readLocalFile(filePath),
       ]);
       expect(results).toEqual([bytes, Buffer.alloc(0), bytes]);
-      await expect(readLocalFile(path.join(root, "state", "missing.txt"))).rejects.toMatchObject({
+      await expect(readLocalFile(file("state/missing.txt"))).rejects.toMatchObject({
         code: "ENOENT",
       });
-      await expect(readLocalFile(path.join(root, "state"))).rejects.toThrow("regular file");
-      const link = path.join(root, "state", "link.txt");
+      await expect(readLocalFile(file("state"))).rejects.toThrow("regular file");
+      const link = file("state/link.txt");
       fs.symlinkSync(filePath, link);
       await expect(readLocalFile(link)).rejects.toThrow("regular file");
       const controller = new AbortController();
@@ -150,7 +134,7 @@ it("reuses the broker for isolated reads, preserving bytes, failures, and cancel
 it("refuses raw reads in a broker that owns native resources", async () => {
   const broker = createSpawnBrokerHost({ nativeResources: true });
   try {
-    await expect(broker.readFile(path.join(root, "state", "notes.txt"))).rejects.toThrow(
+    await expect(broker.readFile(file("state/notes.txt"))).rejects.toThrow(
       "cannot admit a raw file read",
     );
   } finally {
