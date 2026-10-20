@@ -1,34 +1,23 @@
 import { expect, it, vi } from "vitest";
 import { getActiveGatewayRootWorkCount } from "../../../process/gateway-work-admission.js";
-import {
-  AgentDatabaseAdmissionError,
-  createAgentDatabaseInspectionRefusal,
-} from "../../../state/agent-database-admission.js";
-import {
-  createRunEntry,
-  readLifecycleRun,
-  type LifecycleTestDrivers,
-} from "./subagent-registry-lifecycle-controller.test-support.js";
+import * as admission from "../../../state/agent-database-admission.js";
+import * as lifecycle from "./subagent-registry-lifecycle-controller.test-support.js";
 import type { SubagentLifecycleOptions } from "./subagent-registry-lifecycle.js";
 import { observeRootWork } from "./subagent-registry.browser-cleanup.test-support.js";
 import type { RequesterSettleWakeState } from "./subagent-registry.types.js";
 
-const inspectionError = (reason: string, pending = false) =>
-  new AgentDatabaseAdmissionError(
-    createAgentDatabaseInspectionRefusal({
-      agentId: "main",
-      paths: ["/synthetic/main.sqlite"],
-      reason,
-      pending,
-    }),
+const database = { agentId: "main", paths: ["/synthetic/db"], reason: "inspection" };
+const inspectionError = (pending = false) =>
+  new admission.AgentDatabaseAdmissionError(
+    admission.createAgentDatabaseInspectionRefusal({ ...database, pending }),
   );
 
 export function registerRequesterDatabaseAdmissionTests({
   createLifecycleController,
   waitForLifecycleState,
-}: Pick<LifecycleTestDrivers, "createLifecycleController" | "waitForLifecycleState">) {
+}: Pick<lifecycle.LifecycleTestDrivers, "createLifecycleController" | "waitForLifecycleState">) {
   function fixture(requesterSettleWake?: RequesterSettleWakeState) {
-    const entry = createRunEntry({ endedAt: 4_000, requesterSettleWake });
+    const entry = lifecycle.createRunEntry({ endedAt: 4_000, requesterSettleWake });
     const warn = vi.fn();
     const settleWake =
       vi.fn<SubagentLifecycleOptions["maybeWakeRequesterAfterAllChildrenSettled"]>();
@@ -37,7 +26,7 @@ export function registerRequesterDatabaseAdmissionTests({
       warn,
       maybeWakeRequesterAfterAllChildrenSettled: settleWake,
     });
-    const read = () => readLifecycleRun(entry);
+    const read = () => lifecycle.readLifecycleRun(entry);
     const resume = async () => {
       const join = observeRootWork();
       controller.resumeRequesterSettleWake(entry.runId, read());
@@ -58,13 +47,13 @@ export function registerRequesterDatabaseAdmissionTests({
         rearmGeneration: 1,
       };
       const { controller, settleWake, read, resume } = fixture(wake);
-      const pending = inspectionError("Startup inspection is still running", true);
+      const pending = inspectionError(true);
       let ready = false;
-      settleWake.mockImplementation(async (params) => {
+      settleWake.mockImplementation(async ({ completeBatch, settledEntry }) => {
         if (!ready) {
           throw pending;
         }
-        await params.completeBatch([params.settledEntry], wake.rearmGeneration, {
+        await completeBatch([settledEntry], wake.rearmGeneration, {
           delivered: true,
           path: "direct",
         });
@@ -74,10 +63,9 @@ export function registerRequesterDatabaseAdmissionTests({
       expect(read().requesterSettleWake).toEqual(wake);
       expect(getActiveGatewayRootWorkCount()).toBe(0);
       expect(settleWake).toHaveBeenCalledOnce();
-      if (outcome === "cancelled") {
+      ready = outcome === "ready";
+      if (!ready) {
         await controller.retireSubagentObligations(read(), () => {}, { requesterNotified: true });
-      } else {
-        ready = true;
       }
       await resume();
       expect(settleWake).toHaveBeenCalledTimes(outcome === "cancelled" ? 1 : 2);
@@ -91,9 +79,7 @@ export function registerRequesterDatabaseAdmissionTests({
     async (kind) => {
       const { entry, controller, warn, settleWake, read } = fixture();
       settleWake.mockImplementation(async () => {
-        throw kind === "inspection-failed"
-          ? inspectionError("Integrity check failed")
-          : new Error("wake exploded");
+        throw kind === "inspection-failed" ? inspectionError() : new Error("wake exploded");
       });
       await expect(
         controller.completeCleanupBookkeeping({

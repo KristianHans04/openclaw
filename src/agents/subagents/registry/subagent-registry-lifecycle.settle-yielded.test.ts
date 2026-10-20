@@ -1,13 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import {
-  clearRuntimeConfigSnapshot,
-  setRuntimeConfigSnapshot,
-} from "../../../config/runtime-snapshot.js";
+import * as runtimeConfig from "../../../config/runtime-snapshot.js";
 import { resetGatewayWorkAdmission } from "../../../process/gateway-work-admission.js";
-import {
-  SUBAGENT_ENDED_REASON_ERROR,
-  SUBAGENT_ENDED_REASON_KILLED,
-} from "./subagent-lifecycle-events.js";
+import * as ended from "./subagent-lifecycle-events.js";
 import { persistSubagentSessionTiming } from "./subagent-registry-helpers.js";
 import {
   createLifecycleControllerFixture,
@@ -27,10 +21,10 @@ vi.mock("../../agent-bundle-mcp-tools.js", async (importOriginal) => ({
 beforeEach(() => {
   resetGatewayWorkAdmission();
   // Completion captures watcher paths from the prepared runtime config.
-  setRuntimeConfigSnapshot({});
+  runtimeConfig.setRuntimeConfigSnapshot({});
   vi.mocked(persistSubagentSessionTiming).mockResolvedValue(undefined);
 });
-afterEach(clearRuntimeConfigSnapshot);
+afterEach(runtimeConfig.clearRuntimeConfigSnapshot);
 
 const failedOutcome = { status: "error", error: "no continuation can reach this run" } as const;
 function fixture(overrides: RunEntryOverrides = {}) {
@@ -50,7 +44,7 @@ function fixture(overrides: RunEntryOverrides = {}) {
       runId: entry.runId,
       endedAt: 4_000,
       outcome: failedOutcome,
-      reason: SUBAGENT_ENDED_REASON_ERROR,
+      reason: ended.SUBAGENT_ENDED_REASON_ERROR,
       triggerCleanup: false,
       settleYielded: true,
       ...request,
@@ -108,11 +102,11 @@ it("keeps a kill claim published while the settle request is preparing", async (
   await complete({
     endedAt: 7_000,
     outcome: { status: "error", error: claim.reason },
-    reason: SUBAGENT_ENDED_REASON_KILLED,
+    reason: ended.SUBAGENT_ENDED_REASON_KILLED,
     settleYielded: undefined,
   });
   expect(read()).toMatchObject({
-    endedReason: SUBAGENT_ENDED_REASON_KILLED,
+    endedReason: ended.SUBAGENT_ENDED_REASON_KILLED,
     execution: { outcome: { status: "error", error: claim.reason } },
   });
 });

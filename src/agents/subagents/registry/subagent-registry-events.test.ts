@@ -3,48 +3,42 @@ import { sessionChanges } from "../../../sessions/session-row-changes.js";
 import { AGENT_RUN_TERMINAL_RETRY_GRACE_MS } from "../../agent-run-terminal-outcome.js";
 import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
 import { createPendingLifecycleScheduler } from "./subagent-registry-pending-lifecycle.js";
-import {
-  getSubagentRegistryPublicationRevision,
-  publishSubagentRunChanges,
-  subscribeSubagentRunChanges,
-} from "./subagent-registry-publication.js";
+import * as publication from "./subagent-registry-publication.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { copySubagentRunRuntimeOwner } from "./subagent-run-generation.js";
 
-const subscribe = (...args: Parameters<typeof subscribeSubagentRunChanges>) =>
-  onTestFinished(subscribeSubagentRunChanges(...args));
+const subscribe = (...args: Parameters<typeof publication.subscribeSubagentRunChanges>) =>
+  onTestFinished(publication.subscribeSubagentRunChanges(...args));
 
 it.each(["memory", "persistence", "projection failure"] as const)(
   "publishes projections before session and persistence observers: %s",
   (source) => {
     const order: string[] = [];
-    const revision = getSubagentRegistryPublicationRevision();
+    const revision = publication.getSubagentRegistryPublicationRevision();
     const event = { runIds: ["run"], sessionKeys: ["child", undefined, "child"] };
     const failure = new Error("projection failed");
     subscribe("projection", (published) => {
       expect(published).toEqual(event);
-      expect(getSubagentRegistryPublicationRevision()).toBe(revision + 1);
+      expect(publication.getSubagentRegistryPublicationRevision()).toBe(revision + 1);
       if (source === "projection failure") {
         throw failure;
       }
       order.push("projection");
     });
-    const session = vi.fn<Parameters<typeof sessionChanges.subscribe>[0]>((change) => {
-      if ("sessionKey" in change && change.sessionKey === "child") {
-        order.push("session");
-      }
-    });
+    const session = vi.fn(() => order.push("session"));
     onTestFinished(sessionChanges.subscribe(session));
-    const persisted = vi.fn<Parameters<typeof subscribeSubagentRunChanges>[1]>((published) => {
-      expect(published).toEqual(event);
-      order.push("persistence");
-      throw new Error("observer failed");
-    });
+    const persisted = vi.fn<Parameters<typeof publication.subscribeSubagentRunChanges>[1]>(
+      (published) => {
+        expect(published).toEqual(event);
+        order.push("persistence");
+        throw new Error("observer failed");
+      },
+    );
     subscribe("persistence", persisted);
     subscribe("persistence", () => order.push("last"));
 
     const publish = () =>
-      publishSubagentRunChanges(
+      publication.publishSubagentRunChanges(
         event.sessionKeys,
         event.runIds,
         source === "memory" ? "memory" : "persistence",
@@ -55,6 +49,9 @@ it.each(["memory", "persistence", "projection failure"] as const)(
       return;
     }
     expect(publish).not.toThrow();
+    expect(session).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ sessionKey: "child" }),
+    );
     expect(order).toEqual(
       source === "memory"
         ? ["projection", "session"]

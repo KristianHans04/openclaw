@@ -1,15 +1,8 @@
 import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterEach, expect, it } from "vitest";
-import {
-  clearRuntimeConfigSnapshot,
-  setRuntimeConfigSnapshot,
-} from "../../../config/runtime-snapshot.js";
-import {
-  loadSessionEntry,
-  loadTranscriptEvents,
-  upsertSessionEntryCore,
-} from "../../../config/sessions/session-accessor.js";
+import * as runtimeConfig from "../../../config/runtime-snapshot.js";
+import * as sessions from "../../../config/sessions/session-accessor.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
 import {
   createSubagentRunRecord,
@@ -18,7 +11,7 @@ import {
 import { persistSubagentSessionTiming } from "./subagent-registry-helpers.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
-afterEach(clearRuntimeConfigSnapshot);
+afterEach(runtimeConfig.clearRuntimeConfigSnapshot);
 it.each([
   ["error", false],
   ["timeout", false],
@@ -27,14 +20,17 @@ it.each([
   "persists a bounded %s reason and child notice (interrupted=%s)",
   (outcomeStatus, interrupted) =>
     withOpenClawTestState({ scenario: "minimal" }, async (state) => {
-      setRuntimeConfigSnapshot({});
+      runtimeConfig.setRuntimeConfigSnapshot({});
       const target = {
         agentId: "main",
         sessionKey: "agent:main:subagent:setup-failure",
         sessionId: "sess-setup-failure",
         storePath: path.join(state.sessionsDir(), "sessions.json"),
       };
-      await upsertSessionEntryCore(target, { sessionId: target.sessionId, updatedAt: Date.now() });
+      await sessions.upsertSessionEntryCore(target, {
+        sessionId: target.sessionId,
+        updatedAt: Date.now(),
+      });
       const reason = `Repository base ref is missing. ${"details ".repeat(80)}`.trim();
       const record = createSubagentRunRecord({
         runId: "run-setup-failure",
@@ -50,7 +46,7 @@ it.each([
       record.execution.interruptionReason = interrupted ? "gateway-restart" : undefined;
       const persist = (overrides: Partial<SubagentRunRecord> = {}) =>
         persistSubagentSessionTiming({ ...record, ...overrides });
-      const read = () => loadSessionEntry(target);
+      const read = () => sessions.loadSessionEntry(target);
       await persist();
       expect(read()).toMatchObject({
         status: interrupted ? "interrupted" : outcomeStatus === "error" ? "failed" : "timeout",
@@ -62,7 +58,7 @@ it.each([
       const lastRunError = read()?.lastRunError;
       expect(lastRunError?.length).toBeLessThanOrEqual(160);
       await persist();
-      const notices = (await loadTranscriptEvents(target)).filter(
+      const notices = (await sessions.loadTranscriptEvents(target)).filter(
         (event) => isRecord(event) && event.type === "custom_message",
       );
       const notice = {

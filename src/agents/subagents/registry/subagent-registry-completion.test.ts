@@ -20,8 +20,6 @@ const createEmitParams = (overrides?: Partial<Parameters<typeof emitSubagentEnde
   return {
     entry,
     reason: SUBAGENT_ENDED_REASON_COMPLETE,
-    sendFarewell: true,
-    accountId: "acct-1",
     inFlightOwners: new Set<object>(),
     recordEmitted: vi.fn(() => {
       entry.endedHookEmittedAt = Date.now();

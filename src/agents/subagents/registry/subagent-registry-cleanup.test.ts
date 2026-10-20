@@ -9,7 +9,6 @@ function decide({ endedAt = 1_000, ...overrides }: EntryOverrides = {}, activeDe
   return resolveDeferredCleanupDecision({
     entry: createSubagentRunRecord({
       runId: "run-1",
-      createdAt: 0,
       endedAt,
       expectsCompletionMessage: true,
       ...overrides,

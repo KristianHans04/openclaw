@@ -10,12 +10,7 @@ const completionReply = (prefix = "") => ({
   terminalReply: { disposition: "visible" as const, text: prefix + "reply" },
 });
 const createRun = (overrides: Partial<SubagentRunRecord> = {}) =>
-  createSubagentRunRecord({
-    runId: "captured",
-    endedAt: 2,
-    completion: { required: true },
-    ...overrides,
-  });
+  createSubagentRunRecord({ runId: "captured", endedAt: 2, ...overrides });
 function expectRejected(captured: SubagentRunRecord, error: string | ErrorConstructor = TypeError) {
   const before = structuredClone(captured);
   expect(() => bindSubagentRunRecord(captured)).toThrow(error);
@@ -26,13 +21,10 @@ it("persists child ownership independently of a redirected transcript", () => {
   const expected = {
     childSessionKey: "global",
     childAgentId: "research",
-    childSessionIdentity: { sessionId: "original-child", lifecycleRevision: "original" },
-    execution: { transcriptTarget: { sessionId: "hidden-transcript" } },
+    childSessionIdentity: { sessionId: "child", lifecycleRevision: "original" },
+    execution: { status: "terminal" as const, transcriptTarget: { sessionId: "redirected" } },
   };
-  const entry = createRun({
-    ...expected,
-    execution: { status: "terminal", ...expected.execution },
-  });
+  const entry = createRun(expected);
   expect(rowToSubagentRunRecord(bindSubagentRunRecord(entry))).toMatchObject(expected);
 });
 
