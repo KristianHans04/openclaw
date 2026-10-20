@@ -47,7 +47,9 @@ async function listMainSessionWithThinking(
   return await listMainSession({ context: { readPreparedGatewayModelCatalog } });
 }
 
-async function listMainSession(options: Parameters<typeof directSessionReq>[2]) {
+async function listMainSession(
+  options: Parameters<typeof directSessionReq<SessionsListResult>>[2],
+) {
   const result = await directSessionReq<SessionsListResult>("sessions.list", {}, options);
   expect(result.ok, result.error?.message).toBe(true);
   return expectDefined(

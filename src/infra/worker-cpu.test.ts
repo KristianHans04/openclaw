@@ -325,7 +325,7 @@ describe("worker CPU lifecycle", () => {
       for (const [name, reason] of [
         ["other", "exit"],
         [script, "idle_timeout"],
-      ]) {
+      ] as const) {
         expect(retiredCount(retired, name, reason)).toBe(retiredCount(initial, name, reason) + 1);
       }
       expect(sampleTrackedWorkerMemory().workerLifecycle).toEqual(retired.workerLifecycle);
