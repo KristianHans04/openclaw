@@ -9,11 +9,7 @@ import {
   writeBundleTextFiles,
 } from "../plugins/bundle-mcp.test-support.js";
 import { withPluginMetadataSnapshotScope } from "../plugins/current-plugin-metadata-snapshot.js";
-import {
-  bindPluginMetadataSnapshotCache,
-  createPluginCache,
-  withPluginCache,
-} from "../plugins/plugin-cache.js";
+import { createPluginCache, withPluginCache } from "../plugins/plugin-cache.js";
 import { clearPluginMetadataLifecycleCaches } from "../plugins/plugin-metadata-lifecycle.js";
 import { createPluginMetadataSnapshotFixture } from "../plugins/plugin-metadata.test-support.js";
 import { loadSessionMcpConfig } from "./agent-bundle-mcp-runtime-config.js";
@@ -25,11 +21,7 @@ type SnapshotPlugins = NonNullable<
 >["plugins"];
 
 function cachedSnapshot(plugins: SnapshotPlugins, cache = createPluginCache()) {
-  return withPluginCache(cache, () => {
-    const snapshot = createPluginMetadataSnapshotFixture({ plugins });
-    bindPluginMetadataSnapshotCache(snapshot);
-    return snapshot;
-  });
+  return withPluginCache(cache, () => createPluginMetadataSnapshotFixture({ plugins }));
 }
 
 afterEach(async () => {
@@ -63,38 +55,27 @@ async function createBundle() {
   const cfg = { plugins: { entries: { "cache-bundle": { enabled: true } } } };
   const scope = <T>(current: typeof snapshot, read: () => T) =>
     withPluginMetadataSnapshotScope(current, read, { config: cfg, trustConfigIdentity: true });
-  return {
-    rootDir,
-    cache,
-    snapshot,
-    cfg,
-    scope,
-    params: { workspaceDir: rootDir, cfg, manifestRegistry: snapshot.manifestRegistry },
-    settingsParams: { cwd: rootDir, cfg, pluginMetadataSnapshot: snapshot },
-  };
+  const params = { workspaceDir: rootDir, cfg, manifestRegistry: snapshot.manifestRegistry };
+  const settingsParams = { cwd: rootDir, cfg, pluginMetadataSnapshot: snapshot };
+  return { rootDir, cache, snapshot, cfg, scope, params, settingsParams };
 }
 
-it.each(["provided", "current"] as const)(
-  "keeps %s bundle discovery isolated between plugin cache generations",
-  async (registrySource) => {
-    const bundle = await createBundle();
-    const params = {
-      ...bundle.params,
-      manifestRegistry:
-        registrySource === "provided" ? bundle.snapshot.manifestRegistry : undefined,
-    };
-    const read = () => loadSessionMcpConfig(params).loaded.mcpServers.bundled?.command;
-    const readOriginal = () => bundle.scope(bundle.snapshot, read);
-    expect(readOriginal()).toBe("original");
-    await fs.writeFile(
-      path.join(bundle.rootDir, ".mcp.json"),
-      JSON.stringify({ mcpServers: { bundled: { command: "replacement" } } }),
-    );
-    const candidate = cachedSnapshot([...bundle.snapshot.plugins]);
-    expect(bundle.scope(candidate, read)).toBe("replacement");
-    expect(readOriginal()).toBe("original");
-  },
-);
+it.each(["provided", "current"] as const)("isolates %s caches", async (registrySource) => {
+  const bundle = await createBundle();
+  const params = {
+    ...bundle.params,
+    manifestRegistry: registrySource === "provided" ? bundle.snapshot.manifestRegistry : undefined,
+  };
+  const read = () => loadSessionMcpConfig(params).loaded.mcpServers.bundled?.command;
+  const readOriginal = () => bundle.scope(bundle.snapshot, read);
+  expect(readOriginal()).toBe("original");
+  await fs.writeFile(
+    path.join(bundle.rootDir, ".mcp.json"),
+    JSON.stringify({ mcpServers: { bundled: { command: "replacement" } } }),
+  );
+  const candidate = cachedSnapshot([...bundle.snapshot.plugins]);
+  expect([bundle.scope(candidate, read), readOriginal()]).toEqual(["replacement", "original"]);
+});
 
 it("reuses bundle file facts across MCP, LSP, settings, and live session policy", async () => {
   const bundle = await createBundle();
@@ -122,11 +103,8 @@ it("reuses bundle file facts across MCP, LSP, settings, and live session policy"
     expect(loadEnabledBundleMcpConfig(params).config.mcpServers.bundled?.command).toBe("original");
     expect(loadEnabledBundleLspConfig(params).config.lspServers.language?.command).toBe("language");
     const settings = loadEnabledBundleAgentSettingsSnapshot(settingsParams);
-    expect(settings.hideThinkingBlock).toBe(true);
-    expect(settings.shellPath).toBeUndefined();
-    for (const probe of probes) {
-      expect(probe).not.toHaveBeenCalled();
-    }
+    expect([settings.hideThinkingBlock, settings.shellPath]).toEqual([true, undefined]);
+    probes.forEach((probe) => expect(probe).not.toHaveBeenCalled());
   });
 });
 

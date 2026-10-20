@@ -9,7 +9,7 @@ import { withSessionTurn } from "../sessions/session-controller.admission.js";
 import { getCurrentSessionControllerOwner as currentOwner } from "../sessions/session-controller.context.js";
 import {
   agentCommand,
-  compactionTestRuntime,
+  compactionTestRuntime as runtime,
   compactionTestState as state,
   makeCompactionResult,
   registerAgentCommandCompactionTestHooks,
@@ -20,9 +20,7 @@ afterEach(() => clearRuntimeConfigSnapshot());
 
 registerAgentCommandCompactionTestHooks();
 
-beforeEach(() => {
-  setRuntimeConfigSnapshot(expectDefined(state.cfg, "compaction fixture config"));
-});
+beforeEach(() => setRuntimeConfigSnapshot(expectDefined(state.cfg, "compaction fixture config")));
 
 type Owner = NonNullable<ReturnType<typeof currentOwner>>;
 const identity = { sessionId: "outer", sessionKey: "agent:main:explicit:outer" };
@@ -32,43 +30,37 @@ const result = (sessionId: string) =>
 
 async function withCommandTarget(run: (owner: Owner) => Promise<void>) {
   const target = { ...identity, agentId: "main", storePath: requireCompactionStorePath() };
-  await compactionTestRuntime.replaceSessionEntry(target, {
-    sessionId: target.sessionId,
-    updatedAt: Date.now(),
-  });
+  await runtime.replaceSessionEntry(target, { sessionId: target.sessionId, updatedAt: Date.now() });
   return withSessionTurn(target, (operation) =>
     run(expectDefined(operation, "outer command owner")),
   );
 }
 
-it.each(["owned", "detached"] as const)(
-  "scopes %s command identity changes to its owner",
-  async (ownership) => {
-    const reportedId = "reported";
-    const onSessionIdChanged = vi.fn();
+it.each(["owned", "detached"] as const)("scopes %s command identity", async (ownership) => {
+  const reportedId = "reported";
+  const onSessionIdChanged = vi.fn();
 
-    await withCommandTarget(async (outer) => {
-      state.runAgentAttemptMock.mockImplementationOnce(async (params) => {
-        expect(currentOwner()).toBe(ownership === "owned" ? outer : undefined);
-        params.opts.onSessionIdChanged?.(reportedId);
-        return result(params.sessionId);
-      });
-
-      await agentCommand({
-        ...commandOptions,
-        ...(ownership === "detached" ? { sessionEffects: "internal" as const } : {}),
-        onSessionIdChanged,
-      });
-
-      expect(state.runAgentAttemptMock).toHaveBeenCalledOnce();
-      expect(onSessionIdChanged).toHaveBeenCalledExactlyOnceWith(reportedId);
-      expect(currentOwner()).toBe(outer);
-      expect(outer.sessionId).toBe(ownership === "owned" ? reportedId : identity.sessionId);
-      expect(outer.hasOwnedSessionId(reportedId)).toBe(ownership === "owned");
-      expect(outer).toMatchObject({ abortSignal: { aborted: false }, result: null });
+  await withCommandTarget(async (outer) => {
+    state.runAgentAttemptMock.mockImplementationOnce(async (params) => {
+      expect(currentOwner()).toBe(ownership === "owned" ? outer : undefined);
+      params.opts.onSessionIdChanged?.(reportedId);
+      return result(params.sessionId);
     });
-  },
-);
+
+    await agentCommand({
+      ...commandOptions,
+      ...(ownership === "detached" ? { sessionEffects: "internal" as const } : {}),
+      onSessionIdChanged,
+    });
+
+    expect(state.runAgentAttemptMock).toHaveBeenCalledOnce();
+    expect(onSessionIdChanged).toHaveBeenCalledExactlyOnceWith(reportedId);
+    expect(currentOwner()).toBe(outer);
+    expect(outer.sessionId).toBe(ownership === "owned" ? reportedId : identity.sessionId);
+    expect(outer.hasOwnedSessionId(reportedId)).toBe(ownership === "owned");
+    expect(outer).toMatchObject({ abortSignal: { aborted: false }, result: null });
+  });
+});
 
 it("cancels a nested command without aborting its outer turn", async () => {
   const caller = new AbortController();
@@ -87,10 +79,7 @@ it("cancels a nested command without aborting its outer turn", async () => {
       return result(params.sessionId);
     });
     const command = agentCommand({ ...commandOptions, abortSignal: caller.signal });
-    const outcome = command.then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const outcome = command.catch((error: unknown) => error);
     try {
       await awaitGateBeforeSettlement(entered.promise, command, "Runtime did not start");
       caller.abort(reason);

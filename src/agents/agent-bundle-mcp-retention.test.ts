@@ -31,11 +31,8 @@ class MemoryBeforeRequesterSequencer extends BaseSequencer {
   }
 }
 const config = createUnitFastVitestConfig();
-export default {
-  ...config,
-  cacheDir: ${JSON.stringify(path.join(root, ".vite"))},
-  test: {
-    ...config.test,
+config.cacheDir = ${JSON.stringify(path.join(root, ".vite"))};
+Object.assign(config.test, {
     include: [memoryTest, "src/agents/cli-runner/bundle-mcp.requester-lifecycle.test.ts"],
     pool: "forks",
     maxWorkers: 1,
@@ -43,21 +40,21 @@ export default {
     isolate: false,
     passWithNoTests: false,
     sequence: { sequencer: MemoryBeforeRequesterSequencer },
-  },
-};
+});
+export default config;
 `,
       );
-      const env = Object.fromEntries(
-        Object.entries(process.env).filter(
-          ([key]) => !/^(VITEST|OPENCLAW_VITEST)|^GITHUB_ACTIONS$/.test(key),
+      const env = {
+        ...Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) => !/^(VITEST|OPENCLAW_VITEST)|^GITHUB_ACTIONS$/.test(key),
+          ),
         ),
-      );
-      env.OPENCLAW_VITEST_RUNTIME = process.versions.bun ? "bun" : "node";
-      if (process.versions.bun) {
-        env.OPENCLAW_BUN_PATH = process.execPath;
-      }
-      env.OPENCLAW_VITEST_FS_MODULE_CACHE_PATH = path.join(root, "modules");
-      env.NO_COLOR = "1";
+        OPENCLAW_VITEST_RUNTIME: process.versions.bun ? "bun" : "node",
+        ...(process.versions.bun ? { OPENCLAW_BUN_PATH: process.execPath } : {}),
+        OPENCLAW_VITEST_FS_MODULE_CACHE_PATH: path.join(root, "modules"),
+        NO_COLOR: "1",
+      };
       const result = await runVitestShutdownCommand({
         cwd: repoRoot,
         env,
