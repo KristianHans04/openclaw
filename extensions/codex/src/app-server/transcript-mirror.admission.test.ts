@@ -78,21 +78,18 @@ it.each([
     const admitted = structuredClone(recorder.getPersistedMessage?.());
     const runtimeAcknowledgement = vi.spyOn(recorder, "markRuntimePersisted");
     const onUserMessagePersisted = vi.fn();
-    const attempt = {
+    const params = {
       ...base,
       ...target,
       sessionTarget: target,
       userTurnTranscriptRecorder: recorder,
       onUserMessagePersisted,
     };
-    const host = await createAdmittedHostCapabilityTestFixture(attempt);
-    const params = {
-      ...attempt,
-      hostCapabilities:
-        recovery === "removed"
-          ? { ...host.hostCapabilities, annotateCurrentUserTurn: undefined }
-          : host.hostCapabilities,
-    };
+    const host = await createAdmittedHostCapabilityTestFixture(params);
+    params.hostCapabilities =
+      recovery === "removed"
+        ? { ...host.hostCapabilities, annotateCurrentUserTurn: undefined }
+        : host.hostCapabilities;
     try {
       if (recovery === "removed") {
         const manager = SessionManager.open(target, base.workspaceDir);
@@ -153,10 +150,9 @@ it.each([
         expect(recorder.getPersistedMessage?.()).toEqual(admitted);
       }
       const events = await readSessionTranscriptEvents(target);
-      const prompts = events.filter((event) => {
-        const message = asOptionalRecord(asOptionalRecord(event)?.message);
-        return message?.role === "user";
-      });
+      const prompts = events.filter(
+        (event) => asOptionalRecord(asOptionalRecord(event)?.message)?.role === "user",
+      );
       expect(prompts).toHaveLength(recovery === "removed" ? 0 : 1);
       if (recovery === "available") {
         expect(prompts[0]).toMatchObject({

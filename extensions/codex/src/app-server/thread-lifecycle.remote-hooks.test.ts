@@ -1,10 +1,7 @@
 import path from "node:path";
 import { buildNativeHookRelayCommandPlan } from "openclaw/plugin-sdk/native-hook-relay-runtime";
 import { expect, it } from "vitest";
-import {
-  ensureCodexAppServerClientRuntime,
-  retainCodexAppServerLiveThread,
-} from "./client-runtime.js";
+import { ensureCodexAppServerClientRuntime } from "./client-runtime.js";
 import { createFakeCodexAppServerClient } from "./codex-app-server.test-fixtures.js";
 import { createCodexNativeHookRemoteCredential } from "./native-hook-relay-remote.js";
 import { buildCodexNativeHookRelayConfig } from "./native-hook-relay.js";
@@ -16,8 +13,10 @@ import {
 } from "./run-attempt-test-harness.js";
 import {
   createAppServerOptions,
+  createLifecycleRequest,
   startOrResumeAttemptThreadWithoutSkills,
 } from "./thread-lifecycle.test-fixtures.js";
+import { retainCodexAppServerBindingSubscription } from "./thread-ownership.js";
 
 setupRunAttemptTestHooks();
 
@@ -32,30 +31,26 @@ it.each([false, true])(
       params.sessionKey = "agent:main:dashboard:incognito-remote-hooks";
     }
     const files = new Map<string, string>();
-    const { client, request } = createFakeCodexAppServerClient(async (method, value) => {
-      if (method === "config/read") {
-        return { layers: [], config: { mcp_servers: {} } };
-      }
-      if (method === "configRequirements/read") {
-        return { requirements: null };
-      }
-      if (method === "thread/start" || method === "thread/resume") {
-        return threadStartResult("remote-hooks-thread");
-      }
-      if (method === "thread/unsubscribe") {
-        return { status: "unsubscribed" };
-      }
-      if (method === "fs/writeFile") {
-        const write = value as { path: string; dataBase64: string };
-        files.set(write.path, Buffer.from(write.dataBase64, "base64").toString());
-        return {};
-      }
-      if (method === "fs/remove") {
-        files.delete((value as { path: string }).path);
-        return {};
-      }
-      throw new Error(`unexpected method: ${method}`);
-    });
+    const { client, request } = createFakeCodexAppServerClient(
+      createLifecycleRequest(async (method, value) => {
+        if (method === "thread/start" || method === "thread/resume") {
+          return threadStartResult("remote-hooks-thread");
+        }
+        if (method === "thread/unsubscribe") {
+          return { status: "unsubscribed" };
+        }
+        if (method === "fs/writeFile") {
+          const write = value as { path: string; dataBase64: string };
+          files.set(write.path, Buffer.from(write.dataBase64, "base64").toString());
+          return {};
+        }
+        if (method === "fs/remove") {
+          files.delete((value as { path: string }).path);
+          return {};
+        }
+        throw new Error(`unexpected method: ${method}`);
+      }),
+    );
     ensureCodexAppServerClientRuntime(client, { agentDir: workspaceDir });
     let projection: ReturnType<typeof createCodexNativeHookRemoteCredential> | undefined;
     let registration = 0;
@@ -104,14 +99,10 @@ it.each([false, true])(
       const startParams = request.mock.calls.find(([method]) => method === "thread/start")?.[1];
       expect(JSON.stringify(startParams)).toContain(installedPath);
       await expect(
-        retainCodexAppServerLiveThread(
-          client,
-          first.threadId,
-          undefined,
-          first.liveThreadConfigFingerprint,
-          null,
-          first.liveThreadEphemeralPolicy,
-        ),
+        retainCodexAppServerBindingSubscription(client, first.threadId, {
+          configFingerprint: first.liveThreadConfigFingerprint,
+          ephemeralPolicy: first.liveThreadEphemeralPolicy,
+        }),
       ).resolves.toBe(true);
       const second = await startOrResumeAttemptThreadWithoutSkills(common);
       expect(second.threadId).toBe(first.threadId);

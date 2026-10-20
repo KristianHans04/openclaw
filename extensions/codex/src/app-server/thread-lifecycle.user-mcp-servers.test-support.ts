@@ -1,18 +1,18 @@
 import fs from "node:fs/promises";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { text } from "node:stream/consumers";
-import { promisify } from "node:util";
-import { afterEach, beforeEach } from "vitest";
+import { afterEach, beforeEach, type TestContext } from "vitest";
 import { resetCodexTestBindingStore } from "./session-binding.test-helpers.js";
 import { resetThreadLifecycleTestFixtures } from "./thread-lifecycle.test-fixtures.js";
+import { listenForNativeResponses } from "./thread-native.test-support.js";
 
-const activeHttpServers = new Set<http.Server>();
+let currentTest: TestContext;
 export let tempDir = "";
 
 export function setupUserMcpServerTestHooks(): void {
   beforeEach(async (context) => {
+    currentTest = context;
     if (!context.codexAttemptRuntime) {
       throw new Error("Codex MCP server tests require the shared extension runtime fixture");
     }
@@ -28,7 +28,6 @@ export function setupUserMcpServerTestHooks(): void {
     }
     resetThreadLifecycleTestFixtures();
     await context.codexAttemptRuntime.stop();
-    await closePolicyHttpServers();
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
@@ -36,7 +35,7 @@ export function setupUserMcpServerTestHooks(): void {
 }
 
 export async function startPolicyHttpServer(): Promise<string> {
-  const server = http.createServer(async (request, response) => {
+  const port = await listenForNativeResponses(currentTest, async (request, response) => {
     const body = await text(request);
     const message = (body ? JSON.parse(body) : {}) as {
       id?: string | number;
@@ -62,15 +61,7 @@ export async function startPolicyHttpServer(): Promise<string> {
       .writeHead(200, { "content-type": "application/json" })
       .end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
   });
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  activeHttpServers.add(server);
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("expected loopback MCP server address");
-  }
-  return `http://127.0.0.1:${address.port}/mcp`;
+  return `http://127.0.0.1:${port}/mcp`;
 }
 
 export async function writePolicyProbeServer(dir: string): Promise<string> {
@@ -96,14 +87,4 @@ lines.on("line", (line) => {
     "utf-8",
   );
   return filePath;
-}
-
-async function closePolicyHttpServers(): Promise<void> {
-  await Promise.all(
-    [...activeHttpServers].map(async (server) => {
-      server.closeAllConnections();
-      await promisify(server.close.bind(server))();
-    }),
-  );
-  activeHttpServers.clear();
 }
