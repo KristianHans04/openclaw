@@ -9,7 +9,7 @@ import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { cleanupSolid } from "../../test-helpers/mount-solid.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
-import { mountConfigPageState } from "./config-page.test-support.ts";
+import { mountConfigPageState } from "./config-page-state.test-support.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 

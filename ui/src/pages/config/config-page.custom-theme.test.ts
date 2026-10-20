@@ -9,7 +9,7 @@ import { createImportedCustomThemeFixture } from "../../test-helpers/custom-them
 import { cleanupSolid } from "../../test-helpers/mount-solid.ts";
 import { flush } from "../../test-helpers/solid-settle.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
-import { mountConfigPageState, publishConfigSource } from "./config-page.test-support.ts";
+import { mountConfigPageState, publishConfigSource } from "./config-page-state.test-support.ts";
 import * as customTheme from "./custom-theme-import.ts";
 
 const importCustomThemeFromUrl = vi.fn<typeof customTheme.importCustomThemeFromUrl>();

@@ -22,11 +22,8 @@ import { createSolidApplicationContextProvider } from "../../test-helpers/solid-
 import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { meetingStatus } from "../../test-helpers/transcripts.test-support.ts";
-import {
-  completeConfigContext,
-  mountConfigPage,
-  publishConfigSource,
-} from "./config-page.test-support.ts";
+import { completeConfigContext, publishConfigSource } from "./config-page-state.test-support.ts";
+import { mountConfigPage } from "./config-page.test-support.ts";
 import type { ConfigPageRouteData } from "./config-page.tsx";
 import { configSelectionFromSearch, type ConfigPageId } from "./config-sections.ts";
 import { configRouteData } from "./route-data.ts";

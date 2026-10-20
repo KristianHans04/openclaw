@@ -21,8 +21,8 @@ import {
   createSolidApplicationContextProvider,
 } from "../../test-helpers/solid-application-context.tsx";
 import { flush } from "../../test-helpers/solid-settle.ts";
+import { completeConfigContext } from "./config-page-state.test-support.ts";
 import { createConfigPage } from "./config-page-state.ts";
-import { completeConfigContext } from "./config-page.test-support.ts";
 import { MemorySettingsPage, type MemorySettingsPageProps } from "./memory-page.tsx";
 import { configRouteData, type ConfigRouteData } from "./route-data.ts";
 
