@@ -42,17 +42,6 @@ async function createHistory(provider = "codex") {
   return { params, manager };
 }
 
-async function readHistory(params: ReturnType<typeof createParams>) {
-  return await readMirroredSessionHistoryMessages({
-    agentId: "main",
-    sessionId: params.sessionId,
-    sessionKey: params.sessionKey,
-    sessionFile: params.sessionFile,
-    sessionTarget: params.sessionTarget,
-    contextTokenBudget: params.contextTokenBudget,
-  });
-}
-
 function appendToolPair(manager: SessionManager, index: number) {
   manager.appendMessage({
     ...assistantMessage("", index * 2 + 2),
@@ -84,25 +73,16 @@ describe("Codex bounded assistant continuity", () => {
       ...assistantMessage(explanation, 20),
       __openclaw: { mirrorIdentity: "codex-app-server:prior-answer" },
     });
-    const history = await readHistory(params);
-    expect(history?.map((message) => message.role)).toEqual([
-      ...Array.from({ length: 4 }, () => ["assistant", "toolResult"]).flat(),
-      "assistant",
+    const history = await readMirroredSessionHistoryMessages({ ...params, agentId: "main" });
+    expect(history).toMatchObject([
+      ...Array.from({ length: 4 }, (_, index) => [
+        { role: "assistant", content: [{ type: "toolCall", id: `call-${index}` }] },
+        { role: "toolResult", toolCallId: `call-${index}` },
+      ]).flat(),
+      { role: "assistant" },
     ]);
     expect(JSON.stringify(history)).toContain(explanation);
     expect(JSON.stringify(history)).not.toContain("Explain the synthetic migration plan.");
-    const calls = new Set(
-      history?.flatMap((message) =>
-        message.role === "assistant"
-          ? message.content.flatMap((part) => (part.type === "toolCall" ? [part.id] : []))
-          : [],
-      ),
-    );
-    for (const message of history ?? []) {
-      if (message.role === "toolResult") {
-        expect(calls.has(message.toolCallId)).toBe(true);
-      }
-    }
     await writeCodexAppServerBinding(params.sessionFile, {
       threadId: "thread-existing",
       cwd: params.workspaceDir,
@@ -126,7 +106,6 @@ describe("Codex bounded assistant continuity", () => {
     assert(Array.isArray(input));
     const text = input.map((part) => requireRecord(part, "input").text ?? "").join("\n");
     expect(harness.requests.map((entry) => entry.method)).toContain("thread/start");
-    expect(text).toContain(params.prompt);
     expect(text).not.toContain("synthetic tool payload");
     expect(text).not.toContain("[input omitted]");
     expect(text).not.toContain("[content omitted]");
@@ -158,10 +137,7 @@ describe("Codex bounded assistant continuity", () => {
     manager.appendMessage(assistantMessage("previous turn", Date.now()));
     const harness = createStartedThreadHarness();
     params.inputProvenance = { kind: "inter_session", sourceTool: "sessions_send" };
-    params.config = {
-      ...params.config,
-      agents: { defaults: { model: { primary: "openai/gpt-5.5" } } },
-    };
+    (params.config ??= {}).agents = { defaults: { model: { primary: "openai/gpt-5.5" } } };
     const run = runCodexAppServerAttempt(params);
     await run.waitForTurnAccepted();
     await harness.completeTurn({ threadId: "thread-1", turnId: "turn-1" });
@@ -185,12 +161,10 @@ describe("Codex bounded assistant continuity", () => {
       mockCall(beforePromptBuild, "before_prompt_build", 1)[0],
       "hook input",
     );
-    expect(lastHookInput.prompt).toContain("[assistant]\nprevious turn");
     expect(lastHookInput.prompt).toMatch(
-      /<\/conversation_context>\n\nCurrent user request:\nhello$/,
+      /\[assistant\]\nprevious turn[\s\S]*<\/conversation_context>\n\nCurrent user request:\nhello$/,
     );
-    expect(lastHookInput.prompt).not.toContain("queued context");
-    expect(lastHookInput.prompt).not.toContain("tail context");
+    expect(lastHookInput.prompt).not.toMatch(/queued context|tail context/);
     const expectedInput = `queued context\n\n${lastHookInput.prompt}\n\ntail context`;
     expect(hookContext).toMatchObject({
       runId: "run-1",

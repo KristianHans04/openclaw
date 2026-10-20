@@ -4,6 +4,30 @@ import type { CodexAppServerClient } from "./client.js";
 import { CODEX_INFERENCE_GENERATION_KEY } from "./inference-context.js";
 import { getCodexInferenceThread } from "./inference-routing.js";
 import { isJsonObject } from "./protocol.js";
+import { turnCompleted } from "./protocol.test-helpers.js";
+
+export function runningCommand(id: string, command: string, processId: string | null) {
+  return {
+    type: "commandExecution",
+    id,
+    command,
+    processId,
+    cwd: "/workspace",
+    status: "inProgress",
+    commandActions: [],
+    aggregatedOutput: null,
+    exitCode: null,
+    durationMs: null,
+  };
+}
+
+export function answerCompleted(text: string) {
+  return turnCompleted({
+    id: "turn-1",
+    status: "completed",
+    items: [{ id: "answer", type: "agentMessage", phase: "final_answer", text }],
+  });
+}
 
 export function requestParams(
   harness: { requests: ReadonlyArray<{ method: string; params?: unknown }> },
