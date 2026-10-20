@@ -147,13 +147,11 @@ export async function readArtwork(shell: Locator) {
       image.naturalHeight * scale,
     );
 
-    const luminance = (red: number, green: number, blue: number) => {
-      const linear = (channel: number) => {
-        const value = channel / 255;
-        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-      };
-      return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue);
+    const linear = (channel: number) => {
+      const value = channel / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
     };
+    const backgroundLinear = Array.from({ length: 256 }, (_, channel) => linear(channel));
     const minContrast = (rect: DOMRect, foreground: number[], artwork = true) => {
       const x = Math.max(0, Math.ceil(rect.x - bounds.x));
       const y = Math.max(0, Math.ceil(rect.y - bounds.y));
@@ -164,6 +162,13 @@ export async function readArtwork(shell: Locator) {
       }
       const rgba = pixels.getImageData(x, y, width, height).data;
       const alpha = foreground[3]! / 255;
+      const foregroundLinear = foreground
+        .slice(0, 3)
+        .map((channel) =>
+          Array.from({ length: 256 }, (_, background) =>
+            linear(channel * alpha + background * (1 - alpha)),
+          ),
+        );
       let minimum = Infinity;
       for (let offset = 0; offset < rgba.length; offset += 4) {
         const red = rgba[offset]!;
@@ -172,12 +177,14 @@ export async function readArtwork(shell: Locator) {
         if (artwork && (red !== baseColor[0] || green !== baseColor[1] || blue !== baseColor[2])) {
           visiblePaintedPixels += 1;
         }
-        const bg = luminance(red, green, blue);
-        const fg = luminance(
-          foreground[0]! * alpha + red * (1 - alpha),
-          foreground[1]! * alpha + green * (1 - alpha),
-          foreground[2]! * alpha + blue * (1 - alpha),
-        );
+        const bg =
+          0.2126 * backgroundLinear[red]! +
+          0.7152 * backgroundLinear[green]! +
+          0.0722 * backgroundLinear[blue]!;
+        const fg =
+          0.2126 * foregroundLinear[0]![red]! +
+          0.7152 * foregroundLinear[1]![green]! +
+          0.0722 * foregroundLinear[2]![blue]!;
         minimum = Math.min(minimum, (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05));
       }
       return minimum;
