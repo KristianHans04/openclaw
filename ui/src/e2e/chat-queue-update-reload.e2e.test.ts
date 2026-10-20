@@ -10,6 +10,9 @@ import {
   createControlUiE2eContextOptions,
 } from "./control-ui-e2e-suite.test-support.ts";
 import { openSidebarPages } from "./sidebar-customization.test-support.ts";
+
+const captureUiProof = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
+
 const suite = createControlUiE2eSuite({
   name: "Queued correction update recovery",
   trackBrowserContexts: true,
@@ -63,10 +66,12 @@ suite.define(() => {
         const edit = page.locator(".chat-queue__edit-input");
         await edit.fill("Reply exactly CORRECTED-RELOAD");
         await composer.fill("Separate saved composer draft");
-        await page.screenshot({
-          path: `${suite.artifactDir}/${resolution}-before-update.png`,
-          fullPage: true,
-        });
+        if (captureUiProof) {
+          await page.screenshot({
+            path: `${suite.artifactDir}/${resolution}-before-update.png`,
+            fullPage: true,
+          });
+        }
         let reloads = 0;
         page.on("domcontentloaded", () => {
           reloads += 1;
@@ -133,10 +138,12 @@ suite.define(() => {
         await page
           .getByText("Save or cancel your queued message edit before reloading.", { exact: true })
           .waitFor();
-        await page.screenshot({
-          path: `${suite.artifactDir}/${resolution}-after-update.png`,
-          fullPage: true,
-        });
+        if (captureUiProof) {
+          await page.screenshot({
+            path: `${suite.artifactDir}/${resolution}-after-update.png`,
+            fullPage: true,
+          });
+        }
         if (otherPage) {
           const pages = await openSidebarPages(page);
           await pages.getByRole("link", { name: "Agents", exact: true }).click();
@@ -180,10 +187,12 @@ suite.define(() => {
             .toBe(narrow);
         }
         expect(await composer.inputValue()).toBe("Separate saved composer draft");
-        await page.screenshot({
-          path: `${suite.artifactDir}/${resolution}-reviewed-edit.png`,
-          fullPage: true,
-        });
+        if (captureUiProof) {
+          await page.screenshot({
+            path: `${suite.artifactDir}/${resolution}-reviewed-edit.png`,
+            fullPage: true,
+          });
+        }
         if (resolution === "save") {
           await page.locator(".chat-queue__edit-submit").click();
           await page
@@ -253,10 +262,12 @@ suite.define(() => {
         const edit = page.locator(".chat-pane-cache__pane--active .chat-queue__edit-input");
         await edit.fill("Reply exactly CORRECTED-RELOAD");
         await composer.fill("Separate saved composer draft");
-        await page.screenshot({
-          path: `${suite.artifactDir}/${resolution}-before-navigation.png`,
-          fullPage: true,
-        });
+        if (captureUiProof) {
+          await page.screenshot({
+            path: `${suite.artifactDir}/${resolution}-before-navigation.png`,
+            fullPage: true,
+          });
+        }
         let reloads = 0;
         page.on("domcontentloaded", () => {
           reloads += 1;
@@ -306,10 +317,13 @@ suite.define(() => {
           )
           .toBe("agent:main:original");
         expect(await composer.inputValue()).toBe("Separate saved composer draft");
-        await page.screenshot({
-          path: `${suite.artifactDir}/${resolution}-after-navigation.png`,
-          fullPage: true,
-        });
+        await edit.waitFor({ state: "attached" });
+        if (captureUiProof) {
+          await page.screenshot({
+            path: `${suite.artifactDir}/${resolution}-after-navigation.png`,
+            fullPage: true,
+          });
+        }
         console.log(
           JSON.stringify({
             artifactDir: suite.artifactDir,
@@ -436,10 +450,12 @@ suite.define(() => {
       await dialog.getByRole("button", { name: "Download private-note.txt", exact: true }).click();
       const download = await downloaded;
       expect(download.suggestedFilename()).toBe("private-note.txt");
-      await page.screenshot({
-        path: `${suite.artifactDir}/private-draft-update-review.png`,
-        fullPage: true,
-      });
+      if (captureUiProof) {
+        await page.screenshot({
+          path: `${suite.artifactDir}/private-draft-update-review.png`,
+          fullPage: true,
+        });
+      }
       await dialog.getByRole("button", { name: "Keep in this tab", exact: true }).click();
       expect(reloads).toBe(0);
       expect(await privatePane.locator(composer).inputValue()).toBe(privateDraft);
@@ -539,10 +555,12 @@ suite.define(() => {
       if (settings) {
         await page.setViewportSize({ width: 520, height: 900 });
       }
-      await page.screenshot({
-        path: `${suite.artifactDir}/private-new-session-review-${settings}.png`,
-        fullPage: true,
-      });
+      if (captureUiProof) {
+        await page.screenshot({
+          path: `${suite.artifactDir}/private-new-session-review-${settings}.png`,
+          fullPage: true,
+        });
+      }
       await dialog.getByRole("button", { name: "Keep in this tab", exact: true }).click();
       await page.getByRole("button", { name: /Server updated/u }).click();
       await page.getByRole("button", { name: "Review private draft", exact: true }).click();
