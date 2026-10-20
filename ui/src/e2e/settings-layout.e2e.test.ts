@@ -365,7 +365,10 @@ suite.define(() => {
       viewport: { height: 844, width: 390 },
     });
     let page = await context.newPage();
-    await installMockGateway(page, { methodResponses: emptyDeviceResponses });
+    await installMockGateway(page, {
+      awaitInitialRoster: false,
+      methodResponses: emptyDeviceResponses,
+    });
 
     try {
       const readShellInsets = (route: RouteId) =>
@@ -387,7 +390,9 @@ suite.define(() => {
 
       for (const route of mobileSettingsRoutes) {
         const pathname = pathForRoute(route);
-        await page.goto(new URL(pathname, suite.server.baseUrl).toString());
+        await page.goto(new URL(pathname, suite.server.baseUrl).toString(), {
+          waitUntil: "commit",
+        });
         await waitForControlUiRoute(page, { pathname, routeId: route });
         await expect
           .poll(() => readShellInsets(route), { message: `${route} settings shell alignment` })
@@ -396,7 +401,9 @@ suite.define(() => {
 
       for (const route of mobileStandaloneSettingsPageRoutes) {
         const pathname = pathForRoute(route);
-        await page.goto(new URL(pathname, suite.server.baseUrl).toString());
+        await page.goto(new URL(pathname, suite.server.baseUrl).toString(), {
+          waitUntil: "commit",
+        });
         await waitForControlUiRoute(page, { pathname, routeId: route });
         const settingsPage = page.locator(".settings-page").last();
         await settingsPage.waitFor({ state: "attached" });
@@ -411,9 +418,14 @@ suite.define(() => {
       for (const { route, contentSelector } of mobileGeometryCases) {
         await page.close();
         page = await context.newPage();
-        await installMockGateway(page);
+        await installMockGateway(page, {
+          // Sessions rows can change the workspace geometry after the route commits.
+          awaitInitialRoster: route === "sessions",
+        });
         const pathname = pathForRoute(route);
-        await page.goto(new URL(pathname, suite.server.baseUrl).toString());
+        await page.goto(new URL(pathname, suite.server.baseUrl).toString(), {
+          waitUntil: "commit",
+        });
         await waitForControlUiRoute(page, { pathname, routeId: route });
         const header = page.locator(".content-header").last();
         const title = header.locator(".page-title");
@@ -427,7 +439,8 @@ suite.define(() => {
         ]);
         await expect
           .poll(() =>
-            page.evaluate((selector) => {
+            page.evaluate(async (selector) => {
+              await document.fonts.ready;
               const scrollport = document.querySelector<HTMLElement>("main.content");
               const headers = document.querySelectorAll<HTMLElement>(".content-header");
               const workspaces = document.querySelectorAll<HTMLElement>(".settings-workspace");
@@ -473,7 +486,7 @@ suite.define(() => {
           });
       }
 
-      await page.goto(`${suite.server.baseUrl}settings/appearance`);
+      await page.goto(`${suite.server.baseUrl}settings/appearance`, { waitUntil: "commit" });
       await waitForControlUiRoute(page, {
         pathname: "/settings/appearance",
         routeId: "appearance",
@@ -510,7 +523,7 @@ suite.define(() => {
       });
 
       await page.setViewportSize({ height: 900, width: 1440 });
-      await page.goto(`${suite.server.baseUrl}settings/appearance`);
+      await page.goto(`${suite.server.baseUrl}settings/appearance`, { waitUntil: "commit" });
       await waitForControlUiRoute(page, {
         pathname: "/settings/appearance",
         routeId: "appearance",
@@ -833,7 +846,9 @@ suite.define(() => {
       for (const route of settingsRowRoutes) {
         const pathname = pathForRoute(route);
         // Reload each route so earlier lazy styles cannot hide missing or misordered CSS.
-        await page.goto(new URL(pathname, suite.server.baseUrl).toString());
+        await page.goto(new URL(pathname, suite.server.baseUrl).toString(), {
+          waitUntil: "commit",
+        });
         await waitForControlUiRoute(page, {
           pathname,
           routeId: route,
@@ -852,8 +867,9 @@ suite.define(() => {
         const titleDescriptionPairs = page.locator(
           ".settings-row__text > .settings-row__title + .settings-row__desc",
         );
-        const gaps = await titleDescriptionPairs.evaluateAll((descriptions) =>
-          descriptions.map((description) => {
+        const gaps = await titleDescriptionPairs.evaluateAll(async (descriptions) => {
+          await document.fonts.ready;
+          return descriptions.map((description) => {
             const title = description.previousElementSibling;
             if (!(title instanceof HTMLElement)) {
               throw new Error("settings row description is missing its title");
@@ -861,8 +877,8 @@ suite.define(() => {
             const titleBox = title.getBoundingClientRect();
             const descriptionBox = description.getBoundingClientRect();
             return Math.round(descriptionBox.y - titleBox.y - titleBox.height);
-          }),
-        );
+          });
+        });
         auditedPairCount += gaps.length;
         expect(gaps, `${route} title/subtitle gaps`).toEqual(gaps.map(() => 0));
 
@@ -923,7 +939,9 @@ suite.define(() => {
       expect(auditedPairCount).toBeGreaterThan(0);
 
       for (const guidanceLink of settingsGuidanceLinks) {
-        await page.goto(`${suite.server.baseUrl}settings/${guidanceLink.route}`);
+        await page.goto(`${suite.server.baseUrl}settings/${guidanceLink.route}`, {
+          waitUntil: "commit",
+        });
         await waitForControlUiRoute(page, {
           pathname: `/settings/${guidanceLink.route}`,
           routeId: guidanceLink.route,
@@ -945,7 +963,9 @@ suite.define(() => {
       for (const viewport of responsiveViewports) {
         await page.setViewportSize(viewport);
         for (const sectionCase of actionSectionCases) {
-          await page.goto(`${suite.server.baseUrl}settings/${sectionCase.route}`);
+          await page.goto(`${suite.server.baseUrl}settings/${sectionCase.route}`, {
+            waitUntil: "commit",
+          });
           await waitForControlUiRoute(page, {
             pathname: `/settings/${sectionCase.route}`,
             routeId: sectionCase.route,
@@ -964,6 +984,7 @@ suite.define(() => {
             actions.waitFor(),
             group.waitFor(),
           ]);
+          await page.evaluate(() => document.fonts.ready);
           await expect
             .poll(async () => {
               const [sectionBox, headingBox, descriptionBox, actionsBox, groupBox] =
