@@ -788,6 +788,9 @@ describe.skipIf(!connection)("agent database port", () => {
       }
     }
     await client.query(`DROP INDEX "${namespace}".memory_index_chunks_search_gin`);
+    await expect(
+      descriptor.admit!(anchorPath, { connection: connection!, schemaPrefix: "test" }),
+    ).rejects.toThrow(/schema drift/);
     {
       using refused = openNodeSqliteDatabase(":memory:");
       await expect(port(pg(namespace), sqlite(refused), descriptor, storeId)).rejects.toThrow(

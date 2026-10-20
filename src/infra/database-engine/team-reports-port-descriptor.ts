@@ -1,4 +1,5 @@
 import { loadBundledPluginPublicArtifactModuleFromCandidatesSync } from "../../plugins/public-surface-loader.js";
+import { revokeSqliteDatabaseAdmissionsForPath } from "../sqlite-database-admission.js";
 import {
   DatabasePortDataError,
   type DatabasePortProvider,
@@ -39,6 +40,12 @@ export async function loadTeamReportsPortDescriptor(
       }
     },
     migrateSqliteSource: (file) => api.admit(file),
-    admit: (file, input) => api.admit(file, input),
+    admit(file, input) {
+      if (input) {
+        // Explicit port/restore validation cannot reuse earlier runtime admission.
+        revokeSqliteDatabaseAdmissionsForPath(file);
+      }
+      return api.admit(file, input);
+    },
   };
 }

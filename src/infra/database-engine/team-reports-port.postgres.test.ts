@@ -85,6 +85,12 @@ describe.skipIf(!connection)("Team Reports database port and backup", () => {
     expect(manifest.verification).toEqual(staged);
     const restored = await fixture.restore(manifest, file("restored.sqlite"));
     expect(await inspect(restored.namespace)).toMatchObject(staged);
+    const input = { connection: connection!, schemaPrefix: "test" };
+    await descriptor.admit!(file("restored.sqlite"), input);
+    await client.query(`DROP INDEX "${restored.namespace}".idx_team_reports_runs_started`);
+    await expect(async () => descriptor.admit!(file("restored.sqlite"), input)).rejects.toThrow(
+      /schema drift/,
+    );
   });
   it("loads the selected installed plugin when the bundled artifact is absent", async () => {
     const rootDir = fileURLToPath(new URL("../../../extensions/team-reports", import.meta.url));

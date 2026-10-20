@@ -42,6 +42,7 @@ import {
 } from "../kysely-sync.js";
 import { openNodeSqliteDatabase } from "../node-sqlite.js";
 import { LEGACY_USAGE_COST_PARTITION_SCOPE } from "../session-cost-usage-partitions.js";
+import { revokeSqliteDatabaseAdmissionsForPath } from "../sqlite-database-admission.js";
 import { admitSqliteSchema } from "../sqlite-schema-facts.js";
 import { normalizeSchemaSql } from "../sqlite-schema-sql.js";
 import { withEngineStoreAdmission } from "./admission-scope.js";
@@ -339,6 +340,10 @@ export async function loadAgentPortDescriptor(
       );
     },
     async admit(file, input) {
+      if (input) {
+        // Explicit port/restore validation cannot reuse earlier runtime admission.
+        revokeSqliteDatabaseAdmissionsForPath(file);
+      }
       withDatabaseEngineSelection(
         {
           effectiveEngines: resolveDatabaseFamilyEngines({

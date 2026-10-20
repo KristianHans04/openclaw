@@ -20,6 +20,7 @@ import { statePostgresRuntime } from "../../state/postgres-schema.generated/runt
 import metadata from "../../state/postgres-schema.generated/state-port.json" with { type: "json" };
 import { CLIENT_CREDENTIAL_LEGACY_TABLES_SQL } from "../client-credential-schema.js";
 import { openNodeSqliteDatabase } from "../node-sqlite.js";
+import { revokeSqliteDatabaseAdmissionsForPath } from "../sqlite-database-admission.js";
 import { admitSqliteSchema, getAdmittedSqliteSchemaFacts } from "../sqlite-schema-facts.js";
 import { extractSqliteTableSchema } from "../sqlite-schema-sql.js";
 import { withEngineStoreAdmission } from "./admission-scope.js";
@@ -162,6 +163,10 @@ export async function loadStatePortDescriptor(
       // require owner admission against the exact predecessor without migrating.
       if (sourceVersion !== OPENCLAW_STATE_SCHEMA_VERSION && !input) {
         return;
+      }
+      if (input) {
+        // Explicit port/restore validation cannot reuse earlier runtime admission.
+        revokeSqliteDatabaseAdmissionsForPath(file);
       }
       return withEngineStoreAdmission(() => {
         using anchor = openNodeSqliteDatabase(file);
