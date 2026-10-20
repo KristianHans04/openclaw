@@ -23,8 +23,6 @@ function typeInto(input: HTMLInputElement, value: string) {
 }
 const textContents = (root: ParentNode, selector: string) =>
   [...root.querySelectorAll(selector)].map((element) => element.textContent?.trim());
-const findElement = <T extends Element = HTMLElement>(root: ParentNode, selector: string): T =>
-  root.querySelector<T>(selector)!;
 const configValue = (config: Record<string, unknown>) => ({
   plugins: { entries: { fixture: { config } } },
 });
@@ -80,7 +78,7 @@ async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
   const model = makeModel(overrides);
   const [props, setProps] = createSignal<PluginSettingsEditorProps>({ model });
   const { container: host } = mountSolid(() => <PluginSettingsEditor {...props()} />);
-  const editor = findElement(host, "openclaw-plugin-settings-editor");
+  const editor = host.querySelector<HTMLElement>("openclaw-plugin-settings-editor")!;
   const update = async (next: Partial<PluginSettingsEditorProps>) => {
     setProps((current) => ({ ...current, ...next }));
     await settle();
@@ -89,7 +87,7 @@ async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
   return { editor, model, update };
 }
 async function searchSettings(editor: HTMLElement, search: string) {
-  const input = findElement<HTMLInputElement>(editor, 'input[type="search"]');
+  const input = editor.querySelector<HTMLInputElement>('input[type="search"]')!;
   expect(input).not.toBeNull();
   typeInto(input, search);
   await settle();
@@ -209,7 +207,7 @@ it("navigates authored sections without hiding settings and omits the rail for f
     "Capture",
     "Other",
   ]);
-  const target = findElement(editor, links[1]!.getAttribute("href")!);
+  const target = editor.querySelector<HTMLElement>(links[1]!.getAttribute("href")!)!;
   const scroll = vi.spyOn(target, "scrollIntoView");
   links[1]!.click();
   expect(scroll).toHaveBeenCalledOnce();
@@ -217,7 +215,7 @@ it("navigates authored sections without hiding settings and omits the rail for f
   expect(editor.querySelectorAll("[data-setting]")).toHaveLength(4);
   expect(editor.querySelector("h1")).toBeNull();
   expect(textContents(editor, "h2")).toEqual(["Data storage", "Capture", "Other"]);
-  const back = findElement<HTMLAnchorElement>(editor, ".plugins-settings-breadcrumb__parent");
+  const back = editor.querySelector<HTMLAnchorElement>(".plugins-settings-breadcrumb__parent")!;
   expect(back.getAttribute("href")).toBe("/settings/plugins/fixture");
   back.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   expect(model.onBack).toHaveBeenCalledOnce();
@@ -285,7 +283,7 @@ it("edits inherited array items on blur without losing siblings", async () => {
       },
     },
   );
-  const row = findElement(editor, '[data-setting="tags"]');
+  const row = editor.querySelector<HTMLElement>('[data-setting="tags"]')!;
   const inputs = row.querySelectorAll<HTMLInputElement>("input");
   expect([...inputs].map((input) => input.value)).toEqual(["alpha", "beta"]);
   expect(row.textContent).not.toContain("2 items");
@@ -321,7 +319,7 @@ it("keeps object array inputs aligned beside removal and finds their descendants
   const inputs = [...editor.querySelectorAll<HTMLInputElement>(".cfg-array__item input")];
   expect(inputs).toHaveLength(2);
   const bounds = inputs.map((input) => input.getBoundingClientRect());
-  const remove = findElement<HTMLButtonElement>(editor, 'button[aria-label="Remove item"]');
+  const remove = editor.querySelector<HTMLButtonElement>('button[aria-label="Remove item"]')!;
   const removeBounds = remove.getBoundingClientRect();
   expect(bounds[0]!.left).toBe(bounds[1]!.left);
   expect(bounds[1]!.top).toBeGreaterThan(bounds[0]!.bottom);
@@ -388,19 +386,19 @@ it.each([
           : undefined,
     });
     await vi.waitFor(() => expect(editor.textContent).not.toContain("Loading"));
-    const credential = findElement(editor, "openclaw-plugin-credential-editor");
+    const credential = editor.querySelector<HTMLElement>("openclaw-plugin-credential-editor")!;
     expect(credential).not.toBeNull();
     expect(editor.textContent).not.toContain(REDACTED_SENTINEL);
     expect(editor.querySelector('input[aria-label="Search: Mode"]')).not.toBeNull();
     if (typeof replacement === "string") {
-      const input = findElement<HTMLInputElement>(credential, "input");
+      const input = credential.querySelector<HTMLInputElement>("input")!;
       typeInto(input, replacement);
       flush();
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     } else {
-      findElement<HTMLButtonElement>(credential, "button").click();
+      credential.querySelector<HTMLButtonElement>("button")!.click();
       await settle();
-      const select = findElement<HTMLSelectElement>(credential, "select");
+      const select = credential.querySelector<HTMLSelectElement>("select")!;
       select.value = replacement.source;
       select.dispatchEvent(new Event("change", { bubbles: true }));
       flush();
@@ -425,8 +423,8 @@ it.each(["row", "input"])(
   "toggles from the checkbox %s once and ignores non-editing clicks",
   async (target) => {
     const { editor, model, update } = await mount();
-    const row = findElement(editor, '[data-setting="enabled"]');
-    const input = findElement<HTMLInputElement>(row, 'input[type="checkbox"]');
+    const row = editor.querySelector<HTMLElement>('[data-setting="enabled"]')!;
+    const input = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     expect(row).not.toBeNull();
     expect(input).not.toBeNull();
     const range = document.createRange();
@@ -437,10 +435,10 @@ it.each(["row", "input"])(
     row.click();
     expect(model.onConfigPatch).not.toHaveBeenCalled();
     getSelection()!.removeAllRanges();
-    findElement<HTMLButtonElement>(row, 'button[aria-haspopup="menu"]').click();
+    row.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click();
     expect(model.onConfigPatch).not.toHaveBeenCalled();
     await settle();
-    const menu = findElement(row, '[role="menu"]');
+    const menu = row.querySelector<HTMLElement>('[role="menu"]')!;
     expect(menu.matches(":popover-open")).toBe(true);
     menu.click();
     expect(model.onConfigPatch).not.toHaveBeenCalled();
@@ -544,16 +542,16 @@ it.each([1728, 390])("keeps map labels, keys, and values usable at %s pixels", a
     }
     const key = getField(editor, "Key: first");
     expect(key.getBoundingClientRect().width).toBeGreaterThan(100);
-    const value = findElement<HTMLInputElement>(
-      editor,
+    const value = editor.querySelector<HTMLInputElement>(
       '[data-setting="populated"] input[type="number"]',
-    );
+    )!;
     expect(value.getBoundingClientRect().width).toBeGreaterThan(100);
     expect(editor.scrollWidth).toBeLessThanOrEqual(editor.clientWidth);
-    findElement<HTMLButtonElement>(
-      editor,
-      '[data-setting="populated"] button[aria-label="Remove entry"]',
-    ).click();
+    editor
+      .querySelector<HTMLButtonElement>(
+        '[data-setting="populated"] button[aria-label="Remove entry"]',
+      )!
+      .click();
     expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("populated"), {});
   } finally {
     await page.viewport(800, 600);
