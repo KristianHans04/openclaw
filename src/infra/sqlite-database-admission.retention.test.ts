@@ -290,6 +290,20 @@ it("reuses physical catalog facts after unsealed close and invalidates them on D
   expect(database.prepare("SELECT value FROM proof").get()).toEqual({ value: 43 });
 });
 
+it("invalidates retained schema facts before an idle reopened handle is admitted", () => {
+  using fixture = databaseFixture("sqlite-admission-idle-schema-change-");
+  const { database } = fixture;
+  const admitted = schemaFacts(database);
+  database.close();
+  using reopened = openNodeSqliteDatabase(fixture.location);
+
+  publishSchema(reopened);
+  expect(schemaFacts(reopened)).toBeUndefined();
+  admitSqliteSchema(reopened);
+  expect(schemaFacts(reopened)?.admissionId).not.toBe(admitted?.admissionId);
+  expect(reopened.prepare("SELECT value FROM proof").get()).toEqual({ value: 42 });
+});
+
 it.each([undefined, "process"] as const)(
   "preserves path-load lifetime when the loader closes its handle (%s)",
   (lifetime) => {
@@ -706,7 +720,10 @@ it.each(["committed", "native", "sqlite-transaction", "postgres-transaction"] as
   (scope) => {
     using fixture = databaseFixture("sqlite-admission-decode-");
     const { location, database } = fixture;
-    const connection = scope === "postgres-transaction" ? postgresConnection(database) : database;
+    const connection =
+      scope === "postgres-transaction"
+        ? withEngineStoreAdmission(() => postgresConnection(database))
+        : database;
     const read = vi.fn((value: unknown) =>
       typeof value === "string" ? value.toUpperCase() : undefined,
     );
@@ -732,7 +749,7 @@ it.each(["committed", "native", "sqlite-transaction", "postgres-transaction"] as
       expect(getFact(connection, decodedKey)).toBeUndefined();
     } else {
       if (scope.endsWith("transaction")) {
-        transaction(connection, publishAndRead);
+        withEngineStoreAdmission(() => transaction(connection, publishAndRead));
       } else {
         publishAndRead();
       }

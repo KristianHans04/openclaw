@@ -29,6 +29,7 @@ type EngineAdmission =
 const admissionKey: SqliteDatabaseFactKey<EngineAdmission> = {
   name: "database.engine",
   lifetime: "process",
+  schemaDependent: true,
 };
 
 export function readEngineAnchor(

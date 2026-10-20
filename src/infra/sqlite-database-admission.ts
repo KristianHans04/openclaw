@@ -672,7 +672,8 @@ export function publishSqliteDatabaseSchemaChange(
   database: DatabaseSync | PostgresSqlConnection,
 ): void {
   const anchor = sqlPublicationAnchor(database);
-  const record = admission(anchor, false);
+  // Idle reopen must reattach descriptor-held facts before invalidating them.
+  const record = admission(anchor);
   if (record) {
     const previous = advanceSqliteDatabaseGeneration(record, "schemaRevision");
     const ddlRevision = state.ddlRevisions.get(anchor) ?? 0;
