@@ -1,7 +1,7 @@
-import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { describe, expect, it, vi } from "vitest";
 import { retainCodexAppServerLiveThread } from "./client-runtime.js";
 import { itemNotification, turnCompleted } from "./protocol.test-helpers.js";
+import { retainSourceAuthority } from "./run-attempt-continuity.test-support.js";
 import {
   createStartedThreadHarness,
   createTestParams,
@@ -21,7 +21,6 @@ describe("native background command outcomes", () => {
     ["inventory unavailable", "52627"],
     ["retained", null],
   ] as const)("projects owner outcome: %s (%s)", async (scenario, startProcessId) => {
-    const accepted = createDeferred<void>();
     const abort = new AbortController();
     const params = createTestParams();
     params.abortSignal = abort.signal;
@@ -29,22 +28,7 @@ describe("native background command outcomes", () => {
     const releaseSource = vi.fn();
     params.hostCapabilities = {
       ...params.hostCapabilities,
-      retainSourceAuthority: () => ({
-        signal: source.signal,
-        modelPolicyRequired: false,
-        bindModelExecution: () => ({
-          signal: source.signal,
-          assertCurrent: () => source.signal.throwIfAborted(),
-          release: () => {},
-        }),
-        assertCurrent: () => source.signal.throwIfAborted(),
-        release: releaseSource,
-      }),
-    };
-    params.onExecutionPhase = ({ phase }) => {
-      if (phase === "turn_accepted") {
-        accepted.resolve();
-      }
+      retainSourceAuthority: retainSourceAuthority(source.signal, releaseSource),
     };
     const command = {
       type: "commandExecution",
@@ -96,12 +80,7 @@ describe("native background command outcomes", () => {
     });
     const run = runCodexAppServerAttempt(params);
     try {
-      await Promise.race([
-        accepted.promise,
-        run.then(() => {
-          throw new Error("Attempt ended before native turn acceptance");
-        }),
-      ]);
+      await run.waitForTurnAccepted();
       await harness.notify(itemNotification("item/started", command));
       await harness.notify(
         turnCompleted({
@@ -129,9 +108,12 @@ describe("native background command outcomes", () => {
         });
         expect(JSON.stringify(tool)).toContain("52627");
         const unsubscribe = { method: "thread/unsubscribe", params: { threadId: "thread-1" } };
-        for (let index = 0; index < 65; index += 1) {
-          await retainCodexAppServerLiveThread(harness.client, `idle-before-${index}`);
-        }
+        const evictIdleThreads = async (phase: string) => {
+          for (let index = 0; index < 65; index += 1) {
+            await retainCodexAppServerLiveThread(harness.client, `idle-${phase}-${index}`);
+          }
+        };
+        await evictIdleThreads("before");
         expect(harness.requests).not.toContainEqual(unsubscribe);
         await harness.notify({
           ...itemNotification("item/completed", { ...command, processId: "52627" }),
@@ -144,9 +126,7 @@ describe("native background command outcomes", () => {
         await harness.notify(
           itemNotification("item/completed", { ...command, processId: "foreign-process" }),
         );
-        for (let index = 0; index < 65; index += 1) {
-          await retainCodexAppServerLiveThread(harness.client, `idle-foreign-${index}`);
-        }
+        await evictIdleThreads("foreign");
         expect(harness.requests).not.toContainEqual(unsubscribe);
         if (startProcessId === null) {
           source.abort(new Error("Synthetic retained source revoked"));
@@ -160,9 +140,7 @@ describe("native background command outcomes", () => {
             }),
           );
         }
-        for (let index = 0; index < 65; index += 1) {
-          await retainCodexAppServerLiveThread(harness.client, `idle-after-${index}`);
-        }
+        await evictIdleThreads("after");
         expect(harness.requests).toContainEqual(unsubscribe);
         expect(releaseSource).toHaveBeenCalled();
       } else if (scenario === "completion during inventory") {

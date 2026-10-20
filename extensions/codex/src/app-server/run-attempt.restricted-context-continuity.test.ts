@@ -2,6 +2,7 @@ import path from "node:path";
 import type { HarnessContextEngine as ContextEngine } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { openFileBackedSessionManagerForTest } from "openclaw/plugin-sdk/agent-runtime-test-contracts";
 import { describe, expect, it, vi } from "vitest";
+import { requestParams as requireRequestParams } from "./run-attempt-continuity.test-support.js";
 import {
   assistantMessage,
   runCodexAppServerAttempt as runUnmodifiedCodexAppServerAttempt,
@@ -21,12 +22,16 @@ import {
 } from "./run-attempt.context-engine.test-support.js";
 import { readCodexAppServerBinding } from "./session-binding.test-helpers.js";
 
-function requireRequestParams(
-  harness: ReturnType<typeof createStartedThreadHarness>,
-  method: string,
-): Record<string, unknown> {
-  const request = harness.requests.find((entry) => entry.method === method);
-  return requireRecord(request?.params, `${method} params`);
+function snapshot(text: string, epoch: string, prompt?: string) {
+  return {
+    messages: [
+      assistantMessage(text, 10),
+      ...(prompt === undefined ? [] : [userMessage(prompt, 11)]),
+    ],
+    estimatedTokens: 42,
+    systemPromptAddition: "context-engine system",
+    contextProjection: { mode: "thread_bootstrap" as const, epoch },
+  };
 }
 
 setupRunAttemptTestHooks();
@@ -53,12 +58,9 @@ describe("runCodexAppServerAttempt restricted context continuity", () => {
       );
       let currentEpoch = "epoch-1";
       const contextEngine = createContextEngine({
-        assemble: vi.fn(async ({ prompt }) => ({
-          messages: [assistantMessage("retained LCM history", 10), userMessage(prompt ?? "", 11)],
-          estimatedTokens: 42,
-          systemPromptAddition: "context-engine system",
-          contextProjection: { mode: "thread_bootstrap" as const, epoch: currentEpoch },
-        })),
+        assemble: vi.fn(async ({ prompt }) =>
+          snapshot("retained LCM history", currentEpoch, prompt ?? ""),
+        ),
       });
       const attemptParams = createParams(sessionFile, workspaceDir);
       attemptParams.contextEngine = contextEngine;
@@ -68,44 +70,24 @@ describe("runCodexAppServerAttempt restricted context continuity", () => {
       attemptParams.pluginHarnessToolPolicyRestricted = true;
       attemptParams.pluginHarnessToolPolicyScope = "conversation";
 
-      for (const step of [
-        {
-          previousThread: "thread-legacy",
-          threadId: "thread-restricted",
-          epoch: "epoch-1",
-          startsFresh: true,
-        },
-        {
-          previousThread: "thread-restricted",
-          threadId: "thread-restricted",
-          epoch: "epoch-1",
-          startsFresh: false,
-        },
-        {
-          previousThread: "thread-restricted",
-          threadId: "thread-compacted",
-          epoch: "epoch-2",
-          startsFresh: true,
-        },
-        {
-          previousThread: "thread-compacted",
-          threadId: "thread-compacted",
-          epoch: "epoch-2",
-          startsFresh: false,
-        },
-      ]) {
-        currentEpoch = step.epoch;
+      for (const [previousThread, threadId, epoch, startsFresh] of [
+        ["thread-legacy", "thread-restricted", "epoch-1", true],
+        ["thread-restricted", "thread-restricted", "epoch-1", false],
+        ["thread-restricted", "thread-compacted", "epoch-2", true],
+        ["thread-compacted", "thread-compacted", "epoch-2", false],
+      ] as const) {
+        currentEpoch = epoch;
         const harness = createStartedThreadHarness(
           async (method) => {
             if (method === "mcpServerStatus/list") {
               return { data: [], nextCursor: null };
             }
             if (method === "thread/start" || method === "thread/resume") {
-              return threadStartResult(step.threadId, { cwd: workspaceDir });
+              return threadStartResult(threadId, { cwd: workspaceDir });
             }
             return undefined;
           },
-          { persistedThreads: [step.previousThread] },
+          { persistedThreads: [previousThread] },
         );
         const attemptRun = runUnmodifiedCodexAppServerAttempt(attemptParams);
         await attemptRun.waitForTurnAccepted();
@@ -113,11 +95,9 @@ describe("runCodexAppServerAttempt restricted context continuity", () => {
         const nativeLifecycleRequests = harness.requests
           .filter(({ method }) => method === "thread/start" || method === "thread/resume")
           .map(({ method }) => method);
-        expect(nativeLifecycleRequests).toEqual([
-          step.startsFresh ? "thread/start" : "thread/resume",
-        ]);
+        expect(nativeLifecycleRequests).toEqual([startsFresh ? "thread/start" : "thread/resume"]);
         const inputText = getRequestInputText(harness);
-        if (step.startsFresh) {
+        if (startsFresh) {
           expect(inputText).toContain("OpenClaw assembled context for this turn:");
           expect(inputText).toContain("retained LCM history");
           const startParams = requireRequestParams(harness, "thread/start");
@@ -127,17 +107,17 @@ describe("runCodexAppServerAttempt restricted context continuity", () => {
           });
         } else {
           expect(inputText).toBe(attemptParams.prompt);
-          expect(requireRequestParams(harness, "thread/resume").threadId).toBe(step.threadId);
+          expect(requireRequestParams(harness, "thread/resume").threadId).toBe(threadId);
         }
-        await harness.completeTurn("completed", step.threadId);
+        await harness.completeTurn("completed", threadId);
         await attemptRun;
 
         const savedBinding = await readCodexAppServerBinding(sessionFile);
         expect(savedBinding).toMatchObject({
-          threadId: step.threadId,
+          threadId,
           nativeToolPolicyRestricted: true,
           restrictedThreadConfigFingerprint: expect.any(String),
-          contextEngine: { projection: { mode: "thread_bootstrap", epoch: step.epoch } },
+          contextEngine: { projection: { mode: "thread_bootstrap", epoch } },
         });
         await harness.client.closeAndWait();
       }
@@ -147,12 +127,9 @@ describe("runCodexAppServerAttempt restricted context continuity", () => {
   it("bootstraps the prepared LCM snapshot when creation-time policy rotates a restricted thread", async () => {
     const sessionFile = path.join(tempDir, "session-late-policy-rotation.jsonl");
     const workspaceDir = path.join(tempDir, "workspace-late-policy-rotation");
-    const assemble = vi.fn(async ({ prompt }: Parameters<ContextEngine["assemble"]>[0]) => ({
-      messages: [assistantMessage("prepared LCM snapshot", 10), userMessage(prompt ?? "", 11)],
-      estimatedTokens: 42,
-      systemPromptAddition: "context-engine system",
-      contextProjection: { mode: "thread_bootstrap" as const, epoch: "epoch-1" },
-    }));
+    const assemble = vi.fn(async ({ prompt }: Parameters<ContextEngine["assemble"]>[0]) =>
+      snapshot("prepared LCM snapshot", "epoch-1", prompt ?? ""),
+    );
     const attemptParams = createParams(sessionFile, workspaceDir);
     attemptParams.contextEngine = createContextEngine({ assemble });
     attemptParams.config = { tools: { deny: ["browser"], web: { search: { enabled: false } } } };
@@ -166,12 +143,7 @@ describe("runCodexAppServerAttempt restricted context continuity", () => {
     await firstHarness.completeTurn();
     await firstRun;
 
-    assemble.mockResolvedValueOnce({
-      messages: [assistantMessage("prepared LCM snapshot", 10)],
-      estimatedTokens: 42,
-      systemPromptAddition: "context-engine system",
-      contextProjection: { mode: "thread_bootstrap", epoch: "epoch-1" },
-    });
+    assemble.mockResolvedValueOnce(snapshot("prepared LCM snapshot", "epoch-1"));
     assemble.mockResolvedValue({
       messages: [assistantMessage("new background LCM snapshot", 20)],
       estimatedTokens: 42,

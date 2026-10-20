@@ -9,7 +9,7 @@ import {
 import { describe, expect, it, vi, type MockInstance } from "vitest";
 import * as dynamicTools from "./dynamic-tools.js";
 import {
-  createParams,
+  createTestParams,
   createCodexRuntimePlanFixture,
   createStartedThreadHarness,
   runCodexAppServerAttempt,
@@ -42,16 +42,8 @@ describe("Codex attempt TTS media lifetime", () => {
     });
     setActivePluginRegistry(registry);
     const createBridge = vi.spyOn(dynamicTools, "createCodexDynamicToolBridge");
-    const started = createDeferred<void>();
-    const harness = createStartedThreadHarness(async (method) => {
-      if (method === "turn/start") {
-        started.resolve();
-      }
-    });
-    const params = createParams(
-      path.join(tempDir, "session.jsonl"),
-      path.join(tempDir, "workspace"),
-    );
+    const harness = createStartedThreadHarness();
+    const params = createTestParams();
     params.runtimePlan = createCodexRuntimePlanFixture();
     params.sourceReplyDeliveryMode = "message_tool_only";
     params.toolsAllow = ["tts"];
@@ -72,7 +64,7 @@ describe("Codex attempt TTS media lifetime", () => {
       | MockInstance<ReturnType<typeof dynamicTools.createCodexDynamicToolBridge>["handleToolCall"]>
       | undefined;
     try {
-      await Promise.race([started.promise, attemptEnded]);
+      await run.waitForTurnAccepted();
       const bridge = createBridge.mock.results[0]?.value;
       if (!bridge) {
         throw new Error("Expected the attempt's real dynamic tool bridge");
@@ -84,32 +76,23 @@ describe("Codex attempt TTS media lifetime", () => {
         provider: "test-speech",
         audioAsVoice: true,
       });
-      expect(
-        await harness.handleServerRequest({
-          id: "earlier-tts",
+      const speak = (callId: string, args: { text: string; timeoutMs?: number }) =>
+        harness.handleServerRequest({
+          id: callId,
           method: "item/tool/call",
           params: {
             threadId: "thread-1",
             turnId: "turn-1",
-            callId: "earlier-tts",
+            callId,
             namespace: null,
             tool: "tts",
-            arguments: { text: "Earlier accepted audio." },
+            arguments: args,
           },
-        }),
-      ).toMatchObject({ success: true });
-      const response = harness.handleServerRequest({
-        id: "host-tts",
-        method: "item/tool/call",
-        params: {
-          threadId: "thread-1",
-          turnId: "turn-1",
-          callId: "host-tts",
-          namespace: null,
-          tool: "tts",
-          arguments: { text: "Read this aloud.", timeoutMs: 1 },
-        },
+        });
+      expect(await speak("earlier-tts", { text: "Earlier accepted audio." })).toMatchObject({
+        success: true,
       });
+      const response = speak("host-tts", { text: "Read this aloud.", timeoutMs: 1 });
       await Promise.race([
         entered.promise,
         attemptEnded,

@@ -3,10 +3,12 @@ import { initializeGlobalHookRunner } from "openclaw/plugin-sdk/hook-runtime";
 import { createMockPluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { describe, expect, it } from "vitest";
 import { isCodexAppServerLiveThreadProtected } from "./client-runtime.js";
-import { CODEX_INFERENCE_GENERATION_KEY } from "./inference-context.js";
-import { getCodexInferenceThread, ownCodexInferenceClient } from "./inference-routing.js";
-import { isJsonObject } from "./protocol.js";
+import { ownCodexInferenceClient } from "./inference-routing.js";
 import { itemNotification, turnCompleted } from "./protocol.test-helpers.js";
+import {
+  readManagedInstructions,
+  retainSourceAuthority,
+} from "./run-attempt-continuity.test-support.js";
 import {
   createParams,
   createStartedThreadHarness,
@@ -57,39 +59,7 @@ describe("prompt hook context with native background commands", () => {
           return { data: [{ itemId: command.id, processId: command.processId }], nextCursor: null };
         }
         if (method === "turn/start") {
-          const route = getCodexInferenceThread(harness.client, "thread-1");
-          if (
-            !route ||
-            !isJsonObject(request) ||
-            !isJsonObject(request.responsesapiClientMetadata)
-          ) {
-            throw new Error("Missing managed turn registration");
-          }
-          const generation = request.responsesapiClientMetadata[CODEX_INFERENCE_GENERATION_KEY];
-          if (typeof generation !== "string") {
-            throw new Error("Missing managed generation");
-          }
-          const nativeBody = { instructions: "Native model-owned policy", input: [] };
-          const metadata = { requestKind: "turn", threadId: "thread-1", generation };
-          const parent = route.context.prepare(nativeBody, metadata);
-          parent.assertCurrent();
-          const instructions = parent.body.instructions;
-          if (typeof instructions !== "string") {
-            throw new Error("Expected parent instructions");
-          }
-          received.push(instructions);
-          // Repeated parent requests refresh context without accumulating copies.
-          expect(route.context.prepare(nativeBody, metadata).body).toEqual(parent.body);
-          expect(
-            route.context.prepare(nativeBody, { ...metadata, requestKind: "compaction" }).body,
-          ).toBe(nativeBody);
-          expect(
-            route.context.prepare(nativeBody, {
-              ...metadata,
-              threadId: "child",
-              parentThreadId: "thread-1",
-            }).body,
-          ).toBe(nativeBody);
+          received.push(readManagedInstructions(harness.client, request));
         }
         return undefined;
       },
@@ -111,17 +81,7 @@ describe("prompt hook context with native background commands", () => {
         };
         params.hostCapabilities = {
           ...params.hostCapabilities,
-          retainSourceAuthority: () => ({
-            signal: source.signal,
-            modelPolicyRequired: false,
-            bindModelExecution: () => ({
-              signal: source.signal,
-              assertCurrent: () => source.signal.throwIfAborted(),
-              release: () => {},
-            }),
-            assertCurrent: () => source.signal.throwIfAborted(),
-            release: () => {},
-          }),
+          retainSourceAuthority: retainSourceAuthority(source.signal),
         };
         const run = runCodexAppServerAttempt(params);
         await run.waitForTurnAccepted();

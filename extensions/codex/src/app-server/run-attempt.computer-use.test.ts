@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { readAttemptTerminal } from "./attempt-terminal.test-helper.js";
 import * as elicitationBridge from "./elicitation-bridge.js";
 import type { v2 } from "./protocol.js";
+import { requestParams } from "./run-attempt-continuity.test-support.js";
 import {
   createStartedThreadHarness,
   createTestParams,
@@ -38,11 +39,7 @@ describe("runCodexAppServerAttempt", () => {
       if (method === "plugin/installed" || method === "plugin/list") {
         const installed = {
           marketplaces: [
-            {
-              name: "openai-bundled",
-              path: "/marketplaces/openai-bundled",
-              plugins: [plugin],
-            },
+            { name: "openai-bundled", path: "/marketplaces/openai-bundled", plugins: [plugin] },
           ],
           marketplaceLoadErrors: [],
         } satisfies v2.PluginInstalledResponse;
@@ -68,9 +65,7 @@ describe("runCodexAppServerAttempt", () => {
           data: [
             {
               name: "desktop-control",
-              tools: {
-                "computer-use.get_app_state": {},
-              },
+              tools: { "computer-use.get_app_state": {} },
             },
           ],
           nextCursor: null,
@@ -110,22 +105,16 @@ describe("runCodexAppServerAttempt", () => {
         mode: "form",
       },
     });
-    expect(result).toEqual({
-      action: "accept",
-      content: { approve: true },
-      _meta: null,
-    });
+    expect(result).toEqual({ action: "accept", content: { approve: true }, _meta: null });
     expect(bridgeSpy.mock.calls[0]?.[0]).toMatchObject({
       threadId: "thread-1",
       turnId: "turn-1",
       requestParams: { serverName: "desktop-control" },
       computerUseMcpServerName: "desktop-control",
     });
-    const turnStart = elicitation.requests.find(({ method }) => method === "turn/start");
-    const turnStartParams = turnStart?.params as
-      | { approvalPolicy?: { granular?: { mcp_elicitations?: boolean } } }
-      | undefined;
-    expect(turnStartParams?.approvalPolicy?.granular?.mcp_elicitations).toBe(true);
+    expect(requestParams(elicitation, "turn/start")).toMatchObject({
+      approvalPolicy: { granular: { mcp_elicitations: true } },
+    });
     abortController.abort("user_cancelled");
     await turnInterrupted.promise;
     expect(elicitation.requests.filter(({ method }) => method === "turn/interrupt")).toEqual([
