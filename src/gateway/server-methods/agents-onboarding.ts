@@ -168,9 +168,10 @@ export async function startAgentOnboardingConversation(
             sessionKey,
             agentId,
             message: [
-              "A short introduction has already been saved in this agent's conversation. Call the ask_user tool now to continue onboarding; do not show the choices as plain text or use tool_search/dispatch_action.",
-              'Use exactly this Ask User question shape: {"questions":[{"id":"primary_focus","header":"Main focus","question":"What do you want me helping with most?","multiSelect":false,"options":[{"label":"Calendar and scheduling"},{"label":"Notion notes and tasks"},{"label":"Research and summaries"},{"label":"Errands like shopping or bookings"}]}]}. Keep the short header separate from the full question. Do not add option values or other fields.',
-              "After the user selects an option, ask one open-ended follow-up to learn a bit more about the specific thing they want to achieve. Tailor it to their selection, but do not provide another list or hard-code the follow-up wording. Then continue normally after they answer.",
+              "A short introduction has already been saved in this agent's conversation. Now create a real Ask User question; do not show the choices as plain text or print the question JSON.",
+              "If Ask User is not directly visible, use tool_search to find it, then use dispatch_action to invoke that exact result with the question arguments. Do not stop after searching.",
+              'Use exactly this Ask User question shape: {"questions":[{"id":"agent_role","header":"Role","question":"What role would you like me to take on?","multiSelect":false,"options":[{"label":"Chief of staff","description":"Coordinates your work and keeps priorities moving."},{"label":"Researcher","description":"Finds reliable evidence and summarizes what matters."},{"label":"Writer","description":"Turns your notes and source material into clear drafts."},{"label":"Reviewer","description":"Checks work against requirements and flags gaps."}]}]}. These are the four existing single-agent roles; do not offer a team. Keep the short header separate from the full question and do not add option values or other fields.',
+              "After the user selects a role (or chooses Something else), ask one open-ended follow-up that invites a little detail about the specific thing they want to achieve. Tailor it to the choice, but do not provide another list or hard-code the follow-up wording. Then continue normally after they answer.",
               "This agent already exists. Do not propose creating an agent or ask the user to approve its creation.",
             ].join("\n\n"),
             idempotencyKey: `agents.create:${agentId}:onboarding-question`,

@@ -149,7 +149,7 @@ it("atomically publishes a saved greeting that remains in the agent's conversati
   });
 });
 
-it("starts onboarding with a hidden single-select Ask User prompt in the agent's chat", async () => {
+it("starts onboarding with the existing four single-agent roles in Ask User", async () => {
   const release = vi.fn();
   const work = new AsyncWorkScope();
   const options = invocation();
@@ -168,6 +168,10 @@ it("starts onboarding with a hidden single-select Ask User prompt in the agent's
   await work.drain();
 
   const [request, , internalOptions] = sendInternalChat.mock.calls[0]!;
+  expect(request.params.message).toContain(
+    "If Ask User is not directly visible, use tool_search to find it, then use dispatch_action to invoke that exact result with the question arguments.",
+  );
+  expect(request.params.message).not.toContain("do not use tool_search/dispatch_action");
   expect(request.params).toMatchObject({
     sessionKey: "agent:bot-stable:home",
     agentId: "bot-stable",
@@ -179,13 +183,14 @@ it("starts onboarding with a hidden single-select Ask User prompt in the agent's
     },
   });
   expect(request.params.message).toContain(
-    '"header":"Main focus","question":"What do you want me helping with most?","multiSelect":false',
+    '"header":"Role","question":"What role would you like me to take on?","multiSelect":false',
   );
-  expect(request.params.message).toContain('"id":"primary_focus"');
-  expect(request.params.message).toContain("Calendar and scheduling");
-  expect(request.params.message).toContain("Notion notes and tasks");
-  expect(request.params.message).toContain("Research and summaries");
-  expect(request.params.message).toContain("Errands like shopping or bookings");
+  expect(request.params.message).toContain('"id":"agent_role"');
+  expect(request.params.message).toContain('"label":"Chief of staff"');
+  expect(request.params.message).toContain('"label":"Researcher"');
+  expect(request.params.message).toContain('"label":"Writer"');
+  expect(request.params.message).toContain('"label":"Reviewer"');
+  expect(request.params.message).toContain("do not offer a team");
   expect(request.params.message).toContain("one open-ended follow-up");
   expect(internalOptions).toMatchObject({
     transcript: { display: false },
