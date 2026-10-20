@@ -29,8 +29,6 @@ import { gitHubPublicApi } from "./github-public-api.js";
 import { captureOwnGitHubPullRequestReader } from "./github-publication-inspect-reader.js";
 import { resolveGitHubForkParent } from "./github-repository-target.js";
 
-export { parsePullListItem } from "./control-ui-session-pr-metadata.js";
-
 const SUCCESS_CACHE_MS = 90_000;
 // Back off refetches while GitHub reports quota exhaustion; the UI keeps
 // showing the last-known chips with the stale warning during this window.

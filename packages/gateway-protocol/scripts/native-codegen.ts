@@ -1,4 +1,4 @@
-import { IsLiteralString, IsObject, IsUnion } from "typebox";
+import { IsLiteralString, IsObject, IsUnion, type TSchema } from "typebox";
 import { generateKotlinProtocol } from "../../../scripts/protocol-gen-kotlin.js";
 import { generateSwiftProtocol } from "../../../scripts/protocol-gen-swift.js";
 import { ProtocolSchemas } from "../src/schema/protocol-schemas.js";
@@ -47,12 +47,10 @@ export function assertNativeProtocolContract(
   if (language !== "swift") {
     return;
   }
-  for (const [name, schema] of Object.entries(ProtocolSchemas)) {
-    if (IsObject(schema)) {
-      if (!source.includes(`public struct ${name}:`)) {
-        throw new Error(`Missing Swift model for ProtocolSchemas.${name}`);
-      }
-      continue;
+  const schemas: Record<string, TSchema> = ProtocolSchemas;
+  for (const [name, schema] of Object.entries(schemas)) {
+    if (IsObject(schema) && !source.includes(`public struct ${name}:`)) {
+      throw new Error(`Missing Swift model for ProtocolSchemas.${name}`);
     }
     const variants = IsUnion(schema) ? schema.anyOf : undefined;
     if (!variants || variants.length < 2 || !variants.every(IsLiteralString)) {
