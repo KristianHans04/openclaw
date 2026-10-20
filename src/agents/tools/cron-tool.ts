@@ -150,18 +150,14 @@ export function createCronTool(opts?: CronToolOptions): AnyAgentTool {
     label: "Automations",
     name: AUTOMATIONS_TOOL_NAME,
     displaySummary: readOnly ? "Inspect recorded automation state." : CRON_TOOL_DISPLAY_SUMMARY,
-    description: readOnly
-      ? `Inspect recorded automation state during recovery. Available actions: ${managementAuthority?.managementOnly ? "list, get" : "list, get, runs"}.${selfRemoveOnly ? " Only the current automation is accessible." : " Existing caller visibility restrictions apply."} Use get with a known jobId for saved state and streamStatus; list includes disabled jobs only with includeDisabled:true. A missing list entry does not establish deletion or source termination. If the recorded state cannot establish an interrupted action's outcome, report it as unknown. Mutations are unavailable in this recovery continuation; this does not mean the user needs to change permissions.`
-      : selfRemoveOnly
-        ? managementAuthority?.managementOnly
-          ? "Inspect or remove only the current automation. Actions: list [includeDisabled] (enabled only by default), get jobId (saved state), remove jobId. Use the current job ID; other jobs and management actions are unavailable."
-          : 'Inspect or remove only the current automation. Actions: status; list [includeDisabled] (enabled only by default); get/runs/remove jobId; next_check in:"15m" for this paced run or at + agentTurn + explicit session:<key> continuation. A successful one-shot proposal rearms the same job from run end (minimum 2s); without one it completes normally. Use get with the current job ID to inspect its saved state. To stop a finished job, remove it; creating/updating/running jobs and waking sessions are unavailable. Return the task result; the scheduler owns delivery.'
-        : managementAuthority?.managementOnly
-          ? 'Manage any existing automation on this Gateway with the admitted automation management authority. Actions: list [includeDisabled,limit,offset] (enabled-only compact summaries by default; follow nextOffset); get jobId (full saved state, including streamStatus for a known watcher); update jobId job (partial patch, null clears); run jobId (runMode:"force" runs now; waits up to timeoutMs, default 60s; unfinished runs return runId); remove jobId (operator removal requests cancellation of an active run; the result reports activeRunCancellationRequested:true). To stop a saved watcher, use update with job:{enabled:false}, or open it on the Automations page and turn off its Active switch. This pauses the watcher without deleting its saved record. The enabled flag alone does not prove source termination; use get jobId to inspect state.streamStatus. Creator attribution and scheduled execution policy stay intact. Use the Automations page for other actions.'
-          : buildCronToolDescription({
-              triggersEnabled,
-              callerScoped: !isCronModelManagementAllowed(config),
-            }),
+    description: buildCronToolDescription({
+      triggersEnabled,
+      callerScoped: !isCronModelManagementAllowed(config),
+      readOnly,
+      selfRemoveOnly,
+      managementOnly: managementAuthority?.managementOnly,
+      allowCommandJobs,
+    }),
     outputSchema: CronToolOutputSchema,
     parameters: createCronToolSchema({
       readOnly,
@@ -169,11 +165,7 @@ export function createCronTool(opts?: CronToolOptions): AnyAgentTool {
       agentSessionKey: opts?.agentSessionKey,
       triggersEnabled,
       selfRemoveOnly,
-      management: managementAuthority
-        ? managementAuthority.managementOnly
-          ? "only"
-          : "also"
-        : undefined,
+      management: managementAuthority && (managementAuthority.managementOnly ? "only" : "also"),
     }),
     execute: async (_toolCallId, args, operationSignal) => {
       operationSignal?.throwIfAborted();
@@ -728,10 +720,6 @@ export function createCronTool(opts?: CronToolOptions): AnyAgentTool {
         : executeAction());
     },
   };
-  if (!allowCommandJobs && !readOnly && !selfRemoveOnly) {
-    tool.description +=
-      "\nGateway policy forbids creating, editing, enabling or running command jobs and on-exit command watchers. Use direct Gateway administration for those operations.";
-  }
   if (readOnly) {
     bindAgentToolReplaySafety(tool, "bounded-read");
   }

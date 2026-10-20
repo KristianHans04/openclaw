@@ -1,7 +1,29 @@
 export function buildCronToolDescription(params: {
   triggersEnabled: boolean;
   callerScoped: boolean;
+  readOnly?: boolean;
+  selfRemoveOnly?: boolean;
+  managementOnly?: boolean;
+  allowCommandJobs?: boolean;
 }): string {
+  if (params.readOnly) {
+    return `Inspect recorded automation state during recovery. Available actions: ${params.managementOnly ? "list, get" : "list, get, runs"}.${params.selfRemoveOnly ? " Only the current automation is accessible." : " Existing caller visibility restrictions apply."} Use get with a known jobId for saved state and streamStatus; list includes disabled jobs only with includeDisabled:true. A missing list entry does not establish deletion or source termination. If the recorded state cannot establish an interrupted action's outcome, report it as unknown. Mutations are unavailable in this recovery continuation; this does not mean the user needs to change permissions.`;
+  }
+  if (params.selfRemoveOnly) {
+    return params.managementOnly
+      ? "Inspect or remove only the current automation. Actions: list [includeDisabled] (enabled only by default), get jobId (saved state), remove jobId. Use the current job ID; other jobs and management actions are unavailable."
+      : 'Inspect or remove only the current automation. Actions: status; list [includeDisabled] (enabled only by default); get/runs/remove jobId; next_check in:"15m" for this paced run or at + agentTurn + explicit session:<key> continuation. A successful one-shot proposal rearms the same job from run end (minimum 2s); without one it completes normally. Use get with the current job ID to inspect its saved state. To stop a finished job, remove it; creating/updating/running jobs and waking sessions are unavailable. Return the task result; the scheduler owns delivery.';
+  }
+  const commandPolicySuffix =
+    params.allowCommandJobs === false
+      ? "\nGateway policy forbids creating, editing, enabling or running command jobs and on-exit command watchers. Use direct Gateway administration for those operations."
+      : "";
+  if (params.managementOnly) {
+    return (
+      'Manage any existing automation on this Gateway with the admitted automation management authority. Actions: list [includeDisabled,limit,offset] (enabled-only compact summaries by default; follow nextOffset); get jobId (full saved state, including streamStatus for a known watcher); update jobId job (partial patch, null clears); run jobId (runMode:"force" runs now; waits up to timeoutMs, default 60s; unfinished runs return runId); remove jobId (operator removal requests cancellation of an active run; the result reports activeRunCancellationRequested:true). To stop a saved watcher, use update with job:{enabled:false}, or open it on the Automations page and turn off its Active switch. This pauses the watcher without deleting its saved record. The enabled flag alone does not prove source termination; use get jobId to inspect state.streamStatus. Creator attribution and scheduled execution policy stay intact. Use the Automations page for other actions.' +
+      commandPolicySuffix
+    );
+  }
   const scopeDescription = params.callerScoped
     ? "Gateway policy restricts every model turn to caller-visible automations, including administrator-started conversations. Lists and counts reflect only this scope"
     : "Authenticated configured channel owners and Control UI administrators can manage any Gateway automation. Other turns see caller-visible jobs and scoped counts only";
@@ -33,7 +55,7 @@ STREAM CONSENT: creation, source changes and reactivation require current creato
   const scriptCue = params.triggersEnabled
     ? " Use triggers/script payloads to skip the model on quiet checks. Scripts reach MCP only through toolsAllow entries <server>__tool or <server>__*. Throw to record script failure (returning {error} succeeds); recurring-job failure alerts wait for consecutive failures, run output follows delivery."
     : "";
-  return `Schedule reminders, delayed self-wakeups, recurring work${params.triggersEnabled ? ", event watchers" : ""}. Never exec sleep/poll as timer.
+  const description = `Schedule reminders, delayed self-wakeups, recurring work${params.triggersEnabled ? ", event watchers" : ""}. Never exec sleep/poll as timer.
 
 ACTIONS: status | list (enabled-only summaries by default; includeDisabled:true includes paused records; follow nextOffset) | get jobId (full details) | add job | update jobId job (partial; null clears) | remove jobId (operator removal requests active-run cancellation) | run jobId (runMode:"force"=now; waits up to timeoutMs, default 60s; unfinished runs return runId) | runs jobId runId? (history) | next_check in:"30m" (own paced run or one-shot session continuation) | wake text (caller-owned session; mode defaults to next-heartbeat). Check unfinished runs later with runs, never a scheduled verification job. wake has no delay; for a later resume use an at job below.
 
@@ -68,4 +90,5 @@ DELIVERY: omitted=announce. Agent, command, and script jobs send their final vis
 FAILURE ALERTS: routed jobs default to 2 consecutive execution failures and 1h cooldown; terminal one-shot failures bypass that count. failureAlert:false disables execution/delivery alerts, not auto-disable notices. bestEffort suppresses inherited execution alerts. Required-delivery failures use an alternate route, bypass after, and share the cooldown without incrementing the execution streak.
 
 Main-job wakeMode: "now"(default)|"next-heartbeat". Scheduled runs: self status/list/get/runs/remove + own next_check only. Use jobId. contextMessages 0-10 embeds recent chat lines in reminder text.`;
+  return description + commandPolicySuffix;
 }
