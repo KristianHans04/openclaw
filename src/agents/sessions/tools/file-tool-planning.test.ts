@@ -21,52 +21,48 @@ function storage(initial = "target\ntarget\n") {
   };
   return { operations, content: () => content };
 }
-const editInput = (oldText: string) => ({
-  path: "example.txt",
-  edits: [{ oldText, newText: "replacement" }],
-});
-
+const fileError = new Error("Synthetic storage unavailable");
 it.each([
-  { name: "missing", oldText: "absent", message: "Could not find the exact text" },
-  { name: "ambiguous", oldText: "target", message: "Found 2 occurrences" },
-  { name: "empty", oldText: "", message: "oldText must not be empty" },
-])(
-  "preserves trusted $name edit input errors across planning workers",
-  async ({ oldText, message }) => {
-    const content = "target\ntarget\n";
-    const { operations } = storage(content);
-    const tool = createEditTool("/workspace", { operations });
-    const error = await tool
-      .execute("invalid-edit", editInput(oldText))
-      .catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(Error);
-    expect(error).toHaveProperty("message", expect.stringContaining(message));
-    expect(isTrustedToolInputError(error)).toBe(true);
-    if (oldText === "absent") {
-      expect(error).toHaveProperty("message", expect.stringContaining(content));
-      expect(error).toHaveProperty("cause.message", expect.not.stringContaining(content));
-    }
-    expect(operations.writeFile).not.toHaveBeenCalled();
-  },
-);
-
-it("does not classify filesystem failures as edit input errors", async () => {
-  const fileError = new Error("Synthetic storage unavailable");
-  const { operations } = storage("target\n");
+  ["absent", "Could not find the exact text", false],
+  ["target", "Found 2 occurrences", false],
+  ["", "oldText must not be empty", false],
+  ["target", "Synthetic storage unavailable", true],
+] as const)("classifies edit failure for %j (%s)", async (oldText, message, storageError) => {
+  const content = storageError ? "target\n" : "target\ntarget\n";
+  const { operations } = storage(content);
   const tool = createEditTool("/workspace", {
     operations: {
       ...operations,
-      access: async () => {
-        throw fileError;
-      },
-      statFile: async () => null,
+      ...(storageError
+        ? {
+            access: async () => {
+              throw fileError;
+            },
+            statFile: async () => null,
+          }
+        : {}),
     },
   });
   const error = await tool
-    .execute("storage-error", editInput("target"))
+    .execute("edit", {
+      path: "example.txt",
+      edits: [{ oldText, newText: "replacement" }],
+    })
     .catch((caught: unknown) => caught);
-  expect(error).toHaveProperty("cause", fileError);
-  expect(isTrustedToolInputError(error)).toBe(false);
+  expect(error).toBeInstanceOf(Error);
+  expect(isTrustedToolInputError(error)).toBe(!storageError);
+  if (storageError) {
+    expect(error).toHaveProperty("cause", fileError);
+  } else {
+    expect(error).toMatchObject({ message: expect.stringContaining(message) });
+    if (oldText === "absent") {
+      expect(error).toMatchObject({
+        message: expect.stringContaining(content),
+        cause: { message: expect.not.stringContaining(content) },
+      });
+    }
+    expect(operations.writeFile).not.toHaveBeenCalled();
+  }
 });
 
 it.each(

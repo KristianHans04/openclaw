@@ -51,18 +51,9 @@ it("reads ordinary files in-process even when child spawning is unavailable", as
 });
 
 it.each([
-  "agent.sqlite",
-  "agent.sqlite-wal",
-  "agent.sqlite-shm",
-  "agent.sqlite-journal",
-  "plugin.sqlite3",
-  "plugin.sqlite3-wal",
-  "plugin.sqlite3-shm",
-  "plugin.sqlite3-journal",
-  "plugin.db",
-  "plugin.db-wal",
-  "plugin.db-shm",
-  "plugin.db-journal",
+  ...["agent.sqlite", "plugin.sqlite3", "plugin.db"].flatMap((name) =>
+    ["", "-wal", "-shm", "-journal"].map((suffix) => name + suffix),
+  ),
   "PLUGIN.DB-SHM",
   "agent.sqlite.memory-reindex-11111111-2222-3333-4444-555555555555",
   "agent.sqlite.memory-reindex-11111111-2222-3333-4444-555555555555-shm",
@@ -94,35 +85,34 @@ it("resolves a symlinked state root before classifying its files", async () => {
 it("reuses the broker for isolated reads, preserving bytes, failures, and cancellation", async () => {
   const broker = createSpawnBrokerHost();
   const filePath = file("state/notes.txt");
+  const read = (name = "notes.txt", signal?: AbortSignal) =>
+    readLocalFile(file("state", name), signal);
   const bytes = Buffer.alloc(1024 * 1024 + 13, 0xa7);
   fs.writeFileSync(filePath, bytes);
   write("state/empty.txt", "");
   try {
     await broker.ready();
     await runWithSpawnBroker(broker, async () => {
-      const results = await Promise.all([
-        readLocalFile(filePath),
-        readLocalFile(file("state/empty.txt")),
-        readLocalFile(filePath),
+      expect(await Promise.all([read(), read("empty.txt"), read()])).toEqual([
+        bytes,
+        Buffer.alloc(0),
+        bytes,
       ]);
-      expect(results).toEqual([bytes, Buffer.alloc(0), bytes]);
-      await expect(readLocalFile(file("state/missing.txt"))).rejects.toMatchObject({
-        code: "ENOENT",
-      });
-      await expect(readLocalFile(file("state"))).rejects.toThrow("regular file");
+      await expect(read("missing.txt")).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(read("")).rejects.toThrow("regular file");
       const link = file("state/link.txt");
       fs.symlinkSync(filePath, link);
-      await expect(readLocalFile(link)).rejects.toThrow("regular file");
+      await expect(read("link.txt")).rejects.toThrow("regular file");
       const controller = new AbortController();
       const reason = new Error("read canceled");
       controller.abort(reason);
-      await expect(readLocalFile(filePath, controller.signal)).rejects.toBe(reason);
+      await expect(read(undefined, controller.signal)).rejects.toBe(reason);
       const active = new AbortController();
-      const reading = readLocalFile(filePath, active.signal);
+      const reading = read(undefined, active.signal);
       await Promise.resolve();
       active.abort(reason);
       await expect(reading).rejects.toBe(reason);
-      await expect(readLocalFile(filePath)).resolves.toEqual(bytes);
+      await expect(read()).resolves.toEqual(bytes);
       expect(command.runCommandBuffered).not.toHaveBeenCalled();
     });
   } finally {
