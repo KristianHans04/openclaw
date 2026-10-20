@@ -1,5 +1,6 @@
 import { once } from "node:events";
 import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http";
+import { connect, type Socket } from "node:net";
 import type { ImageGenerationProvider } from "openclaw/plugin-sdk/image-generation";
 import { generateImage } from "openclaw/plugin-sdk/image-generation-runtime";
 import type {
@@ -9,7 +10,7 @@ import type {
 } from "openclaw/plugin-sdk/plugin-entry";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { acquireTestPortBlock, useIsolatedStateGuard } from "openclaw/plugin-sdk/test-env";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import plugin from "./index.js";
 
 const MODEL = "openai/gpt-image-2.5-flare";
@@ -80,6 +81,9 @@ describe("registered ClawRouter image generation over HTTP", () => {
   const providers: ImageGenerationProvider[] = [];
   const catalogs: UnifiedModelCatalogProviderPlugin[] = [];
   let baseUrl: string;
+  let externalResultUrl: string;
+  const proxyTargets: string[] = [];
+  const proxySockets = new Set<Socket>();
   let cfg: OpenClawConfig;
   let payload: unknown;
   let inventory: unknown;
@@ -138,13 +142,45 @@ describe("registered ClawRouter image generation over HTTP", () => {
       response.destroy(failure instanceof Error ? failure : undefined);
     });
   });
+  const storageServer = createServer((request, response) => {
+    calls.push({
+      url: request.url ?? "",
+      method: request.method,
+      headers: request.headers,
+      body: undefined,
+    });
+    response.setHeader("Content-Type", "image/png");
+    response.end(PNG);
+  });
+  storageServer.on("connect", (request, socket, head) => {
+    proxyTargets.push(request.url ?? "");
+    const target = new URL(baseUrl);
+    const upstream = connect(Number(target.port), target.hostname);
+    for (const owned of [socket, upstream]) {
+      proxySockets.add(owned);
+      owned.once("close", () => proxySockets.delete(owned));
+    }
+    upstream.once("connect", () => {
+      socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
+      if (head.length) {
+        upstream.write(head);
+      }
+      socket.pipe(upstream).pipe(socket);
+    });
+    upstream.on("error", () => socket.destroy());
+    socket.on("error", () => upstream.destroy());
+    socket.once("close", () => upstream.destroy());
+  });
   let releasePort: () => Promise<void>;
   beforeAll(async () => {
-    const claim = await acquireTestPortBlock({ offsets: [0] });
+    const claim = await acquireTestPortBlock({ offsets: [0, 1] });
     releasePort = claim.release;
     server.listen(claim.port, "127.0.0.1");
     await once(server, "listening");
+    storageServer.listen(claim.port + 1, "127.0.0.1");
+    await once(storageServer, "listening");
     baseUrl = "http://127.0.0.1:" + claim.port;
+    externalResultUrl = "http://127.0.0.1:" + (claim.port + 1) + "/external-result.png";
     plugin.register?.(
       createTestPluginApi({
         registerImageGenerationProvider(provider) {
@@ -157,15 +193,25 @@ describe("registered ClawRouter image generation over HTTP", () => {
     );
   });
   afterAll(async () => {
-    const closed = new Promise<void>((resolve, reject) => {
-      server.close((error) => (error ? reject(error) : resolve()));
-    });
-    server.closeAllConnections();
-    await closed;
+    for (const socket of proxySockets) {
+      socket.destroy();
+    }
+    for (const ownedServer of [server, storageServer]) {
+      const closed = new Promise<void>((resolve, reject) => {
+        ownedServer.close((error) => (error ? reject(error) : resolve()));
+      });
+      ownedServer.closeAllConnections();
+      await closed;
+    }
     await releasePort();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
   beforeEach(() => {
     calls.length = 0;
+    proxyTargets.length = 0;
     payload = { data: [{ b64_json: PNG.toString("base64") }] };
     inventory = catalog();
     status = 200;
@@ -248,7 +294,7 @@ describe("registered ClawRouter image generation over HTTP", () => {
       payload = {
         data: [
           {
-            url: mode === "private-host" ? "http://192.168.1.1/image.png" : baseUrl + "/result.png",
+            url: mode === "private-host" ? externalResultUrl : baseUrl + "/result.png",
           },
         ],
       };
@@ -265,6 +311,65 @@ describe("registered ClawRouter image generation over HTTP", () => {
       }
     },
   );
+
+  it.each([false, true])(
+    "honors explicit private-network permission %s across generation and storage origins",
+    async (allowPrivateNetwork) => {
+      cfg.models!.providers!.clawrouter!.request = { allowPrivateNetwork };
+      payload = { data: [{ url: externalResultUrl }] };
+      if (!allowPrivateNetwork) {
+        await expect(generate()).rejects.toThrow(/private|blocked|allowed/i);
+        expect(calls).toHaveLength(0);
+        return;
+      }
+      const result = await generate();
+      expect(result.images[0]).toMatchObject({ buffer: PNG, mimeType: "image/png" });
+      expect(calls.map((call) => call.url)).toEqual([
+        "/v1/catalog",
+        "/v1/images/generations",
+        "/external-result.png",
+      ]);
+      expect(calls[2]?.headers.authorization).toBeUndefined();
+    },
+  );
+
+  it("uses the environment proxy for both required catalog and generation requests", async () => {
+    const proxyUrl = new URL(externalResultUrl).origin;
+    for (const name of ["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"]) {
+      vi.stubEnv(name, proxyUrl);
+    }
+    for (const name of ["NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"]) {
+      vi.stubEnv(name, "");
+    }
+    vi.stubEnv("OPENCLAW_PROXY_ACTIVE", undefined);
+    const target = new URL(baseUrl);
+    target.hostname = "clawrouter-proxy.invalid";
+    cfg.models!.providers!.clawrouter!.baseUrl = target.origin;
+    const result = await generate();
+    expect(result.images[0]).toMatchObject({ buffer: PNG, mimeType: "image/png" });
+    expect(calls.map((call) => call.url)).toEqual(["/v1/catalog", "/v1/images/generations"]);
+    expect(proxyTargets).toEqual([target.host, target.host]);
+    expect(calls.map((call) => call.headers.authorization)).toEqual([
+      "Bearer synthetic-router-key",
+      "Bearer synthetic-router-key",
+    ]);
+  });
+
+  it("installs the caller's longer generation deadline instead of the default ceiling", async () => {
+    // Observe real timers without replacing scheduling or waiting three minutes;
+    // the held-response case below separately proves deadline expiry and release.
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    const result = await generate({ timeoutMs: 300_000 });
+    expect(result.images[0]).toMatchObject({ buffer: PNG, mimeType: "image/png" });
+    const generationTimers = timers.mock.calls.filter(
+      (call) => call[5] === "fetchWithSsrFGuard" && call[6] === baseUrl + "/v1/images/generations",
+    );
+    expect(generationTimers.length).toBeGreaterThan(0);
+    for (const timer of generationTimers) {
+      expect(timer[1]).toBeGreaterThan(180_000);
+      expect(timer[1]).toBeLessThanOrEqual(300_000);
+    }
+  });
 
   it.each([401, 402, 403, 429])(
     "preserves generation HTTP %i without retry or upstream fallback",

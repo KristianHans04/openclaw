@@ -92,7 +92,10 @@ export function buildClawRouterImageGenerationProvider(): ImageGenerationProvide
         label: "ClawRouter image generation",
       });
       const remainingTimeoutMs = () =>
-        resolveProviderOperationTimeoutMs({ deadline, defaultTimeoutMs: DEFAULT_TIMEOUT_MS });
+        resolveProviderOperationTimeoutMs({
+          deadline,
+          defaultTimeoutMs: deadline.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        });
       const auth = await resolveApiKeyForProvider({
         provider: "clawrouter",
         cfg: req.cfg,
@@ -153,6 +156,7 @@ export function buildClawRouterImageGenerationProvider(): ImageGenerationProvide
           maxBytes,
           timeoutMs: remainingTimeoutMs,
           signal: req.signal,
+          allowPrivateNetwork: context.allowPrivateNetwork,
           ssrfPolicy: req.ssrfPolicy,
           dispatcherPolicy: context.dispatcherPolicy,
         });

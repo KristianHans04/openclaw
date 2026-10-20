@@ -8,11 +8,12 @@ import type {
 } from "openclaw/plugin-sdk/plugin-entry";
 import { resolveApiKeyForProvider } from "openclaw/plugin-sdk/provider-auth-runtime";
 import {
+  fetchWithTimeoutGuarded,
   readProviderJsonResponse,
-  resolveProviderHttpRequestConfig,
+  resolveProviderHttpRequestConfigWithOriginTrust,
   sanitizeConfiguredModelProviderRequest,
 } from "openclaw/plugin-sdk/provider-http";
-import { fetchWithSsrFGuard, mergeSsrFPolicies } from "openclaw/plugin-sdk/ssrf-runtime";
+import { mergeSsrFPolicies } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   asOptionalRecord,
   normalizeOptionalString,
@@ -136,7 +137,7 @@ export function resolveClawRouterImageHttpContext(
 ) {
   const providerConfig = req.cfg.models?.providers?.clawrouter;
   const baseUrl = normalizeClawRouterApiBaseUrl(providerConfig?.baseUrl);
-  const context = resolveProviderHttpRequestConfig({
+  const context = resolveProviderHttpRequestConfigWithOriginTrust({
     provider: "clawrouter",
     capability: "image",
     transport: "http",
@@ -153,7 +154,13 @@ export function resolveClawRouterImageHttpContext(
   headers.set("Authorization", "Bearer " + apiKey);
   headers.set("X-ClawRouter-Client", "openclaw");
   headers.set("Accept", "application/json");
-  return { ...context, headers, ssrfPolicy: { allowedOrigins: [new URL(baseUrl).origin] } };
+  return {
+    ...context,
+    headers,
+    ssrfPolicy: context.trustConfiguredBaseUrlOrigin
+      ? { allowedOrigins: [new URL(baseUrl).origin] }
+      : undefined,
+  };
 }
 
 export function assertClawRouterImageResponseOk(response: Response, operation: string): void {
@@ -176,19 +183,21 @@ export async function fetchClawRouterImageModels(params: {
 }): Promise<ImageCatalogEntry[]> {
   const { context } = params;
   params.signal?.throwIfAborted();
-  const { response, release } = await fetchWithSsrFGuard({
-    url: context.baseUrl.replace(/\/+$/u, "") + "/catalog",
-    init: { method: "GET", headers: context.headers },
-    timeoutMs: params.timeoutMs(),
-    signal: params.signal,
-    policy: mergeSsrFPolicies(
-      params.ssrfPolicy,
-      context.ssrfPolicy,
-      context.allowPrivateNetwork ? { allowPrivateNetwork: true } : undefined,
-    ),
-    dispatcherPolicy: context.dispatcherPolicy,
-    auditContext: "clawrouter.image-catalog",
-  });
+  const { response, release } = await fetchWithTimeoutGuarded(
+    context.baseUrl.replace(/\/+$/u, "") + "/catalog",
+    { method: "GET", headers: context.headers, signal: params.signal },
+    params.timeoutMs(),
+    fetch,
+    {
+      ssrfPolicy: mergeSsrFPolicies(
+        params.ssrfPolicy,
+        context.ssrfPolicy,
+        context.allowPrivateNetwork ? { allowPrivateNetwork: true } : undefined,
+      ),
+      dispatcherPolicy: context.dispatcherPolicy,
+      auditContext: "clawrouter.image-catalog",
+    },
+  );
   try {
     assertClawRouterImageResponseOk(response, "ClawRouter image catalog");
     const payload = asOptionalRecord(
