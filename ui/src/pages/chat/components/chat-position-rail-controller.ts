@@ -569,7 +569,8 @@ export function createPositionRail(props: PositionRailParams) {
       }
       markersChanged = true;
     }
-    if (!refreshingWindow) {
+    // Text-only stream edits keep the same targets. Scroll/resize observers own geometry changes.
+    if (!refreshingWindow && (markersChanged || targetsChanged)) {
       requestObservation();
     }
     const indexes = windowIndexes();

@@ -207,6 +207,7 @@ const { values } = parseArgs({
     "probe-dir": { type: "string" },
     "live-events": { type: "boolean", default: false },
     "streaming-reply": { type: "boolean", default: false },
+    "streaming-burst-size": { type: "string", default: "1" },
     "session-switch": { type: "boolean", default: false },
     "init-script": { type: "string", multiple: true, default: [] },
     "sidebar-list-churn": { type: "boolean", default: false },
@@ -305,6 +306,14 @@ const frameGapMs = Number(values["frame-gap-ms"]);
 const captureMs = Number(values["capture-ms"]);
 const transcriptMessages =
   values["transcript-messages"] === undefined ? undefined : Number(values["transcript-messages"]);
+const streamingBurstSize = Number(values["streaming-burst-size"]);
+if (
+  !Number.isSafeInteger(streamingBurstSize) ||
+  streamingBurstSize < 1 ||
+  streamingBurstSize > 30
+) {
+  throw new Error("streaming-burst-size must be between 1 and 30");
+}
 const sessionEventDurationMs = Number(values["session-event-duration-ms"]);
 const fixtureNowMs =
   values["fixture-now-ms"] === undefined ? undefined : Number(values["fixture-now-ms"]);
@@ -941,6 +950,7 @@ try {
       }
       await page.evaluate((input) => Reflect.get(window, "__streamingReply").start(input), {
         ...streamingReply,
+        burstSize: streamingBurstSize,
         sessionKey: fixture.selectedSessionKey,
         runId: fixture.scenario.inFlightRun!.runId,
       });
@@ -1008,6 +1018,7 @@ try {
             head,
             chars: streamingReply.text.length,
             deltasPerSecond: streamingReply.deltasPerSecond,
+            burstSize: streamingBurstSize,
             ...streaming,
           },
           null,

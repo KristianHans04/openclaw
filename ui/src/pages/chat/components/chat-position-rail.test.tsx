@@ -546,6 +546,13 @@ describe("conversation position rail", () => {
       const query = vi.spyOn(root, "querySelectorAll");
       const targetScans = () =>
         query.mock.calls.filter(([selector]) => selector === ".chat-bubble[data-entry-id]").length;
+      const observations = [...resizeObservers].map((observer) => vi.spyOn(observer, "observe"));
+      const railObservations = () =>
+        observations.reduce(
+          (count, observe) =>
+            count + observe.mock.calls.filter(([target]) => target === marks).length,
+          0,
+        );
 
       for (const word of ["one", "two", "three"]) {
         props.stream = `Live **${word}**`;
@@ -555,6 +562,16 @@ describe("conversation position rail", () => {
         expect(container.querySelector('.chat-bubble[data-entry-id="question"]')).toBe(original);
       }
       expect(targetScans()).toBe(0);
+      expect(railObservations()).toBe(0);
+
+      publishTranscriptScroll(root, {
+        type: "offset",
+        offset: 100,
+        scrolling: true,
+        touching: false,
+        programmatic: false,
+      });
+      expect(railObservations()).toBeGreaterThan(0);
 
       const elements = transcript.renderSession(
         props.sessionKey,
