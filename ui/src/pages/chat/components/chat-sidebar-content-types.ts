@@ -127,7 +127,12 @@ type FileSidebarEdit = {
 
 export type FileSidebarNavigation = { line: number };
 
-export type SessionFileSource = { sessionKey: string; agentId?: string; path: string };
+export type SessionFileSource = {
+  sessionKey: string;
+  agentId?: string;
+  path: string;
+  messageEntryId?: string;
+};
 
 export type FileSidebarContent = {
   kind: "file";

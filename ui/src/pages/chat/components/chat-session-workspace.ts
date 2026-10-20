@@ -187,7 +187,12 @@ function openFile(
   state: SessionWorkspaceHost,
   workspace: SessionWorkspaceState,
   path: string,
-  opts: { line?: number | null; requestPath?: string; sessionKey?: string } = {},
+  opts: {
+    line?: number | null;
+    requestPath?: string;
+    sessionKey?: string;
+    messageEntryId?: string;
+  } = {},
 ) {
   const requestPath = opts.requestPath ?? path;
   const sessionKey = opts.sessionKey ?? workspace.sessionKey;
@@ -201,10 +206,15 @@ function openFile(
   openWorkspaceItem(
     state,
     workspace,
-    viewingSession ? `file:${requestPath}` : JSON.stringify(["file", sessionKey, requestPath]),
+    viewingSession && !opts.messageEntryId
+      ? `file:${requestPath}`
+      : JSON.stringify(["file", sessionKey, requestPath, opts.messageEntryId]),
     async () => {
       try {
-        return await state.sessions.getFile(sessionKey, requestPath, { agentId });
+        return await state.sessions.getFile(sessionKey, requestPath, {
+          agentId,
+          ...(opts.messageEntryId ? { messageEntryId: opts.messageEntryId } : {}),
+        });
       } catch (error) {
         const details = error instanceof GatewayRequestError ? error.details : null;
         if (
@@ -242,7 +252,12 @@ function openFile(
       const download = (signal: AbortSignal) =>
         downloadSessionFile(
           state,
-          { sessionKey: result.sessionKey, agentId, path: requestPath },
+          {
+            sessionKey: result.sessionKey,
+            agentId,
+            path: requestPath,
+            ...(opts.messageEntryId ? { messageEntryId: opts.messageEntryId } : {}),
+          },
           signal,
         );
       if (file.previewKind === "image") {
@@ -337,6 +352,7 @@ function openFile(
             fetchLatest: async () => {
               const latest = await state.sessions.getFile(result.sessionKey, requestPath, {
                 agentId,
+                ...(opts.messageEntryId ? { messageEntryId: opts.messageEntryId } : {}),
               });
               // A hash-conflict recovery still belongs to the file source that was opened.
               if (
@@ -375,6 +391,7 @@ function openFile(
           sessionKey: result.sessionKey,
           agentId,
           path: filePath,
+          ...(opts.messageEntryId ? { messageEntryId: opts.messageEntryId } : {}),
         },
         draftKey: [
           gatewayUrl,
@@ -436,6 +453,7 @@ export function openSessionWorkspaceFile(
   openFile(state, getSessionWorkspace(state), target.path, {
     line: target.line,
     sessionKey: target.sessionKey,
+    messageEntryId: target.messageEntryId,
   });
 }
 
