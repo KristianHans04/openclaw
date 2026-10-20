@@ -20,6 +20,17 @@ import { loadSessionMcpConfig } from "./agent-bundle-mcp-runtime-config.js";
 import { loadEnabledBundleAgentSettingsSnapshot } from "./agent-project-settings-snapshot.js";
 
 const tempHarness = createBundleMcpTempHarness();
+type SnapshotPlugins = NonNullable<
+  Parameters<typeof createPluginMetadataSnapshotFixture>[0]
+>["plugins"];
+
+function cachedSnapshot(plugins: SnapshotPlugins, cache = createPluginCache()) {
+  return withPluginCache(cache, () => {
+    const snapshot = createPluginMetadataSnapshotFixture({ plugins });
+    bindPluginMetadataSnapshotCache(snapshot);
+    return snapshot;
+  });
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -36,24 +47,28 @@ async function createBundle() {
     "settings.json": JSON.stringify({ hideThinkingBlock: true, shellPath: "/blocked" }),
   });
   const cache = createPluginCache();
-  const snapshot = withPluginCache(cache, () => {
-    const prepared = createPluginMetadataSnapshotFixture({
-      plugins: [
-        {
-          id: "cache-bundle",
-          origin: "global",
-          format: "bundle",
-          bundleFormat: "claude",
-          rootDir,
-          settingsFiles: ["settings.json"],
-        },
-      ],
-    });
-    bindPluginMetadataSnapshotCache(prepared);
-    return prepared;
-  });
+  const snapshot = cachedSnapshot(
+    [
+      {
+        id: "cache-bundle",
+        origin: "global",
+        format: "bundle",
+        bundleFormat: "claude",
+        rootDir,
+        settingsFiles: ["settings.json"],
+      },
+    ],
+    cache,
+  );
   const cfg = { plugins: { entries: { "cache-bundle": { enabled: true } } } };
-  return { rootDir, cache, snapshot, cfg, workspaceDir: rootDir };
+  return {
+    rootDir,
+    cache,
+    snapshot,
+    cfg,
+    params: { workspaceDir: rootDir, cfg, manifestRegistry: snapshot.manifestRegistry },
+    settingsParams: { cwd: rootDir, cfg, pluginMetadataSnapshot: snapshot },
+  };
 }
 
 describe("bundle metadata cache ownership", () => {
@@ -62,11 +77,9 @@ describe("bundle metadata cache ownership", () => {
     async (registrySource) => {
       const bundle = await createBundle();
       const params = {
-        workspaceDir: bundle.workspaceDir,
-        cfg: bundle.cfg,
-        ...(registrySource === "provided"
-          ? { manifestRegistry: bundle.snapshot.manifestRegistry }
-          : {}),
+        ...bundle.params,
+        manifestRegistry:
+          registrySource === "provided" ? bundle.snapshot.manifestRegistry : undefined,
       };
       const read = () => loadSessionMcpConfig(params).loaded.mcpServers.bundled?.command;
       const readOriginal = () =>
@@ -77,17 +90,9 @@ describe("bundle metadata cache ownership", () => {
       expect(readOriginal()).toBe("original");
       await fs.writeFile(
         path.join(bundle.rootDir, ".mcp.json"),
-        JSON.stringify({
-          mcpServers: { bundled: { command: "replacement" } },
-        }),
+        JSON.stringify({ mcpServers: { bundled: { command: "replacement" } } }),
       );
-      const candidate = withPluginCache(createPluginCache(), () => {
-        const snapshot = createPluginMetadataSnapshotFixture({
-          plugins: [...bundle.snapshot.plugins],
-        });
-        bindPluginMetadataSnapshotCache(snapshot);
-        return snapshot;
-      });
+      const candidate = cachedSnapshot([...bundle.snapshot.plugins]);
       expect(
         withPluginMetadataSnapshotScope(candidate, read, {
           config: bundle.cfg,
@@ -101,16 +106,7 @@ describe("bundle metadata cache ownership", () => {
   it("reuses bundle file facts across MCP, LSP, settings, and live session policy", async () => {
     const bundle = await createBundle();
     await withPluginCache(bundle.cache, async () => {
-      const params = {
-        workspaceDir: bundle.workspaceDir,
-        cfg: bundle.cfg,
-        manifestRegistry: bundle.snapshot.manifestRegistry,
-      };
-      const settingsParams = {
-        cwd: bundle.workspaceDir,
-        cfg: bundle.cfg,
-        pluginMetadataSnapshot: bundle.snapshot,
-      };
+      const { params, settingsParams } = bundle;
       loadEnabledBundleMcpConfig(params);
       loadEnabledBundleLspConfig(params);
       loadEnabledBundleAgentSettingsSnapshot(settingsParams);
@@ -150,11 +146,7 @@ describe("bundle metadata cache ownership", () => {
 
   it("reads explicitly supplied settings snapshots from their original plugin cache", async () => {
     const bundle = await createBundle();
-    const params = {
-      cwd: bundle.workspaceDir,
-      cfg: bundle.cfg,
-      pluginMetadataSnapshot: bundle.snapshot,
-    };
+    const params = bundle.settingsParams;
     expect(
       withPluginCache(bundle.cache, () => loadEnabledBundleAgentSettingsSnapshot(params))
         .hideThinkingBlock,

@@ -26,6 +26,16 @@ afterAll(async () => {
   await receipts.close();
 });
 
+function toolBytes(tools: Awaited<ReturnType<typeof materializeBundleMcpToolsForRun>>["tools"]) {
+  return JSON.stringify(
+    tools.map(({ name, description, parameters }) => ({
+      name,
+      description,
+      parameters,
+    })),
+  );
+}
+
 it.skipIf(process.platform === "win32")(
   "prepares the same session after removing an unavailable process-group server",
   async () => {
@@ -122,13 +132,7 @@ it("reconnects after an MCP child process exits", async ({ signal }) => {
 
   try {
     const originalTools = await materializeBundleMcpToolsForRun({ runtime });
-    const originalBytes = JSON.stringify(
-      originalTools.tools.map(({ name, description, parameters }) => ({
-        name,
-        description,
-        parameters,
-      })),
-    );
+    const originalBytes = toolBytes(originalTools.tools);
     await originalTools.dispose();
     await expect(runtime.callTool("child", "slow_tool", {})).resolves.toMatchObject({
       isError: false,
@@ -160,15 +164,7 @@ it("reconnects after an MCP child process exits", async ({ signal }) => {
     );
     const recoveringTools = await materializeBundleMcpToolsForRun({ runtime });
     try {
-      expect(
-        JSON.stringify(
-          recoveringTools.tools.map(({ name, description, parameters }) => ({
-            name,
-            description,
-            parameters,
-          })),
-        ),
-      ).toBe(originalBytes);
+      expect(toolBytes(recoveringTools.tools)).toBe(originalBytes);
       expect(recoveringTools.diagnostics).toEqual([
         expect.objectContaining({ serverName: "child", message: "mcp transport closed" }),
       ]);

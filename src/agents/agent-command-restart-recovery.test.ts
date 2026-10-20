@@ -10,6 +10,9 @@ import {
 import { hasMessagingToolDeliveryToSource } from "./subagents/announce/subagent-announce-completion-delivery.js";
 import { createDirectAnnounceResponseClassifier } from "./subagents/announce/subagent-announce-direct-response.js";
 
+const session = { sessionId: "session-1", updatedAt: 1 };
+const target = { provider: "discord", to: "channel:123" };
+
 describe("buildCurrentRunRestartRecoveryClaim", () => {
   const scopedPolicy = {
     restartRecoveryDisableMessageTool: true,
@@ -23,8 +26,7 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
       buildCurrentRunRestartRecoveryClaim({
         disableMessageTool: true,
         entry: {
-          sessionId: "session-1",
-          updatedAt: 1,
+          ...session,
           restartRecoveryDeliveryMediaUrls: ["/tmp/old.png"],
           restartRecoverySuppressTextDelivery: true,
         },
@@ -48,15 +50,10 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
   it("preserves the claimed route when delivery preparation resolves an alias", () => {
     expect(
       buildCurrentRunRestartRecoveryClaim({
-        deliveryContext: {
-          channel: "telegram",
-          to: "telegram:-100123:topic:1",
-          threadId: 1,
-        },
+        deliveryContext: { channel: "telegram", to: "telegram:-100123:topic:1", threadId: 1 },
         entry: {
           ...scopedPolicy,
-          sessionId: "session-1",
-          updatedAt: 1,
+          ...session,
           restartRecoveryDeliveryRunId: "recovery-run",
           restartRecoveryDeliveryContext: { channel: "telegram", to: "-100123", threadId: 1 },
         },
@@ -72,7 +69,7 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
   it("requires explicit ownership for a new source claim", () => {
     expect(() =>
       buildCurrentRunRestartRecoveryClaim({
-        entry: { sessionId: "session-1", updatedAt: 1 },
+        entry: session,
         runId: "media-run",
         sourceRunId: "media-run",
       }),
@@ -92,8 +89,7 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
     ]);
     return getRestartRecoveryTerminalDeliveryEvidence(
       {
-        sessionId: "session-1",
-        updatedAt: 1,
+        ...session,
         restartRecoveryTerminalDeliveryEvidence: JSON.parse(persisted),
       },
       "original",
@@ -122,52 +118,39 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
     tryTextCompletionDirectDelivery: async () => undefined,
   });
 
+  const delivery = (result: TerminalDeliveryInput) => classify({ status: "ok", result });
+  const suppressedOutcomes = (reason: string, count = 65): PayloadOutcome[] =>
+    Array.from({ length: count }, (_, index) => ({ index, status: "suppressed", reason }));
+  const silent = { terminalReply: { disposition: "silent" as const } };
+
   it.each([
-    {
-      name: "intentional silent final",
-      result: { meta: { terminalReply: { disposition: "silent" } } },
-      delivered: true,
+    ["intentional silent final", { meta: silent }, true],
+    ["unsettled yielded silence", { meta: { ...silent, yielded: true } }, false],
+    ["pending continuation", { meta: { ...silent, continuationPending: true } }, false],
+    ["aborted silent run", { meta: { ...silent, aborted: true } }, false],
+    [
+      "failed silent run",
+      { meta: { ...silent, error: new Error("private synthetic failure") } },
+      false,
+    ],
+    [
+      "host-settled yielded continuation",
+      { meta: { yielded: true }, requesterContinuationSettled: true },
+      true,
+    ],
+    ["legacy empty receipt", { payloads: [] }, false],
+  ] satisfies Array<[string, TerminalDeliveryInput, boolean]>)(
+    "replays %s without inventing visible delivery",
+    async (_name, result, delivered) => {
+      const stored = project(result);
+      const classified = await delivery(stored);
+      expect(classified).toMatchObject({ delivered, path: "direct" });
+      expect(JSON.stringify(stored)).not.toContain("private synthetic failure");
+      if (!delivered) {
+        expect(classified).toMatchObject({ reason: "visible_reply_missing" });
+      }
     },
-    {
-      name: "unsettled yielded silence",
-      result: { meta: { terminalReply: { disposition: "silent" }, yielded: true } },
-      delivered: false,
-    },
-    {
-      name: "pending continuation",
-      result: { meta: { terminalReply: { disposition: "silent" }, continuationPending: true } },
-      delivered: false,
-    },
-    {
-      name: "aborted silent run",
-      result: { meta: { terminalReply: { disposition: "silent" }, aborted: true } },
-      delivered: false,
-    },
-    {
-      name: "failed silent run",
-      result: {
-        meta: {
-          terminalReply: { disposition: "silent" },
-          error: new Error("private synthetic failure"),
-        },
-      },
-      delivered: false,
-    },
-    {
-      name: "host-settled yielded continuation",
-      result: { meta: { yielded: true }, requesterContinuationSettled: true },
-      delivered: true,
-    },
-    { name: "legacy empty receipt", result: { payloads: [] }, delivered: false },
-  ])("replays $name without inventing visible delivery", async ({ result, delivered }) => {
-    const stored = project(result);
-    const delivery = await classify({ status: "ok", result: stored });
-    expect(delivery).toMatchObject({ delivered, path: "direct" });
-    expect(JSON.stringify(stored)).not.toContain("private synthetic failure");
-    if (!delivered) {
-      expect(delivery).toMatchObject({ reason: "visible_reply_missing" });
-    }
-  });
+  );
 
   it.each([
     { reason: "no_visible_payload", expected: { reason: "visible_reply_missing" } },
@@ -206,23 +189,19 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
           resultCount: 0,
           reason: "cancelled_by_message_sending_hook",
           payloadOutcomes: [
-            ...Array.from({ length: 64 }, (_, index): PayloadOutcome => ({
-              index,
-              status: "suppressed",
-              reason: "cancelled_by_message_sending_hook",
-            })),
+            ...suppressedOutcomes("cancelled_by_message_sending_hook", 64),
             { index: 64, ...lastOutcome },
           ],
         },
       } satisfies TerminalDeliveryInput;
-      expect(await classify({ status: "ok", result: original })).toMatchObject({
+      expect(await delivery(original)).toMatchObject({
         delivered: false,
         disposition: "ambiguous",
       });
       const stored = project(original);
       expect(stored?.deliveryStatus?.payloadOutcomes).toHaveLength(64);
       expect(stored?.deliveryStatus?.payloadOutcomes?.[63]).toEqual({ index: 64, ...lastOutcome });
-      expect(await classify({ status: "ok", result: stored })).toMatchObject({
+      expect(await delivery(stored)).toMatchObject({
         delivered: false,
         disposition: "ambiguous",
       });
@@ -235,11 +214,10 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
         status: "suppressed",
         resultCount: 0,
         reason: "no_visible_payload",
-        payloadOutcomes: Array.from({ length: 65 }, (_, index): PayloadOutcome => ({
-          index,
-          status: "suppressed",
-          reason: index < 64 ? "no_visible_payload" : "cancelled_by_message_sending_hook",
-        })),
+        payloadOutcomes: [
+          ...suppressedOutcomes("no_visible_payload", 64),
+          { index: 64, status: "suppressed", reason: "cancelled_by_message_sending_hook" },
+        ],
       },
     } satisfies TerminalDeliveryInput;
     const expected = {
@@ -247,8 +225,8 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
       disposition: "intentional_non_delivery",
       reason: "delivery_suppressed",
     };
-    expect(await classify({ status: "ok", result: original })).toMatchObject(expected);
-    expect(await classify({ status: "ok", result: project(original) })).toMatchObject(expected);
+    expect(await delivery(original)).toMatchObject(expected);
+    expect(await delivery(project(original))).toMatchObject(expected);
   });
 
   it("bounds suppression reasons and outcomes without retaining raw terminal objects", () => {
@@ -260,11 +238,7 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
       deliveryStatus: {
         status: "suppressed",
         reason: "x".repeat(300),
-        payloadOutcomes: Array.from({ length: 65 }, (_, index): PayloadOutcome => ({
-          index,
-          status: "suppressed",
-          reason: "y".repeat(300),
-        })),
+        payloadOutcomes: suppressedOutcomes("y".repeat(300)),
       },
     });
     expect(evidence?.meta).toEqual({ terminalReply: { disposition: "silent" }, error: true });
@@ -304,17 +278,9 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
   it.each([false, true])(
     "retains the source final marker %s through durable projection",
     (sourceReplyFinal) => {
-      const original = {
-        messagingToolSentTargets: [
-          {
-            provider: "discord",
-            to: "channel:123",
-            text: "reply",
-            sourceReplyFinal,
-          },
-        ],
-      };
-      const stored = project(original);
+      const stored = project({
+        messagingToolSentTargets: [{ ...target, text: "reply", sourceReplyFinal }],
+      });
       expect(stored?.messagingToolSentTargets?.[0]?.sourceReplyFinal).toBe(sourceReplyFinal);
       expect(
         hasMessagingToolDeliveryToSource(
@@ -367,16 +333,13 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
     const evidence = buildRestartRecoveryTerminalDeliveryEvidence({
       didSendViaMessagingTool: true,
       messagingToolSentMediaUrls: ["/tmp/one.png", "/tmp/two.png"],
-      messagingToolSentTargets: [
-        { provider: "discord", to: "channel:123", mediaUrls: ["/tmp/one.png"] },
-      ],
+      messagingToolSentTargets: [{ ...target, mediaUrls: ["/tmp/one.png"] }],
     });
 
     expect(evidence?.messagingToolAggregateEvidenceUnaccounted).toBe(true);
     expect(evidence?.messagingToolSentTargets).toEqual([
       {
-        provider: "discord",
-        to: "channel:123",
+        ...target,
         mediaUrls: ["/tmp/one.png"],
         visible: true,
       },
@@ -385,11 +348,9 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
 
   it("preserves explicit negative messaging-target visibility", () => {
     const evidence = buildRestartRecoveryTerminalDeliveryEvidence({
-      messagingToolSentTargets: [{ provider: "discord", to: "channel:123", text: "" }],
+      messagingToolSentTargets: [{ ...target, text: "" }],
     });
 
-    expect(evidence?.messagingToolSentTargets).toEqual([
-      { provider: "discord", to: "channel:123", visible: false },
-    ]);
+    expect(evidence?.messagingToolSentTargets).toEqual([{ ...target, visible: false }]);
   });
 });
