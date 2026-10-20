@@ -1606,6 +1606,7 @@ src/plugins/plugin-registry-contributions.ts
 src/plugins/plugin-registry-id-normalizer.ts
 src/plugins/plugin-registry-snapshot.ts
 src/plugins/plugin-registry.ts
+src/plugins/plugin-retention-diagnostics.ts
 src/plugins/plugin-return-value.ts
 src/plugins/plugin-tool-execution.ts
 src/plugins/plugin-runtime-artifact-identity.ts
@@ -2174,6 +2175,7 @@ src/config/sessions/session-cold-storage-read.ts
 src/config/sessions/session-entry-read-errors.ts
 src/config/sessions/session-transcript-append-postimage.ts
 src/config/sessions/session-transcript-fts.ts
+src/config/sessions/session-transcript-index-postgres.ts
 src/config/sessions/session-transcript-index.ts
 src/config/sessions/session-transcript-projection-append.ts
 src/config/sessions/session-transcript-projection-rebuild.ts
