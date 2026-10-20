@@ -31,9 +31,9 @@ export async function expectComposerSurface(composer: Locator, accessible = fals
   });
 }
 
-export async function readArtwork(shell: Locator) {
+export async function readArtwork(shell: Locator, capturePixels = false) {
   await shell.evaluate(finishElementAnimations);
-  return shell.evaluate(async (element) => {
+  return shell.evaluate(async (element, includePixels) => {
     const style = getComputedStyle(element);
     const probe = document.createElement("div");
     probe.style.backgroundImage = "var(--app-background-image)";
@@ -68,7 +68,8 @@ export async function readArtwork(shell: Locator) {
       throw new Error("Cannot inspect decoded app artwork");
     }
     pixels.drawImage(image, 0, 0);
-    const fingerprint = canvas.toDataURL();
+    // Only the desktop uniqueness check consumes the full PNG fingerprint.
+    const fingerprint = includePixels ? canvas.toDataURL() : "";
     const data = pixels.getImageData(0, 0, canvas.width, canvas.height).data;
     let paintedPixels = 0;
     let maxColorSpread = 0;
@@ -224,7 +225,7 @@ export async function readArtwork(shell: Locator) {
         ...opaqueAncestors.map((name) => `opaque ancestor: ${name}`),
       ],
     };
-  });
+  }, capturePixels);
 }
 
 export function expectAppArtwork(artwork: Awaited<ReturnType<typeof readArtwork>>, label: string) {

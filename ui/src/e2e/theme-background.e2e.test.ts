@@ -121,7 +121,7 @@ suite.define(() => {
               }
             }
             const label = `${resolved}-${route.replace("/", "-")}-${viewport}`;
-            const artwork = await readArtwork(shell);
+            const artwork = await readArtwork(shell, route === "new" && viewport === "desktop");
             expectAppArtwork(artwork, label);
             const minimumContrast = selection.family === "beacon" ? 7 : 4.5;
             expect
