@@ -19,74 +19,26 @@ afterEach(() => {
   tempDirs.cleanup();
 });
 
-it("dispatches an admitted agent-only send while another agent is preparing", async () => {
-  recordAgentDatabaseAdmissions(
-    [
-      createAgentDatabaseInspectionRefusal({
-        agentId: "main",
-        paths: [],
-        reason: "Synthetic inspection is pending.",
-        pending: true,
-      }),
-    ],
-    { source: "startup" },
-  );
+function createSend(hasPendingAgents: boolean, idempotencyKey = "agent-only-startup") {
+  const startup = {
+    hasPendingAgents,
+    waitForAgentPreparation: () => {
+      throw new Error("Send must not wait for startup preparation");
+    },
+  };
   const handler = vi.fn<GatewayRequestHandler>(({ respond }) => respond(true, { sent: true }));
-  const respond = await sendAuthorizationRequest(
-    "send",
-    {
-      agentId: "work",
-      to: "channel:C1",
-      channel: "slack",
-      message: "hello",
-      idempotencyKey: "healthy-agent-send",
-    },
-    {
-      scopes: ["operator.admin"],
-      context: {
-        getRuntimeConfig: () => ({
-          agents: { ownership: "explicit", entries: { main: {}, work: {} } },
-        }),
-        agentDatabaseStartup: {
-          hasPendingAgents: true,
-          waitForAgentPreparation: () => {
-            throw new Error("An admitted send must not wait for startup preparation");
-          },
-        },
-      },
-      extraHandlers: { send: handler },
-    },
-  );
-  expect(respond).toHaveBeenCalledWith(true, { sent: true });
-  expect(handler).toHaveBeenCalledTimes(1);
-});
-
-it.each([true, false])(
-  "refuses an agent-only send before dispatch while inspection is pending=%s",
-  async (pending) => {
-    const refusal = createAgentDatabaseInspectionRefusal({
-      agentId: "work",
-      paths: [],
-      reason: pending ? "Synthetic inspection is pending." : "Synthetic inspection failed.",
-      pending,
-    });
-    recordAgentDatabaseAdmissions([refusal], { source: "startup" });
-    const handler = vi.fn<GatewayRequestHandler>(({ respond }) => respond(true, { sent: true }));
-    const startup = {
-      hasPendingAgents: pending,
-      waitForAgentPreparation: () => {
-        throw new Error("Writes must refuse without waiting for startup preparation");
-      },
-    };
-    const send = () =>
+  return {
+    handler,
+    startup,
+    send: () =>
       sendAuthorizationRequest(
         "send",
         {
           agentId: "work",
-          channel: "slack",
           to: "channel:C1",
+          channel: "slack",
           message: "hello",
-          idempotencyKey: "agent-only-startup",
+          idempotencyKey,
         },
         {
           scopes: ["operator.admin"],
@@ -98,7 +50,34 @@ it.each([true, false])(
           },
           extraHandlers: { send: handler },
         },
-      );
+      ),
+  };
+}
+
+function recordRefusal(agentId: string, pending: boolean) {
+  const refusal = createAgentDatabaseInspectionRefusal({
+    agentId,
+    paths: [],
+    pending,
+    reason: pending ? "Synthetic inspection is pending." : "Synthetic inspection failed.",
+  });
+  recordAgentDatabaseAdmissions([refusal], { source: "startup" });
+  return refusal;
+}
+
+it("dispatches an admitted agent-only send while another agent is preparing", async () => {
+  recordRefusal("main", true);
+  const { handler, send } = createSend(true, "healthy-agent-send");
+  const respond = await send();
+  expect(respond).toHaveBeenCalledWith(true, { sent: true });
+  expect(handler).toHaveBeenCalledTimes(1);
+});
+
+it.each([true, false])(
+  "refuses an agent-only send before dispatch while inspection is pending=%s",
+  async (pending) => {
+    const refusal = recordRefusal("work", pending);
+    const { handler, send, startup } = createSend(pending);
 
     const respond = await send();
     expect(handler).not.toHaveBeenCalled();
