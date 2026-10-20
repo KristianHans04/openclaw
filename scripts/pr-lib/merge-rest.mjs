@@ -1,7 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { isDirectRunUrl } from "../lib/direct-run.mjs";
 import { parseGithubResponse } from "./gh-api-preflight.mjs";
 import { execPrGh, execPrGhAsync, execPrGhJson } from "./github.mjs";
@@ -86,10 +83,10 @@ function verifyOverrideReviews(repo, pr, head, policy) {
   verifyMergeReviews(policy, head, parseGithubResponse(response));
 }
 
-async function verifyOverrideChecks(repo, pr, snapshot, checks, dispatching) {
+async function verifyOverrideChecks(repo, pr, snapshot, checks) {
   const failed = checks.filter((check) => check.bucket !== "pass");
   if (failed.length === 0) {
-    return;
+    return undefined;
   }
   const combined = checks.filter(
     (check) => check.name === "openclaw/ci-gate" && check.statusId !== undefined,
@@ -119,9 +116,7 @@ async function verifyOverrideChecks(repo, pr, snapshot, checks, dispatching) {
     main: snapshot.main,
     statusId: combined[0].statusId,
   });
-  if (dispatching) {
-    verifyPriorCiSecurityMainSources(security, snapshot.main);
-  }
+  return (qualifiedMain) => verifyPriorCiSecurityMainSources(security, qualifiedMain);
 }
 
 function requireEvidence(condition, message) {
@@ -753,7 +748,7 @@ function* requiredMergeChecksSteps(
     }
   }
   for (const check of candidates) {
-    if (check.status !== "completed" || check.conclusion !== "success") {
+    if (check.status !== "completed" || (!allowFailedSuites && check.conclusion !== "success")) {
       continue;
     }
     const suite = suites.find((value) => value.id === check.check_suite?.id);
@@ -766,7 +761,9 @@ function* requiredMergeChecksSteps(
         (suite.conclusion === "success" ||
           (allowFailedSuites &&
             ["fail", "cancel"].includes(bucket((suite.conclusion ?? "UNKNOWN").toUpperCase())))),
-      "required check suite is not freshly successful",
+      allowFailedSuites
+        ? "required check suite is not complete for the prepared head"
+        : "required check suite is not freshly successful",
     );
   }
   const rows = [];
@@ -1087,9 +1084,10 @@ async function main(args) {
           allowFailedSuites: overrideFailingCi,
         })
       : undefined;
-  if (overrideFailingCi && checks !== undefined) {
-    await verifyOverrideChecks(repo, pr, snapshot, checks, mode === "merge");
-  }
+  const verifyOverrideSecuritySources =
+    overrideFailingCi && checks !== undefined
+      ? await verifyOverrideChecks(repo, pr, snapshot, checks)
+      : undefined;
   if (mode !== "checks" && checks !== undefined) {
     requireEvidence(
       priorCiObservation || overrideFailingCi || checks.every((check) => check.bucket === "pass"),
@@ -1176,44 +1174,33 @@ async function main(args) {
     );
     if (overrideFailingCi) {
       verifyOverrideReviews(repo, pr, head, snapshot.policy);
-      const directory = mkdtempSync(join(tmpdir(), "openclaw-pr-admin-"));
-      try {
-        const bodyPath = join(directory, "body");
-        writeFileSync(bodyPath, body, { mode: 0o600 });
-        console.error(
-          "Merging with maintainer-approved unrelated CI failures; no CI success is claimed.",
-        );
-        execPrGh(
-          [
-            "pr",
-            "merge",
-            String(pr),
-            "--repo",
-            repo.url,
-            "--admin",
-            "--squash",
-            "--match-head-commit",
-            head,
-            "--body-file",
-            bodyPath,
-          ],
-          { encoding: "utf8" },
-          "plain",
-        );
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
-      }
-      process.stdout.write('{"admin":true}\n');
-      return;
+      // finishRead may observe forward main movement after awaited security work.
+      // Bind its retained publisher proof to that final tip, not the starting tip.
+      verifyOverrideSecuritySources?.(snapshot.main);
+      console.error(
+        "Merging with maintainer-approved unrelated CI failures; no CI success is claimed.",
+      );
+      // Like prior-CI admin admission, use the protected synchronous endpoint.
+      // Native --admin is not a supported Octopool rewrite shape.
+      result = execPrGhJson(
+        apiArgs(repo, `/pulls/${pr}/merge`, ["--method", "PUT", "--input", "-"]),
+        { input: JSON.stringify({ sha: head, merge_method: "squash", commit_message: body }) },
+        "plain",
+      );
+      requireEvidence(
+        result?.merged === true && OID.test(result.sha ?? ""),
+        "admin merge response is unconfirmed; reconcile the retained intent without resubmitting",
+      );
+    } else {
+      const payload = {
+        sha: head,
+        merge_method: "squash",
+        merge_action: "direct_merge",
+        bypass_rules: false,
+        commit_message: body,
+      };
+      result = asyncMergeResponse(repo, pr, head, undefined, payload);
     }
-    const payload = {
-      sha: head,
-      merge_method: "squash",
-      merge_action: "direct_merge",
-      bypass_rules: false,
-      commit_message: body,
-    };
-    result = asyncMergeResponse(repo, pr, head, undefined, payload);
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }

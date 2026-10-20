@@ -54,7 +54,7 @@ another API. Completion comments use the receipt observation's transport and kee
 their one-attempt marker. Auto-merge, queues, admin admission, and non-squash merges
 require GraphQL; GitHub has no REST auto-merge endpoint. The explicit
 [failing-CI override](/reference/scripts/merge-admission#maintainer-approved-failing-ci)
-uses REST admission plus GraphQL review checks and protected native CLI admin
+uses REST admission plus GraphQL review checks and protected synchronous REST admin
 dispatch instead. Legacy hosted workflow
 proof requires REST. Fallback never waives a required gate.
 API failures preserve safe quota and retry metadata from the original response.

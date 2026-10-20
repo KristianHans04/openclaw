@@ -232,6 +232,7 @@ export function createMergeOutcomeFixtureHarness() {
         commit_message: string;
       },
       restMergeRefusal: "",
+      protectedMerge: false,
       asyncMergeStatus: "",
       asyncMergeFault: "",
       asyncPolls: 0,
@@ -687,6 +688,8 @@ else if(args[0]==="pr"&&args[1]==="view") {
   if(s.asyncMergeFault==="sha") result.details.sha="f".repeat(40);
   out("HTTP/2.0 200 OK\\n\\n"+JSON.stringify(result));
 } else if((args[0]==="pr"&&args[1]==="merge")||restMerge||graphqlMerge) {
+  // The protected writer supports pinned REST merges, not native --admin.
+  if(s.protectedMerge&&args.includes("--admin")) fail("string rewrite protection blocked unsupported --admin");
   if(s.mode==="octopool-refusal") {
     if(process.env.OCTOPOOL_DIAGNOSTICS!=="1"||!args.includes("--subject")) fail("missing protected merge publication inputs");
     save();process.stderr.write(s.refusalCapture);process.exit(1);

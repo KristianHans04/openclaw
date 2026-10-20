@@ -21,8 +21,10 @@ title: "PR merge admission"
 ## Maintainer-approved failing CI
 
 `scripts/pr merge-run <PR> --override-failing-ci` is an explicit immediate admin
-squash for maintainer-approved, definitely unrelated CI failures. It uses protected
-`gh pr merge --admin --squash --match-head-commit <prepared-head> --body-file <file>`.
+squash for maintainer-approved, definitely unrelated CI failures. It uses the same
+protected synchronous REST `PUT /repos/OWNER/REPO/pulls/NUMBER/merge` contract as
+prior-CI admin admission, with the prepared `sha`, `merge_method: "squash"`, and
+captured `commit_message`. The protected writer and its rewrite policy stay enabled.
 Record attribution in the existing review/PR; no separate evidence file or second
 confirmation flag is required. A readiness question or an unexplained "ignore CI"
 does not authorize this route.
@@ -32,8 +34,10 @@ guards remain. Admission requires current writer admin access, supported REST
 branch policy and satisfied enforced reviews. Only failed/cancelled GitHub Actions
 `openclaw/ci-gate` checks may be overridden; every other required check must pass.
 The combined CI/security status is independently revalidated through the existing
-security-clearance owner, so failed CI never waives security review. Completed
-mixed-result suites may be admitted; pending/skipped required checks and
+security-clearance owner, so failed CI never waives security review. Publisher
+proof is checked against the final observed main tip immediately before
+dispatch: unrelated forward movement is allowed, changed publisher sources refuse.
+Completed mixed-result suites may be admitted; pending/skipped required checks and
 in-progress reruns may not.
 It cannot be combined with auto-merge, queues, non-squash methods, or the separate
 [structured prior-CI evidence route](/reference/scripts/prior-ci).
@@ -41,7 +45,7 @@ It cannot be combined with auto-merge, queues, non-squash methods, or the separa
 Outcomes retain `route: "admin"` and `overrideFailingCi: true`. Comments and delayed
 completion preserve the failing-CI caveat rather than claiming green CI. Repeated
 invocations reconcile an existing outcome and never replay an uncertain dispatch.
-The protected writer must support the exact CLI shape; a refusal is a capability
+The protected writer must support this REST contract; a refusal is a capability
 blocker, not permission to select a raw binary or another transport.
 
 ## Complete check-suite reads

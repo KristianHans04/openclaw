@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { expect, it } from "vitest";
 import { configureMerge, expectExit, pendingGates } from "./pr-merge-assertions.test-support.js";
 import { createMergeOutcomeFixtureHarness } from "./pr-merge-outcome.test-support.js";
@@ -24,8 +25,9 @@ function failingCiFixture() {
 }
 
 describePosix("maintainer-approved failing CI override", () => {
-  it("requires explicit override, then merges once with pinned admin squash and truthful evidence", () => {
+  it("requires explicit override, then merges once through the protected writer with truthful evidence", () => {
     const f = failingCiFixture();
+    configureMerge(f, { protectedMerge: true });
 
     expectExit(f.run(true), 1);
     expect(f.state().mutations).toBe(0);
@@ -38,10 +40,7 @@ describePosix("maintainer-approved failing CI override", () => {
       head: f.head,
       method: "squash",
     });
-    const merge = f.state().calls.find((args) => args[1] === "pr" && args[2] === "merge");
-    expect(merge).toEqual(
-      expect.arrayContaining(["--admin", "--squash", "--match-head-commit", f.head, "--body-file"]),
-    );
+    expect(f.state().restMergePayload).toMatchObject({ sha: f.head, merge_method: "squash" });
     const [comment] = f.state().comments;
     expect(comment?.body).toContain("maintainer-approved unrelated CI failures");
     expect(comment?.body).toContain("No current-head CI success is claimed");
@@ -53,6 +52,11 @@ describePosix("maintainer-approved failing CI override", () => {
     {
       name: "pending CI",
       changes: { gates: "pending" },
+    },
+    {
+      name: "rerunning failed CI suite",
+      changes: { restSuite: "rerunning" },
+      expected: "required check suite is not complete for the prepared head",
     },
     {
       name: "security clearance",
@@ -117,6 +121,46 @@ describePosix("maintainer-approved failing CI override", () => {
       const admitted = restSuite === "failed";
       expectExit(f.overrideFailingCi(), admitted ? 0 : 1);
       expect(f.state().mutations).toBe(admitted ? 1 : 0);
+    },
+  );
+
+  it.each([false, true])(
+    "binds security proof to the final observed main (publisher changed=%s)",
+    (changed) => {
+      const f = failingCiFixture();
+      let tree = f.tree("before\n", "advanced\n");
+      if (changed) {
+        const index = { GIT_INDEX_FILE: join(f.root, "publisher.index") };
+        const blob = f.git(["hash-object", "-w", "--stdin"], "Changed publisher\n");
+        f.git(["read-tree", tree], undefined, f.repo, index);
+        f.git(
+          ["update-index", "--cacheinfo", `100644,${blob},.github/workflows/security-review.yml`],
+          undefined,
+          f.repo,
+          index,
+        );
+        tree = f.git(["write-tree"], undefined, f.repo, index);
+      }
+      const main = f.commit(tree, [f.base]);
+      configureMerge(f, {
+        protectedMerge: true,
+        restMainAdvance: { boundary: "during-evidence", observed: false, main },
+      });
+
+      expectExit(f.overrideFailingCi(), changed ? 1 : 0);
+      expect(f.state().restMainAdvance).toBeNull();
+      expect(f.state().mutations).toBe(changed ? 0 : 1);
+      if (changed) {
+        expect(
+          f
+            .captures()
+            .map(([, contents]) => contents)
+            .join("\n"),
+        ).toContain("Security Review publisher source differs from the current owner");
+      } else {
+        expect(f.record().phase).toBe("complete");
+        expect(f.git(["show", `${f.record().landed}:sibling.txt`])).toBe("advanced");
+      }
     },
   );
 
