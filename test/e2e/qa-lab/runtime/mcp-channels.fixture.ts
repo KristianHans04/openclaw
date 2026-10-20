@@ -4,8 +4,8 @@
 import crypto from "node:crypto";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { z } from "zod";
 import { resolveGatewaySuccessPayload } from "../../../../scripts/e2e/lib/gateway-frame-payload.mjs";
 import { readMcpChannelLimits } from "../../../../scripts/e2e/mcp-channel-limits.ts";
@@ -17,16 +17,17 @@ import {
 } from "./mcp-client-temp-state.fixture.ts";
 
 const protocolModulePath = "../../../../dist/gateway/protocol/index.js" as string;
+const errorsModulePath = "../../../../dist/infra/errors.js" as string;
 const stringCoerceModulePath = "../../../../dist/normalization-core/string-coerce.js" as string;
-const [{ PROTOCOL_VERSION }, { readStringValue }] = await Promise.all([
+const [{ PROTOCOL_VERSION }, { formatErrorMessage }, { readStringValue }] = await Promise.all([
   import(protocolModulePath) as Promise<
     typeof import("../../../../packages/gateway-protocol/src/index.js")
   >,
+  import(errorsModulePath) as Promise<typeof import("../../../../src/infra/errors.js")>,
   import(stringCoerceModulePath) as Promise<
     typeof import("../../../../packages/normalization-core/src/string-coerce.js")
   >,
 ]);
-
 export const ClaudeChannelNotificationSchema = z.object({
   method: z.literal("notifications/claude/channel"),
   params: z.object({
@@ -454,7 +455,10 @@ export async function connectMcpClient(params: {
     pushBounded(rawMessages, message, MCP_RAW_MESSAGE_RETAIN_LIMIT);
   });
 
-  const client = new Client({ name: "docker-mcp-channels", version: "1.0.0" });
+  const client = new Client(
+    { name: "docker-mcp-channels", version: "1.0.0" },
+    { versionNegotiation: { mode: "legacy" } },
+  );
   try {
     await connectMcpWithTimeout(client, transport, MCP_CONNECT_TIMEOUT_MS);
     return {
@@ -470,4 +474,37 @@ export async function connectMcpClient(params: {
     }
     throw error;
   }
+}
+
+export async function maybeApprovePendingBridgePairing(
+  gateway: GatewayRpcClient,
+): Promise<boolean> {
+  let pairingState:
+    | {
+        pending?: Array<{ requestId?: string; role?: string }>;
+      }
+    | undefined;
+  try {
+    pairingState = await gateway.request<{
+      pending?: Array<{ requestId?: string; role?: string }>;
+    }>("device.pair.list", {});
+  } catch (error) {
+    const message = formatErrorMessage(error);
+    if (
+      message.includes("missing scope: operator.pairing") ||
+      message.includes("device.pair.list")
+    ) {
+      return false;
+    }
+    throw error;
+  }
+  if (!pairingState) {
+    return false;
+  }
+  const pendingRequest = pairingState.pending?.find((entry) => entry.role === "operator");
+  if (!pendingRequest?.requestId) {
+    return false;
+  }
+  await gateway.request("device.pair.approve", { requestId: pendingRequest.requestId });
+  return true;
 }

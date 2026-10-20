@@ -2,7 +2,10 @@
 
 import { createComponent, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { pathForClawCatalogEntry } from "../../app-route-paths.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
+import { waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { ClawsPage } from "../claws/page.tsx";
 import { page as clawsRoute } from "../claws/route.ts";
 import {
   cleanupAgentsHomePageTest,
@@ -10,30 +13,33 @@ import {
   setupAgentsHomePageTest,
   workflowOperator,
 } from "./agents-home-page.test-helpers.ts";
-import { ClawsCatalogDialog } from "./claws-catalog-dialog.tsx";
 
 beforeEach(setupAgentsHomePageTest);
 afterEach(cleanupAgentsHomePageTest);
 
-function createDetail(
-  options: Parameters<typeof createPage>[0],
-  initialEntry: typeof workflowOperator | null = workflowOperator,
-) {
+function createDetail(options: Parameters<typeof createPage>[0]) {
   const fixture = createPage(options);
-  const [packageName, setPackageName] = createSignal<string>(workflowOperator.packageName);
+  const [location, setLocation] = createSignal({
+    pathname: pathForClawCatalogEntry(workflowOperator.packageName, ""),
+    search: "",
+    hash: "",
+  });
   const view = mountSolid(
     () =>
-      createComponent(ClawsCatalogDialog, {
-        initialEntry,
-        get initialPackageName() {
-          return packageName();
+      createComponent(ClawsPage, {
+        get routeData() {
+          return { location: location(), basePath: "" };
         },
-        pageMode: true,
       }),
     { wrapper: fixture.wrapper },
   );
   onTestFinished(view.unmount);
-  return { ...fixture, detail: view.container, setPackageName };
+  return {
+    ...fixture,
+    detail: view.container,
+    setPackageName: (packageName: string) =>
+      setLocation({ pathname: pathForClawCatalogEntry(packageName, ""), search: "", hash: "" }),
+  };
 }
 
 describe("Claws discovery", () => {
@@ -90,27 +96,28 @@ describe("Claws discovery", () => {
     }
   });
 
-  it.each(["/claws", "/claws/workflow-operator"])(
-    "rejects direct visits to %s while Labs is disabled",
-    async (pathname) => {
-      const { context, page, request, ensureConfigLoaded } = createPage({ pathname });
-      const location = { pathname, search: "", hash: "" };
-      const result = await clawsRoute.loader!(context, {
-        location,
-        signal: new AbortController().signal,
-        shouldRun: () => true,
-        revalidating: false,
-        cause: "navigation",
-        deps: clawsRoute.loaderDeps!(context, location),
-      });
-      expect(result).toEqual({ type: "notFound", data: undefined });
-      expect(ensureConfigLoaded).toHaveBeenCalledOnce();
-      expect(page.textContent).toContain("Claws is disabled");
-      expect(page.querySelector("[data-claws-explore]")).toBeNull();
-      expect(page.querySelector("[data-claws-confirm]")).toBeNull();
-      expect(request.mock.calls.some(([method]) => method.startsWith("claws."))).toBe(false);
-    },
-  );
+  it.each([
+    "/claws",
+    "/claws/workflow-operator",
+    "/claws/packages/%40openclaw%2Fworkflow-operator",
+  ])("rejects direct visits to %s while Labs is disabled", async (pathname) => {
+    const { context, page, request, ensureConfigLoaded } = createPage({ pathname });
+    const location = { pathname, search: "", hash: "" };
+    const result = await clawsRoute.loader!(context, {
+      location,
+      signal: new AbortController().signal,
+      shouldRun: () => true,
+      revalidating: false,
+      cause: "navigation",
+      deps: clawsRoute.loaderDeps!(context, location),
+    });
+    expect(result).toEqual({ type: "notFound", data: undefined });
+    expect(ensureConfigLoaded).toHaveBeenCalledOnce();
+    expect(page.textContent).toContain("Claws is disabled");
+    expect(page.querySelector("[data-claws-explore]")).toBeNull();
+    expect(page.querySelector("[data-claws-confirm]")).toBeNull();
+    expect(request.mock.calls.some(([method]) => method.startsWith("claws."))).toBe(false);
+  });
 
   it("removes discovery when the Labs toggle is disabled during a visit", async () => {
     const { page, setClawsEnabled } = createPage({ clawsEnabled: true });
@@ -132,7 +139,7 @@ describe("Claws discovery", () => {
 
     page.querySelector<HTMLButtonElement>(".agents-home__claw-card-link")?.click();
     expect(navigate).toHaveBeenCalledWith("claws", {
-      pathname: "/claws/workflow-operator",
+      pathname: "/claws/packages/%40openclaw%2Fworkflow-operator",
     });
     expect(request).toHaveBeenCalledWith("claws.catalog.search", {});
   });
@@ -141,7 +148,7 @@ describe("Claws discovery", () => {
     const { page, request } = createPage({ clawsEnabled: true });
     await vi.waitFor(() => expect(page.querySelectorAll("[data-claws-entry]")).toHaveLength(1));
 
-    const search = page.querySelector<HTMLInputElement>("[data-claws-explore] [data-claws-search]");
+    const search = page.querySelector<HTMLInputElement>("[data-claws-search]");
     expect(search).not.toBeNull();
     search!.value = "missing";
     search!.dispatchEvent(new Event("input", { bubbles: true }));
@@ -180,12 +187,21 @@ describe("Claws discovery", () => {
     });
   });
 
-  it("clears a selected Claw when the detail route changes", async () => {
-    const { detail, request, setPackageName } = createDetail({ clawsEnabled: true }, null);
+  it("retains the selected Claw on revalidation and clears it when the package changes", async () => {
+    const { detail, request, setPackageName } = createDetail({ clawsEnabled: true });
 
     await vi.waitFor(() =>
       expect(detail.querySelector(".plugin-capabilities")?.textContent).toContain("AGENTS.md"),
     );
+    const selected = detail.querySelector(".plugin-capabilities");
+    const searches = request.mock.calls.filter(([method]) => method === "claws.catalog.search");
+    setPackageName(workflowOperator.packageName);
+    await waitForSolid(() => {
+      expect(detail.querySelector(".plugin-capabilities")).toBe(selected);
+      expect(request.mock.calls.filter(([method]) => method === "claws.catalog.search")).toEqual(
+        searches,
+      );
+    });
     setPackageName("@openclaw/another-claw");
 
     await vi.waitFor(() =>
@@ -203,10 +219,10 @@ describe("Claws discovery", () => {
     const applyWait = new Promise<void>((resolve) => {
       finishApply = resolve;
     });
-    const { detail, request, setPackageName } = createDetail(
-      { clawsEnabled: true, applyWait },
-      null,
-    );
+    const { detail, request, navigate, setPackageName } = createDetail({
+      clawsEnabled: true,
+      applyWait,
+    });
 
     await vi.waitFor(() =>
       expect(detail.querySelector<HTMLButtonElement>("[data-claws-confirm] button")?.disabled).toBe(
@@ -227,6 +243,14 @@ describe("Claws discovery", () => {
       ),
     );
     finishApply?.();
+    detail.querySelector<HTMLButtonElement>("[data-claws-confirm] button")?.click();
+    await vi.waitFor(() =>
+      expect(navigate).toHaveBeenCalledWith(
+        "chat",
+        expect.objectContaining({ pathname: "/chat/workflow-operator-2" }),
+      ),
+    );
+    expect(navigate.mock.calls.filter(([route]) => route === "chat")).toHaveLength(1);
   });
 
   it("asks before acknowledging a ClawHub trust warning", async () => {

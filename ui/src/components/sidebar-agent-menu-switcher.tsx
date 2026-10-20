@@ -6,8 +6,10 @@ import { t } from "../lib/reactive/i18n.ts";
 import { normalizeAgentId } from "../lib/sessions/session-key.ts";
 import { Icon } from "./solid/icon.tsx";
 import { AgentIdentityAvatar } from "./solid/identity-avatar.tsx";
-import type { MenuEntry, MenuItem } from "./solid/menu.tsx";
+import type { MenuControls, MenuEntry, MenuItem } from "./solid/menu.tsx";
+
 export const AGENT_VALUE_PREFIX = "agent:";
+
 export type SidebarAgentMenuSwitcherParams = {
   activeId: string;
   allAgentsScope: boolean;
@@ -16,12 +18,12 @@ export type SidebarAgentMenuSwitcherParams = {
   pendingAgent?: GatewayAgentRow;
   recentlyCreatedAgentId?: string;
   identities: ReadonlyMap<string, AgentIdentityResult>;
-  pinnedAgentIds: readonly string[];
   resolveAvatarUrl: (url: string) => string | null;
   avatarErrorHandler: (url: string) => () => void;
   agentUnreadCount: (agentId: string) => number;
   onAgentSettings: (agentId: string) => void;
 };
+
 function renderAgentAvatar(
   readAgent: () => GatewayAgentRow,
   params: SidebarAgentMenuSwitcherParams,
@@ -54,6 +56,7 @@ function renderAgentAvatar(
     />
   );
 }
+
 function renderAgentGroupAvatar(
   agents: readonly GatewayAgentRow[],
   params: SidebarAgentMenuSwitcherParams,
@@ -85,10 +88,12 @@ function renderAgentGroupAvatar(
     </span>
   );
 }
+
 function renderAgentRow(
   readAgent: () => GatewayAgentRow,
   params: SidebarAgentMenuSwitcherParams,
   readAutofocus: () => boolean,
+  controls?: MenuControls,
 ) {
   const agentId = createMemo(() => normalizeAgentId(readAgent().id));
   const pending = createMemo(() => params.pendingAgent?.id === agentId());
@@ -121,10 +126,7 @@ function renderAgentRow(
     },
     content: (
       <span class="sidebar-agent-menu__agent-row">
-        <span class="sidebar-agent-menu__agent-avatar">
-          {" "}
-          {renderAgentAvatar(readAgent, params)}{" "}
-        </span>
+        <span class="sidebar-agent-menu__agent-avatar">{renderAgentAvatar(readAgent, params)}</span>
         <span class="agent-select__option-copy">
           <span class="agent-select__option-heading">
             <span class="agent-select__option-label">{label()}</span>
@@ -140,6 +142,7 @@ function renderAgentRow(
             </span>
           ) : (
             <button
+              ref={controls?.ref()}
               type="button"
               class="sidebar-agent-menu__settings"
               aria-label={t("agentChip.namedSettings", { name: label() })}
@@ -159,20 +162,18 @@ function renderAgentRow(
     ),
   } satisfies MenuItem;
 }
-export function renderSidebarAgentMenuSwitcher(params: SidebarAgentMenuSwitcherParams) {
+
+export function renderSidebarAgentMenuSwitcher(
+  params: SidebarAgentMenuSwitcherParams,
+  controls?: MenuControls,
+): MenuEntry[] {
   const agents = createMemo(() => {
-    const pinnedIds = new Set(params.pinnedAgentIds.map(normalizeAgentId));
     const pending = params.pendingAgent;
     const roster = pending
-      ? [pending, ...params.agents.filter((agent) => agent.id !== pending.id)]
-      : params.agents;
+      ? [pending, ...params.agents.filter((agent) => normalizeAgentId(agent.id) !== pending.id)]
+      : [...params.agents];
     const firstId = pending?.id ?? params.recentlyCreatedAgentId;
-    return roster.toSorted(
-      (a, b) =>
-        Number(b.id === firstId) - Number(a.id === firstId) ||
-        Number(pinnedIds.has(normalizeAgentId(b.id))) -
-          Number(pinnedIds.has(normalizeAgentId(a.id))),
-    );
+    return roster.toSorted((a, b) => Number(b.id === firstId) - Number(a.id === firstId));
   });
   const autofocusAll = createMemo(
     () => params.openMode === "click" && params.allAgentsScope && agents().length > 1,
@@ -186,7 +187,7 @@ export function renderSidebarAgentMenuSwitcher(params: SidebarAgentMenuSwitcherP
   if (agents().length === 0) {
     return entries;
   }
-  if (params.agents.length > 1) {
+  if (agents().length > 1) {
     entries.push({
       id: "scope:all",
       label: t("agentChip.showAll"),
@@ -214,6 +215,7 @@ export function renderSidebarAgentMenuSwitcher(params: SidebarAgentMenuSwitcherP
         () => agent,
         params,
         () => agent === autofocusAgent(),
+        controls,
       ),
     );
   }

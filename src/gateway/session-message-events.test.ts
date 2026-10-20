@@ -32,6 +32,10 @@ import {
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
 import { resolveCurrentUserProfileDisplay } from "./current-user-profile-display.js";
+import {
+  connectSessionClient,
+  sessionClientCredentialPath,
+} from "./session-message-client.test-support.js";
 import { registerCronSessionCompletionEventTests } from "./session-message-cron.test-support.js";
 import { registerRecoveredSubagentSessionEventTest } from "./session-message-subagent.test-support.js";
 import { createWorkerFanoutFixture } from "./session-message-worker.test-support.js";
@@ -168,26 +172,6 @@ const copilotOptions = {
   client: copilotClient,
   scopes: ["operator.read", "operator.write"],
 };
-
-async function connectSessionClient(
-  ws: GatewayWs,
-  storePath: string,
-  identityFile: string,
-  kind: "web" | "tui",
-) {
-  await connectOk(ws, {
-    caps: [GATEWAY_CLIENT_CAPS.SESSION_SCOPED_EVENTS],
-    client: {
-      id: kind === "web" ? GATEWAY_CLIENT_IDS.CONTROL_UI : GATEWAY_CLIENT_IDS.TUI,
-      mode: kind === "web" ? GATEWAY_CLIENT_MODES.UI : GATEWAY_CLIENT_MODES.CLI,
-      platform: kind === "web" ? "web" : "test",
-      version: "test",
-    },
-    deviceIdentityPath: path.join(path.dirname(storePath), identityFile),
-    prePairDevice: true,
-    scopes: ["operator.read"],
-  });
-}
 
 async function writeTranscriptFixture(
   transcriptPath: string,
@@ -522,7 +506,7 @@ describe("session.message websocket events", () => {
       main: { sessionId: "sess-main" },
       other: { sessionId: "sess-other" },
     });
-    const copilotIdentityPath = path.join(path.dirname(storePath), "copilot-device.json");
+    const copilotIdentityPath = sessionClientCredentialPath(storePath, "copilot-device");
     const unpairedWs = await harness.openWs({ origin: copilotOrigin });
     const pairingWs = await harness.openWs({ origin: copilotOrigin });
     const wrongOriginWs = await harness.openWs({
@@ -541,7 +525,7 @@ describe("session.message websocket events", () => {
       const unpaired = await connectReq(unpairedWs, {
         ...copilotOptions,
         prePairDevice: false,
-        deviceIdentityPath: path.join(path.dirname(storePath), "unpaired-copilot-device.json"),
+        deviceIdentityPath: sessionClientCredentialPath(storePath, "unpaired-copilot-device"),
       });
       expect(unpaired.ok).toBe(false);
       expect(unpaired.error?.code).toBe("NOT_PAIRED");
@@ -619,8 +603,8 @@ describe("session.message websocket events", () => {
 
   test("rejects client identity changes across a dedicated copilot pairing", async () => {
     const storePath = await createSessionStoreFile();
-    const identityPath = path.join(path.dirname(storePath), "other-client-device.json");
-    const copilotIdentityPath = path.join(path.dirname(storePath), "copilot-paired-device.json");
+    const identityPath = sessionClientCredentialPath(storePath, "other-client-device");
+    const copilotIdentityPath = sessionClientCredentialPath(storePath, "copilot-paired-device");
     const controlWs = await harness.openWs({ origin: `http://127.0.0.1:${harness.port}` });
     const copilotWs = await harness.openWs({
       origin: copilotOrigin,
@@ -645,7 +629,7 @@ describe("session.message websocket events", () => {
           id: GATEWAY_CLIENT_IDS.BROWSER_COPILOT,
           mode: GATEWAY_CLIENT_MODES.WEBCHAT,
         },
-        deviceIdentityPath: path.join(path.dirname(storePath), "wrong-mode-device.json"),
+        deviceIdentityPath: sessionClientCredentialPath(storePath, "wrong-mode-device"),
       });
       expect(wrongMode.ok).toBe(false);
       expect(wrongMode.error?.message).toContain("requires ui mode");
@@ -654,7 +638,7 @@ describe("session.message websocket events", () => {
       const missingCaps = await connectReq(missingCapsWs, {
         ...copilotOptions,
         caps: [GATEWAY_CLIENT_CAPS.RUN_TOOL_BINDINGS],
-        deviceIdentityPath: path.join(path.dirname(storePath), "missing-caps-device.json"),
+        deviceIdentityPath: sessionClientCredentialPath(storePath, "missing-caps-device"),
         prePairDevice: false,
         scopes: ["operator.read", "operator.write"],
       });
@@ -665,7 +649,7 @@ describe("session.message websocket events", () => {
       const webOrigin = await connectReq(webOriginWs, {
         ...copilotOptions,
         prePairDevice: false,
-        deviceIdentityPath: path.join(path.dirname(storePath), "web-origin-device.json"),
+        deviceIdentityPath: sessionClientCredentialPath(storePath, "web-origin-device"),
       });
       expect(webOrigin.ok).toBe(false);
       expect(webOrigin.error?.message).toContain("canonical Chrome extension origin");
@@ -810,8 +794,8 @@ describe("session.message websocket events", () => {
     const tuiWs = await harness.openWs();
     let reconnectedTuiWs: Awaited<ReturnType<typeof harness.openWs>> | undefined;
     try {
-      await connectSessionClient(webWs, storePath, "shared-web-device.json", "web");
-      await connectSessionClient(tuiWs, storePath, "shared-tui-device.json", "tui");
+      await connectSessionClient(webWs, storePath, "shared-web-device", "web");
+      await connectSessionClient(tuiWs, storePath, "shared-tui-device", "tui");
       for (const ws of [webWs, tuiWs]) {
         const subscription = await rpcReq(ws, "sessions.messages.subscribe", {
           key: sessionKey,
@@ -1058,8 +1042,8 @@ describe("session.message websocket events", () => {
     ];
 
     try {
-      await connectSessionClient(webWs, storePath, "committed-web-device.json", "web");
-      await connectSessionClient(tuiWs, storePath, "committed-tui-device.json", "tui");
+      await connectSessionClient(webWs, storePath, "committed-web-device", "web");
+      await connectSessionClient(tuiWs, storePath, "committed-tui-device", "tui");
       for (const ws of [webWs, tuiWs]) {
         const subscription = await rpcReq(ws, "sessions.messages.subscribe", {
           key: sessionKey,
@@ -1187,8 +1171,8 @@ describe("session.message websocket events", () => {
     const tuiWs = await harness.openWs();
     const wrongSessionWs = await harness.openWs();
     try {
-      await connectSessionClient(webWs, storePath, "identity-only-web-device.json", "web");
-      await connectSessionClient(tuiWs, storePath, "identity-only-tui-device.json", "tui");
+      await connectSessionClient(webWs, storePath, "identity-only-web-device", "web");
+      await connectSessionClient(tuiWs, storePath, "identity-only-tui-device", "tui");
       await connectOk(wrongSessionWs, { scopes: ["operator.read"] });
       for (const ws of [webWs, tuiWs]) {
         const subscription = await rpcReq(ws, "sessions.messages.subscribe", { key: sessionKey });

@@ -4,7 +4,6 @@ import {
   type SystemAgentConfigSnapshot,
 } from "./inference-route.js";
 import {
-  type ActivateSetupInferenceDeps,
   type CompleteSetupInferenceResult,
   invalidSetupConfigError,
   redactSetupInferenceError,
@@ -15,9 +14,7 @@ import { runSetupInferenceTurn, type SetupInferenceRequestParams } from "./setup
 export async function completeSetupInference(
   params: SetupInferenceRequestParams & { prompt: string },
 ): Promise<CompleteSetupInferenceResult> {
-  const readSnapshot =
-    params.deps?.readConfigFileSnapshot ??
-    (await import("../config/config.js")).readConfigFileSnapshot;
+  const readSnapshot = (await import("../config/config.js")).readConfigFileSnapshot;
   const snapshot = await readSnapshot();
   if (!snapshot.exists) {
     return { ok: false, status: "unavailable", error: "No OpenClaw config exists." };
@@ -40,15 +37,10 @@ export async function completeSetupInferenceConfig(
     prompt: string;
   },
 ): Promise<CompleteSetupInferenceResult> {
-  const deps: ActivateSetupInferenceDeps = {
-    ...params.deps,
-    ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
-  };
   const route = await resolveSystemAgentConfiguredRouteFromConfig(
     params.config,
     params.agentId,
     {
-      loadAuthProfileStoreForRuntimeAsync: deps.loadAuthProfileStoreForRuntimeAsync,
       modelTarget: params.modelTarget,
     },
     params.configSnapshot,
@@ -66,7 +58,7 @@ export async function completeSetupInferenceConfig(
   const turn = await runSetupInferenceTurn({
     route,
     prompt: params.prompt,
-    deps,
+    timeoutMs: params.timeoutMs,
     requireExecutionOwner: false,
     runtime: params.runtime,
   });

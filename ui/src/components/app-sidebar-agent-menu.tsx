@@ -3,15 +3,46 @@ import { createMemo, createUniqueId, Show } from "solid-js";
 import type { NavigationRouteId } from "../app-navigation.ts";
 import { pathForAgentPanel } from "../app-route-paths.ts";
 import type { ApplicationNavigationOptions } from "../app/context.ts";
+import { currentThemeBranding } from "../app/theme-branding.ts";
+import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../lib/external-link.ts";
+import { openExternalUrlSafe } from "../lib/open-external-url.ts";
 import { t } from "../lib/reactive/i18n.ts";
-import { SidebarDropdown } from "./app-sidebar-nav-menus.tsx";
+import { SidebarDropdown, renderSidebarMenuAction } from "./app-sidebar-nav-menus.tsx";
+import type { IconName } from "./icon-data.ts";
 import {
   AGENT_VALUE_PREFIX,
   renderSidebarAgentMenuSwitcher,
   type SidebarAgentMenuSwitcherParams,
 } from "./sidebar-agent-menu-switcher.tsx";
 import { Icon } from "./solid/icon.tsx";
-import type { MenuEntry } from "./solid/menu.tsx";
+import {
+  createMenuControls,
+  type MenuEntry,
+  type MenuHandle,
+  type MenuItem,
+} from "./solid/menu.tsx";
+
+const IDENTITY_MENU_LINKS: ReadonlyArray<{
+  href: string;
+  icon: IconName;
+  label: () => string;
+}> = [
+  { href: "https://docs.openclaw.ai", icon: "book", label: () => t("common.docs") },
+  {
+    href: "https://docs.openclaw.ai/help",
+    icon: "messageSquare",
+    label: () => t("agentChip.getHelp"),
+  },
+  { href: "https://discord.gg/clawd", icon: "users", label: () => t("agentChip.discord") },
+  {
+    href: "https://docs.openclaw.ai/releases",
+    icon: "scrollText",
+    label: () => t("agentChip.viewChangelog"),
+  },
+];
+
+export const COMMAND_VALUE_PREFIX = "command:";
+const LINK_VALUE_PREFIX = "link:";
 
 type SidebarAgentMenuParams = Omit<
   SidebarAgentMenuSwitcherParams,
@@ -24,22 +55,113 @@ type SidebarAgentMenuParams = Omit<
   rosterMode: boolean;
   creationDisabledReason: string | null;
   onShowAllAgents: () => void;
+  onCreateAgent: () => void;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
   onAfterShow: () => void;
   onSwitchAgent: (agentId: string) => void;
-  onCreateAgent: () => void;
   onClose: (restoreFocus?: boolean) => void;
   onNavigate: (routeId: NavigationRouteId, options?: ApplicationNavigationOptions) => void;
+  ref?: (handle: MenuHandle) => void;
 };
 
+export function renderSidebarHelpMenu(): MenuItem | undefined {
+  if (!currentThemeBranding().communityLinks) {
+    return undefined;
+  }
+  return {
+    ...renderSidebarMenuAction("command:help", t("agentChip.help"), "circleQuestionMark", {
+      className: "sidebar-identity-menu__help",
+    }),
+    trigger: (
+      <span class="sidebar-customize-menu__trigger">
+        <span class="nav-item__icon" aria-hidden="true">
+          <Icon name="circleQuestionMark" />
+        </span>
+        <span class="sidebar-customize-menu__text">{t("agentChip.help")}</span>
+      </span>
+    ),
+    content: undefined,
+    children: IDENTITY_MENU_LINKS.map((link) => ({
+      id: `${LINK_VALUE_PREFIX}${encodeURIComponent(link.href)}`,
+      label: link.label(),
+      href: link.href,
+      class: "sidebar-customize-menu__item",
+      attributes: {
+        "data-new-tab-action": "",
+        target: EXTERNAL_LINK_TARGET,
+        rel: buildExternalLinkRel(),
+      },
+      icon: (
+        <span class="nav-item__icon" aria-hidden="true">
+          <Icon name={link.icon} />
+        </span>
+      ),
+      content: <span class="sidebar-customize-menu__text">{link.label()}</span>,
+    })),
+  };
+}
+
+export function selectSidebarHelpLink(value: string): boolean {
+  if (!value.startsWith(LINK_VALUE_PREFIX)) {
+    return false;
+  }
+  openExternalUrlSafe(decodeURIComponent(value.slice(LINK_VALUE_PREFIX.length)));
+  return true;
+}
+
 export function renderSidebarAgentMenu(params: SidebarAgentMenuParams): JSX.Element {
+  const controls = createMenuControls();
   const position = params.position;
   const creationReasonId = createUniqueId();
+  const hasMultipleAgents = () =>
+    params.agents.length +
+      Number(
+        Boolean(
+          params.pendingAgent &&
+          !params.agents.some((agent) => agent.id === params.pendingAgent?.id),
+        ),
+      ) >
+    1;
   const menuLabel = createMemo(() =>
     t(params.rosterMode ? "agentChip.workspaceMenuLabel" : "agentChip.menuLabel"),
   );
   const agentsTitle = <div class="sidebar-customize-menu__title">{t("agentChip.agents")}</div>;
+  const createAgentItem: MenuItem = {
+    id: `${COMMAND_VALUE_PREFIX}new-agent`,
+    label: t("agentChip.createAgent"),
+    class: [
+      "sidebar-customize-menu__item sidebar-agent-menu__create",
+      { "session-menu__item--described": Boolean(params.creationDisabledReason) },
+    ],
+    disabled: Boolean(params.creationDisabledReason || params.pendingAgent),
+    attributes: {
+      "aria-describedby": params.creationDisabledReason ? creationReasonId : undefined,
+    },
+    closeOnSelect: false,
+    content: (
+      <span class="sidebar-agent-menu__agent-row">
+        <span class="sidebar-agent-menu__create-icon" aria-hidden="true">
+          <Icon name="circlePlus" />
+        </span>
+        <span class="agent-select__option-copy">
+          <span
+            class="agent-select__option-label"
+            role={params.pendingAgent ? "status" : undefined}
+          >
+            {t(params.pendingAgent ? "agentChip.creatingAgent" : "agentChip.createAgent")}
+          </span>
+          <Show when={params.creationDisabledReason}>
+            {(reason) => (
+              <span id={creationReasonId} class="session-menu__description">
+                {reason()}
+              </span>
+            )}
+          </Show>
+        </span>
+      </span>
+    ),
+  };
   const items = (): MenuEntry[] => [
     ...(params.agents.length > 0
       ? [
@@ -50,73 +172,45 @@ export function renderSidebarAgentMenu(params: SidebarAgentMenuParams): JSX.Elem
           },
         ]
       : []),
-    {
-      id: "command:new-agent",
-      label: t("agentChip.createAgent"),
-      class: [
-        "sidebar-customize-menu__item sidebar-agent-menu__create",
-        { "session-menu__item--described": Boolean(params.creationDisabledReason) },
-      ],
-      disabled: Boolean(params.creationDisabledReason || params.pendingAgent),
-      attributes: {
-        "aria-describedby": params.creationDisabledReason ? creationReasonId : undefined,
-      },
-      closeOnSelect: false,
-      content: (
-        <span class="sidebar-agent-menu__agent-row">
-          <span class="sidebar-agent-menu__create-icon" aria-hidden="true">
-            <Icon name="circlePlus" />
-          </span>
-          <span class="agent-select__option-copy">
-            <span
-              class="agent-select__option-label"
-              role={params.pendingAgent ? "status" : undefined}
-            >
-              {t(params.pendingAgent ? "agentChip.creatingAgent" : "agentChip.createAgent")}
-            </span>
-            <Show when={params.creationDisabledReason}>
-              {(reason) => (
-                <span id={creationReasonId} class="session-menu__description">
-                  {reason()}
-                </span>
-              )}
-            </Show>
-          </span>
-        </span>
-      ),
-    },
+    createAgentItem,
     {
       kind: "group",
       id: "agents",
       class: "sidebar-agent-menu__agent-list",
-      items: renderSidebarAgentMenuSwitcher({
-        ...params,
-        allAgentsScope: params.rosterMode && params.agents.length > 1,
-        onAgentSettings: (agentId) => {
-          params.onClose(false);
-          params.onNavigate("agents", {
-            pathname: pathForAgentPanel(agentId, null, params.basePath),
-          });
+      items: renderSidebarAgentMenuSwitcher(
+        {
+          ...params,
+          allAgentsScope: params.rosterMode && hasMultipleAgents(),
+          onAgentSettings: (agentId) => {
+            params.onClose(false);
+            params.onNavigate("agents", {
+              pathname: pathForAgentPanel(agentId, null, params.basePath),
+            });
+          },
         },
-      }),
+        controls,
+      ),
     },
   ];
+
   return (
     <SidebarDropdown
+      controls={controls}
       class="sidebar-customize-menu sidebar-agent-menu"
       position={position}
       anchor={params.anchor}
       tabFocusTarget={params.tabFocusTarget}
       label={menuLabel()}
       focusOnOpen={params.openMode !== "hover"}
+      ref={params.ref}
       items={items()}
       onPointerEnter={params.onPointerEnter}
       onPointerLeave={params.onPointerLeave}
       onAfterShow={params.onAfterShow}
       onClose={params.onClose}
       onSelect={(value) => {
-        if (value === "command:new-agent") {
-          void params.onCreateAgent();
+        if (value === `${COMMAND_VALUE_PREFIX}new-agent`) {
+          params.onCreateAgent();
           return;
         }
         params.onClose(value === "scope:all" && params.rosterMode);
@@ -124,10 +218,8 @@ export function renderSidebarAgentMenu(params: SidebarAgentMenuParams): JSX.Elem
           params.onSwitchAgent(decodeURIComponent(value.slice(AGENT_VALUE_PREFIX.length)));
           return;
         }
-        switch (value) {
-          case "scope:all":
-            params.onShowAllAgents();
-            break;
+        if (value === "scope:all") {
+          params.onShowAllAgents();
         }
       }}
     />

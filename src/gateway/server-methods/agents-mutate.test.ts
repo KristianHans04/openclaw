@@ -12,6 +12,7 @@ import { FsSafeError, root, type ReadResult } from "../../infra/fs-safe.js";
 import { getActiveGatewayRootWorkCount } from "../../process/gateway-work-admission.js";
 import { runWithGatewayRootWorkAdmissionForTest } from "../../process/gateway-work-admission.test-helpers.js";
 import { resumeAgentDeletions } from "../server-agent-deletion-recovery.js";
+import * as lifecycleState from "../session-lifecycle-state.js";
 import { registerAgentDeletionAuthorityTests } from "./agents-delete-authority.test-support.js";
 import { registerAgentDeleteFilesystemTests } from "./agents-delete-filesystem.test-support.js";
 import {
@@ -485,12 +486,19 @@ vi.mock(import("./agents-onboarding.js"), () => ({
 }));
 
 const { agentsHandlers } = await import("./agents.js");
+let restoreLifecyclePersistence: (() => void) | undefined;
 
 afterEach(() => {
+  restoreLifecyclePersistence?.();
   memorySessionActorOwners.reset();
 });
 
 beforeEach(() => {
+  // The roster fixture owns synthetic storage; cancellation authority stays real.
+  const lifecyclePersistence = vi
+    .spyOn(lifecycleState, "persistGatewaySessionLifecycleEvent")
+    .mockImplementation(async (params) => params.assertCommitAllowed?.());
+  restoreLifecyclePersistence = () => lifecyclePersistence.mockRestore();
   vi.mocked(root).mockReset();
   mocks.writeConfigFile.mockReset().mockResolvedValue(undefined);
   mocks.configApplicationStatus.mockReset().mockReturnValue("applied");
@@ -576,8 +584,6 @@ beforeEach(() => {
 function createContext() {
   return {
     getRuntimeConfig: () => mocks.loadConfigReturn,
-    chatAbortControllers: new Map(),
-    chatQueuedTurns: new Map(),
     dedupe: new Map(),
     cron: { removeAgentJobsTransactional: mocks.cronRemoveAgentJobsTransactional },
     logGateway: { warn: mocks.logGatewayWarn, isEnabled: () => false },

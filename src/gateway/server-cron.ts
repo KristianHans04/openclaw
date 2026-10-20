@@ -1,12 +1,12 @@
 import { finiteSecondsToTimerSafeMilliseconds } from "@openclaw/normalization-core/number-coercion";
-import { retireSessionMcpRuntime } from "../agents/agent-bundle-mcp-tools.js";
+import { captureSessionMcpRuntimeRetirement } from "../agents/agent-bundle-mcp-manager-api.js";
 import { prepareAgentRunTerminalReply } from "../agents/agent-run-terminal-reply.js";
 import {
   listAgentIds,
   resolveAgentEntry,
   tryResolveAmbientOwnerAgentId,
 } from "../agents/agent-scope-config.js";
-import { isEmbeddedAgentSessionHeldByOtherRun } from "../agents/embedded-agent-runner/runs.js";
+import { abortAndDrainEmbeddedAgentRunByRunId } from "../agents/embedded-agent-runner/runs.js";
 import { abortAndDrainEmbeddedAgentRun } from "../agents/embedded-agent.js";
 import { loadPreparedInboundPluginRegistry } from "../agents/prepared-model-runtime.inbound-registry.js";
 import type { CliDeps } from "../cli/deps.types.js";
@@ -90,7 +90,12 @@ import {
 } from "./scheduled-run-gateway-context.js";
 import { finalizeCronCompletionAnnouncement, pickDefined } from "./server-cron-completion.js";
 import type { GatewayCronServiceContract } from "./server-cron-contract.js";
-import { drainGatewayCron } from "./server-cron-drain.js";
+import {
+  bindCronStreamRemoval,
+  bindCronStreamUpdate,
+  drainGatewayCron,
+  withObservedCronStreamState,
+} from "./server-cron-drain.js";
 import {
   fireOnExitJob,
   fireStreamJob,
@@ -462,6 +467,7 @@ export function buildGatewayCronService(params: {
   };
 
   const cron = new CronService({
+    env,
     scheduler: params.scheduler,
     storePath,
     cronEnabled,
@@ -647,23 +653,27 @@ export function buildGatewayCronService(params: {
       if (!execution?.sessionId) {
         return;
       }
-      if (
-        execution.runId &&
-        isEmbeddedAgentSessionHeldByOtherRun(execution.sessionId, execution.runId)
-      ) {
-        cronLogger.warn(
-          { jobId: job.id, sessionId: execution.sessionId, sessionKey: execution.sessionKey },
-          "cron: timed-out agent run already left its session; kept the current run",
-        );
-        return;
-      }
-      const result = await abortAndDrainEmbeddedAgentRun({
+      const mcpRetirement = captureSessionMcpRuntimeRetirement({
+        sessionId: execution.sessionId,
+        sessionKey: execution.sessionKey,
+      });
+      const cleanup = {
         sessionId: execution.sessionId,
         sessionKey: execution.sessionKey,
         settleMs: 15_000,
         forceClear: true,
         reason: "cron_timeout",
-      });
+      };
+      const result = await (execution.runId
+        ? abortAndDrainEmbeddedAgentRunByRunId({ ...cleanup, runId: execution.runId })
+        : abortAndDrainEmbeddedAgentRun(cleanup));
+      if (!result) {
+        cronLogger.warn(
+          { jobId: job.id, sessionId: execution.sessionId, sessionKey: execution.sessionKey },
+          "cron: timed-out agent run no longer registered; kept the current run",
+        );
+        return;
+      }
       cronLogger.warn(
         {
           jobId: job.id,
@@ -675,16 +685,14 @@ export function buildGatewayCronService(params: {
         },
         "cron: cleaned up timed-out agent run",
       );
-      await retireSessionMcpRuntime({
-        sessionId: execution.sessionId,
-        reason: "cron-timeout-cleanup",
-        onError: (error, sid) => {
+      await mcpRetirement
+        ?.retire(() => params.scheduler.signal.throwIfAborted())
+        .catch((error: unknown) => {
           cronLogger.warn(
-            { jobId: job.id, sessionId: sid },
+            { jobId: job.id, sessionId: execution.sessionId },
             `cron: failed to retire MCP runtime for timed-out session: ${String(error)}`,
           );
-        },
-      }).catch(() => {});
+        });
     },
     onIsolatedAgentSetupTimeout: ({ job, error, timeoutMs }) => {
       cronLogger.warn(
@@ -976,22 +984,8 @@ export function buildGatewayCronService(params: {
       cancelDisabledExitWatcher(addedJob);
     }
     await routeStreamWatcherMutation(addedJob.id, addedJob, "added");
-    return result;
-  };
-  const settleStopAfterCommittedUpdate = async (
-    jobId: string,
-    lifecycleStop: Promise<PromiseSettledResult<void>[]> | undefined,
-  ) => {
-    const [settled] = (await lifecycleStop) ?? [];
-    if (settled?.status === "rejected") {
-      // The durable update already committed and the owner persisted its own
-      // terminal stream diagnostic. Failing the caller here would claim a
-      // rollback that never happened; routeLiveStreamJobLogged below retries teardown.
-      cronLogger.warn(
-        { jobId, err: String(settled.reason) },
-        "cron-stream: source teardown failed after committed update",
-      );
-    }
+    const observed = withObservedCronStreamState(cron, addedJob);
+    return "job" in result ? { ...result, ...observed, job: observed } : observed;
   };
   // Watcher routing after a committed mutation is lifecycle repair, not part
   // of the mutation result: a stubborn child failing again must not turn an
@@ -1007,64 +1001,25 @@ export function buildGatewayCronService(params: {
       );
     }
   };
-  const updateCronWithPrecondition = cron.updateWithPrecondition.bind(cron);
-  const updateWithWatchers = async (
-    jobId: string,
-    patch: Parameters<CronService["update"]>[1],
-    opts?: Parameters<CronService["update"]>[2],
-    precondition?: Parameters<CronService["updateWithPrecondition"]>[2],
-  ) => {
-    let lifecycleStop: Promise<PromiseSettledResult<void>[]> | undefined;
-    const routeAfterValidation = (current: CronJob, nowMs: number) => {
-      const stop = streamWatchers.stopBeforeUpdate(current, patch, nowMs, params.cfg.cron);
-      lifecycleStop = stop ? Promise.allSettled([stop]) : undefined;
-    };
-    const beforeUpdate = precondition
-      ? async (current: CronJob, nowMs: number) => {
-          await precondition(current, nowMs);
-          routeAfterValidation(current, nowMs);
-        }
-      : routeAfterValidation;
-    try {
-      const result = await updateCronWithPrecondition(jobId, patch, beforeUpdate, opts);
-      if (
-        patch.enabled === false &&
-        (!precondition || terminalExitCompletionTokens.get(jobId) !== precondition)
-      ) {
-        cancelDisabledExitWatcher(result);
+  const updateWithWatchers = bindCronStreamUpdate({
+    cron,
+    streamWatchers,
+    reconcile: routeLiveStreamJobLogged,
+    cancelDisabledExitWatcher: (job, precondition) => {
+      if (!precondition || terminalExitCompletionTokens.get(job.id) !== precondition) {
+        cancelDisabledExitWatcher(job);
       }
-      await settleStopAfterCommittedUpdate(jobId, lifecycleStop);
-      await routeLiveStreamJobLogged(jobId);
-      return result;
-    } catch (error) {
-      await lifecycleStop;
-      if (lifecycleStop) {
-        await routeLiveStreamJobLogged(jobId);
-      }
-      throw error;
-    }
-  };
+    },
+    logger: cronLogger,
+  });
   cron.update = (jobId, patch, opts) => updateWithWatchers(jobId, patch, opts);
   cron.updateWithPrecondition = (jobId, patch, precondition, opts) =>
     updateWithWatchers(jobId, patch, opts, precondition);
-  const removeCron = cron.remove.bind(cron);
-  cron.remove = async (jobId, opts) => {
-    const previous = cron.getJob(jobId);
-    try {
-      if (previous?.schedule.kind === "stream") {
-        await streamWatchers?.stop(jobId, "removed", previous);
-      }
-      const result = await removeCron(jobId, opts);
-      if (!result.removed) {
-        await routeLiveStreamJobLogged(jobId);
-      }
-      return result;
-    } catch (error) {
-      // Preserve the original stop/removal error; recovery routing is advisory.
-      await routeLiveStreamJobLogged(jobId);
-      throw error;
-    }
-  };
+  cron.remove = bindCronStreamRemoval({
+    cron,
+    streamWatchers,
+    reconcile: routeLiveStreamJobLogged,
+  });
   const getCronSuspensionBlockerCount = cron.getSuspensionBlockerCount.bind(cron);
   cron.getSuspensionBlockerCount = () =>
     getCronSuspensionBlockerCount() +
@@ -1169,9 +1124,7 @@ export function buildGatewayCronService(params: {
       logger: cronLogger,
     });
   };
-  cron.stopAndDrain = async () => {
-    await stopAndDrainCron();
-  };
+  cron.stopAndDrain = () => stopAndDrainCron();
   const systemJobs = createGatewayCronSystemJobReconciler({
     cron,
     scheduler: params.scheduler,

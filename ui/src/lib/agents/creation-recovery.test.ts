@@ -39,8 +39,8 @@ describe("agent creation outcome recovery", () => {
     await expect(original).resolves.toBeNull();
     expect(request).toHaveBeenCalledOnce();
 
-    harness.publish(true);
     request.mockResolvedValueOnce(roster);
+    harness.publish(true);
     request.mockImplementationOnce(async (_method, params) => {
       const { agentId } = params as { agentId: string };
       return {
@@ -72,8 +72,8 @@ describe("agent creation outcome recovery", () => {
     const agentId = agents.state.pendingAgent!.id;
     await creationStarted.promise;
     harness.publish(false);
-    harness.publish(true);
     request.mockResolvedValueOnce({ defaultId: "main", agents: [] });
+    harness.publish(true);
     request.mockReturnValueOnce(recoveryRead.promise);
     const recovery = agents.create("New agent");
     await vi.waitFor(() => expect(request).toHaveBeenCalledWith("config.get", {}));
@@ -125,8 +125,8 @@ describe("agent creation outcome recovery", () => {
     await expect(agents.create("New agent", started)).rejects.toThrow("hasn't confirmed");
     const attemptedId = started.mock.calls[0]![0];
     harness.publish(false);
-    harness.publish(true);
     request.mockResolvedValueOnce({ defaultId: "main", agents: [] });
+    harness.publish(true);
     request.mockRejectedValueOnce(new Error("Read unavailable"));
     await expect(agents.create("New agent", started)).rejects.toThrow("hasn't confirmed");
     request.mockResolvedValueOnce(savedAgent(attemptedId));
@@ -182,8 +182,8 @@ describe("agent creation outcome recovery", () => {
       "agents.create",
       expect.objectContaining({ agentId: originalId }),
     );
-    harness.publish(true);
     request.mockResolvedValueOnce({ defaultId: "main", agents: [] });
+    harness.publish(true);
     request.mockResolvedValueOnce(savedAgent(originalId));
     await expect(agents.create("New agent", started)).resolves.toMatchObject({
       agentId: originalId,
