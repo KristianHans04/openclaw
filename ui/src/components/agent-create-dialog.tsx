@@ -1,6 +1,9 @@
 import { createMemo, createSignal, createUniqueId, Show } from "solid-js";
 import type { AgentsAvatarGenerateResult } from "../../../packages/gateway-protocol/src/index.js";
 import type { ApplicationContext } from "../app/context.ts";
+import { LobsterSvg } from "../components/lobster-pet-artwork.tsx";
+import { canonicalLobsterLook } from "../components/lobster-pet-identity.ts";
+import { LOBSTER_PALETTE_WEIGHTS } from "../components/lobster-pet-palettes.ts";
 import { Icon } from "../components/solid/icon.tsx";
 import { AgentIdentityAvatar } from "../components/solid/identity-avatar.tsx";
 import { registerAgentCreationEnglish } from "../i18n/locales/en-agent-creation.ts";
@@ -111,7 +114,19 @@ export function AgentCreateDialog(props: {
         </div>
         <div class="agent-create-dialog__body">
           <div class="agent-create-dialog__preview">
-            <AgentIdentityAvatar agent={draftIdentity()} />
+            <Show
+              when={avatar()}
+              fallback={
+                <div class="agent-create-dialog__ghost avatar-picker__ghost avatar-picker__sprite lobster-pet">
+                  <LobsterSvg
+                    look={canonicalLobsterLook(LOBSTER_PALETTE_WEIGHTS[0][0])}
+                    standalone
+                  />
+                </div>
+              }
+            >
+              <AgentIdentityAvatar agent={draftIdentity()} />
+            </Show>
           </div>
           <label class="agent-create-dialog__name">
             <span class="sr-only">{t("agents.identity.name")}</span>

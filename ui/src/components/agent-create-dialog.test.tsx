@@ -31,6 +31,11 @@ it("requires a display name and submits the selected Blobster identity", () => {
 
   const name = view.container.querySelector<HTMLInputElement>('input[name="name"]')!;
   const create = view.container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(view.container.querySelector("h2")?.textContent).toBe("Create New Agent");
+  expect(name.placeholder).toBe("Name your agent");
+  expect(
+    view.container.querySelector(".agent-create-dialog__ghost .lobster-pet__svg"),
+  ).not.toBeNull();
   expect(create.disabled).toBe(true);
   name.value = "  Scout  ";
   name.dispatchEvent(new Event("input", { bubbles: true }));
@@ -38,6 +43,10 @@ it("requires a display name and submits the selected Blobster identity", () => {
   expect(create.disabled).toBe(false);
   picker.select!(selectedAvatar);
   flush();
+  expect(view.container.querySelector(".agent-create-dialog__ghost")).toBeNull();
+  expect(
+    view.container.querySelector(".agent-create-dialog__preview .identity-avatar--agent"),
+  ).not.toBeNull();
   create.click();
 
   expect(onCreate).toHaveBeenCalledExactlyOnceWith({ name: "Scout", avatar: selectedAvatar });

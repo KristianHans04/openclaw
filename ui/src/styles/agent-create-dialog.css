@@ -64,6 +64,11 @@
   overflow: hidden;
 }
 
+.agent-create-dialog__preview .agent-create-dialog__ghost {
+  width: 76px;
+  animation: none;
+}
+
 .agent-create-dialog__name input {
   width: 100%;
   height: 42px;
