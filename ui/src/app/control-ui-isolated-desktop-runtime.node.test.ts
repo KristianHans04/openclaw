@@ -33,37 +33,30 @@ it("keeps desktop codec detection lazy without adding boot facade requests", asy
   // Real manifest entry IDs and payloads above the production group's minimum size.
   const catalogValue = "catalog-value-".repeat(12_000);
   const outboxValue = "outbox-value-".repeat(12_000);
-  const sources = new Map([
-    [
-      catalog,
-      `globalThis.desktopBuildFixture.events.push("catalog"); export const value = ${JSON.stringify(catalogValue)};`,
-    ],
-    [
-      outbox,
-      `globalThis.desktopBuildFixture.events.push("outbox"); export const value = ${JSON.stringify(outboxValue)};`,
-    ],
-  ]);
-  await Promise.all([
-    fs.writeFile(local("package.json"), '{"type":"module"}'),
-    fs.writeFile(
-      local("index.html"),
+  const sources: Record<string, string> = {
+    [catalog]: `globalThis.desktopBuildFixture.events.push("catalog"); export const value = ${JSON.stringify(catalogValue)};`,
+    [outbox]: `globalThis.desktopBuildFixture.events.push("outbox"); export const value = ${JSON.stringify(outboxValue)};`,
+  };
+  const files = {
+    "package.json": '{"type":"module"}',
+    "index.html":
       '<html><head></head><body><script type="module" src="./main.js"></script></body></html>',
-    ),
-    fs.writeFile(
-      local("main.js"),
-      `globalThis.desktopBuildFixture.loadCatalog = () => import("fixture:catalog");
+    "main.js": `globalThis.desktopBuildFixture.loadCatalog = () => import("fixture:catalog");
        globalThis.desktopBuildFixture.loadOutbox = () => import("fixture:outbox");
        globalThis.desktopBuildFixture.loadDesktop = () => import("@novnc/novnc");`,
-    ),
-    fs.writeFile(
-      desktop,
-      `globalThis.desktopBuildFixture.events.push("desktop");
+    "desktop.js": `globalThis.desktopBuildFixture.events.push("desktop");
        globalThis.desktopBuildFixture.entered();
        const codec = await globalThis.desktopBuildFixture.codecReady;
        export default class RemoteDesktop { static codec = codec; }`,
-    ),
-  ]);
-
+  };
+  await Promise.all(
+    Object.entries(files).map(([name, content]) => fs.writeFile(local(name), content)),
+  );
+  const aliases: Record<string, string> = {
+    "@novnc/novnc": desktop,
+    "fixture:catalog": catalog,
+    "fixture:outbox": outbox,
+  };
   const buildFixture = async (isolated: boolean) => {
     const outDir = local(isolated ? "isolated" : "original");
     const result = await build({
@@ -75,15 +68,8 @@ it("keeps desktop codec detection lazy without adding boot facade requests", asy
         {
           name: "desktop-build-fixture",
           enforce: "pre",
-          resolveId: (source) =>
-            source === "@novnc/novnc"
-              ? desktop
-              : source === "fixture:catalog"
-                ? catalog
-                : source === "fixture:outbox"
-                  ? outbox
-                  : null,
-          load: (id) => sources.get(id) ?? null,
+          resolveId: (source) => (Object.hasOwn(aliases, source) ? aliases[source] : null),
+          load: (id) => (Object.hasOwn(sources, id) ? sources[id] : null),
         },
         ...(isolated ? [controlUiIsolatedDesktopRuntimePlugin()] : []),
         controlUiBootPreloadsPlugin(),
