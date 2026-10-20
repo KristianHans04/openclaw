@@ -1,5 +1,5 @@
 import { InteractionResponseType, MessageFlags } from "discord-api-types/v10";
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   createInteraction as createDiscordInteraction,
   type BaseComponentInteraction,
@@ -26,105 +26,102 @@ function createButton(overrides: Partial<ButtonParams> = {}) {
 }
 
 function createInteraction() {
-  const acknowledge = vi.fn();
-  const followUp = vi.fn();
-  const interaction = {
-    userId: "user-1",
-    reply: vi.fn(),
-    acknowledge,
-    followUp,
-  } as unknown as BaseComponentInteraction;
-  return { interaction, acknowledge, followUp };
+  const client = createInternalTestClient();
+  const post = vi.fn(async () => undefined);
+  attachRestMock(client, { post });
+  const interaction = createDiscordInteraction(
+    client,
+    createInternalComponentInteractionPayload({
+      id: "interaction-1",
+      token: "interaction-token",
+      user: {
+        id: "user-1",
+        username: "Alice",
+        discriminator: "0",
+        avatar: null,
+        global_name: null,
+      },
+    }),
+  ) as BaseComponentInteraction;
+  return { interaction, post };
 }
 
-describe("Discord question button", () => {
-  it("does not resolve unauthorized clicks", async () => {
-    const { interaction, acknowledge } = createInteraction();
-    const resolveQuestion = vi.fn();
-    const button = createButton({ authorizeQuestion: vi.fn(async () => false), resolveQuestion });
+it("does not resolve unauthorized clicks", async () => {
+  const { interaction, post } = createInteraction();
+  const resolveQuestion = vi.fn();
+  const button = createButton({ authorizeQuestion: vi.fn(async () => false), resolveQuestion });
 
-    await button.run(interaction, data);
+  await button.run(interaction, data);
 
-    expect(resolveQuestion).not.toHaveBeenCalled();
-    expect(acknowledge).not.toHaveBeenCalled();
-  });
+  expect(resolveQuestion).not.toHaveBeenCalled();
+  expect(post).not.toHaveBeenCalled();
+});
 
-  it("does not turn a committed answer into an error when feedback fails", async () => {
-    const { interaction, followUp } = createInteraction();
-    followUp.mockRejectedValue(new Error("receipt failed"));
-    await expect(createButton().run(interaction, data)).resolves.toBeUndefined();
-    expect(followUp).toHaveBeenCalledOnce();
-    expect(followUp).toHaveBeenCalledWith({ content: "Answer submitted.", ephemeral: true });
-  });
-
-  it.each([
+it("does not turn a committed answer into an error when feedback fails", async () => {
+  const { interaction, post } = createInteraction();
+  post.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("receipt failed"));
+  await expect(createButton().run(interaction, data)).resolves.toBeUndefined();
+  expect(post.mock.calls).toHaveLength(2);
+  expect(post).toHaveBeenLastCalledWith(
+    "/webhooks/app1/interaction-token",
     {
-      name: "submitted answer",
-      acknowledged: false,
-      result: answer,
-      expectedText: "Answer submitted.",
+      body: { content: "Answer submitted.", flags: MessageFlags.Ephemeral },
     },
-    {
-      name: "already answered question",
-      acknowledged: true,
-      result: { status: "already-terminal" as const, reason: "already-terminal" as const },
-      expectedText: "This question was already answered.",
-    },
-    {
-      name: "question resolution failure",
-      acknowledged: true,
-      error: new Error("question service unavailable"),
-      expectedText: "Could not submit this answer.",
-    },
-  ])("delivers $name feedback when acknowledgement is $acknowledged", async (testCase) => {
-    const client = createInternalTestClient();
-    const post = vi.fn(async () => undefined);
-    if (!testCase.acknowledged) {
-      post.mockRejectedValueOnce(new Error("temporary connection reset"));
+    undefined,
+  );
+});
+
+it.each([
+  {
+    name: "submitted answer",
+    acknowledged: false,
+    result: answer,
+    expectedText: "Answer submitted.",
+  },
+  {
+    name: "already answered question",
+    acknowledged: true,
+    result: { status: "already-terminal" as const, reason: "already-terminal" as const },
+    expectedText: "This question was already answered.",
+  },
+  {
+    name: "question resolution failure",
+    acknowledged: true,
+    error: new Error("question service unavailable"),
+    expectedText: "Could not submit this answer.",
+  },
+])("delivers $name feedback when acknowledgement is $acknowledged", async (testCase) => {
+  const { interaction, post } = createInteraction();
+  if (!testCase.acknowledged) {
+    post.mockRejectedValueOnce(new Error("temporary connection reset"));
+  }
+  const resolveQuestion = vi.fn(async () => {
+    if (testCase.error) {
+      throw testCase.error;
     }
-    attachRestMock(client, { post });
-    const interaction = createDiscordInteraction(
-      client,
-      createInternalComponentInteractionPayload({
-        id: "interaction-1",
-        token: "interaction-token",
-        user: {
-          id: "user-1",
-          username: "Alice",
-          discriminator: "0",
-          avatar: null,
-          global_name: null,
-        },
-      }),
-    ) as BaseComponentInteraction;
-    const resolveQuestion = vi.fn(async () => {
-      if (testCase.error) {
-        throw testCase.error;
-      }
-      return testCase.result;
-    });
-    await createButton({ resolveQuestion: resolveQuestion as never }).run(interaction, data);
-
-    expect(resolveQuestion).toHaveBeenCalledOnce();
-    expect(post).toHaveBeenNthCalledWith(1, callbackPath, {
-      body: { type: InteractionResponseType.DeferredMessageUpdate },
-    });
-    if (testCase.acknowledged) {
-      expect(post).toHaveBeenNthCalledWith(
-        2,
-        "/webhooks/app1/interaction-token",
-        { body: { content: testCase.expectedText, flags: MessageFlags.Ephemeral } },
-        undefined,
-      );
-      expect(interaction.responseState).toBe("deferred-update");
-    } else {
-      expect(post).toHaveBeenNthCalledWith(2, callbackPath, {
-        body: {
-          type: InteractionResponseType.ChannelMessageWithSource,
-          data: { content: testCase.expectedText, flags: MessageFlags.Ephemeral },
-        },
-      });
-      expect(interaction.responseState).toBe("replied");
-    }
+    return testCase.result;
   });
+  await createButton({ resolveQuestion: resolveQuestion as never }).run(interaction, data);
+
+  expect(resolveQuestion).toHaveBeenCalledOnce();
+  expect(post).toHaveBeenNthCalledWith(1, callbackPath, {
+    body: { type: InteractionResponseType.DeferredMessageUpdate },
+  });
+  if (testCase.acknowledged) {
+    expect(post).toHaveBeenNthCalledWith(
+      2,
+      "/webhooks/app1/interaction-token",
+      { body: { content: testCase.expectedText, flags: MessageFlags.Ephemeral } },
+      undefined,
+    );
+    expect(interaction.responseState).toBe("deferred-update");
+  } else {
+    expect(post).toHaveBeenNthCalledWith(2, callbackPath, {
+      body: {
+        type: InteractionResponseType.ChannelMessageWithSource,
+        data: { content: testCase.expectedText, flags: MessageFlags.Ephemeral },
+      },
+    });
+    expect(interaction.responseState).toBe("replied");
+  }
 });

@@ -1,6 +1,6 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { ResolvedAgentRoute } from "openclaw/plugin-sdk/routing";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import {
   buildDiscordConversationRouteContext,
   buildDiscordRoutePeer,
@@ -36,76 +36,72 @@ const bindingRecord = {
   boundAt: 1,
 };
 
-describe("discord route resolution helpers", () => {
-  it("keeps a group DM keyed by its conversation instead of one sender", () => {
-    expect(
-      buildDiscordRoutePeer({
-        isDirectMessage: true,
-        isGroupDm: true,
-        directUserId: "user-1",
-        conversationId: "group-dm-1",
-      }),
-    ).toEqual({ kind: "group", id: "group-dm-1" });
-  });
+it("keeps a group DM keyed by its conversation instead of one sender", () => {
+  expect(
+    buildDiscordRoutePeer({
+      isDirectMessage: true,
+      isGroupDm: true,
+      directUserId: "user-1",
+      conversationId: "group-dm-1",
+    }),
+  ).toEqual({ kind: "group", id: "group-dm-1" });
+});
 
-  it("records the direct routing peer separately from the native DM channel", () => {
-    expect(
-      buildDiscordConversationRouteContext({
-        isDirectMessage: true,
-        isGroupDm: false,
-        directUserId: "user-1",
-        conversationId: "dm-1",
-        isThread: false,
-      }),
-    ).toEqual({
-      ConversationRouteContextObserved: true,
-      ConversationRoutePeerId: "user-1",
-      NativeChannelId: "dm-1",
-      InboundAccessAuthorized: true,
-      MessageThreadId: undefined,
-      ThreadParentId: undefined,
-    });
+it("records the direct routing peer separately from the native DM channel", () => {
+  expect(
+    buildDiscordConversationRouteContext({
+      isDirectMessage: true,
+      isGroupDm: false,
+      directUserId: "user-1",
+      conversationId: "dm-1",
+      isThread: false,
+    }),
+  ).toEqual({
+    ConversationRouteContextObserved: true,
+    ConversationRoutePeerId: "user-1",
+    NativeChannelId: "dm-1",
+    InboundAccessAuthorized: true,
+    MessageThreadId: undefined,
+    ThreadParentId: undefined,
   });
+});
 
-  it("composes route building with effective-route overrides", () => {
-    expect(
-      resolveDiscordBoundConversationRoute({
-        cfg,
-        accountId: "default",
-        isDirectMessage: true,
-        isGroupDm: false,
-        directUserId: "user-1",
-        conversationId: "dm-1",
-        boundSessionKey: "agent:worker:discord:direct:user-1",
-        matchedBy: "binding.channel",
-      }),
-    ).toEqual({
-      agentId: "worker",
-      channel: "discord",
+it("composes route building with effective-route overrides", () => {
+  expect(
+    resolveDiscordBoundConversationRoute({
+      cfg,
       accountId: "default",
-      dmScope: "main",
-      groupScope: "per-group",
-      sessionKey: "agent:worker:discord:direct:user-1",
-      mainSessionKey: "agent:worker:main",
-      lastRoutePolicy: "session",
+      isDirectMessage: true,
+      isGroupDm: false,
+      directUserId: "user-1",
+      conversationId: "dm-1",
+      boundSessionKey: "agent:worker:discord:direct:user-1",
       matchedBy: "binding.channel",
-    });
+    }),
+  ).toEqual({
+    agentId: "worker",
+    channel: "discord",
+    accountId: "default",
+    dmScope: "main",
+    groupScope: "per-group",
+    sessionKey: "agent:worker:discord:direct:user-1",
+    mainSessionKey: "agent:worker:main",
+    lastRoutePolicy: "session",
+    matchedBy: "binding.channel",
   });
+});
 
-  it("ignores stale route-shaped bindings after the configured agent changes", () => {
-    expect(shouldIgnoreStaleDiscordRouteBinding({ route, bindingRecord })).toBe(true);
-  });
-
-  it("keeps explicit focus bindings even when their agent differs from routing", () => {
+it.each([
+  ["stale route-shaped", undefined, true],
+  ["explicit focus", { boundBy: "user-1", label: "oldagent" }, false],
+] as const)(
+  "handles %s bindings after the configured agent changes",
+  (_name, metadata, ignored) => {
     expect(
       shouldIgnoreStaleDiscordRouteBinding({
         route,
-        bindingRecord: {
-          ...bindingRecord,
-          bindingId: "focus-binding",
-          metadata: { boundBy: "user-1", label: "oldagent" },
-        },
+        bindingRecord: { ...bindingRecord, metadata },
       }),
-    ).toBe(false);
-  });
-});
+    ).toBe(ignored);
+  },
+);
