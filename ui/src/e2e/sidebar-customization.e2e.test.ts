@@ -9,7 +9,6 @@ import {
   takeControlUiViewportScreenshot,
 } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import {
-  controlUiBundledSettingsStorageKey,
   controlUiSessionPath,
   installMockGateway,
   waitForControlUiRoute,
@@ -17,6 +16,7 @@ import {
 } from "../test-helpers/control-ui-e2e.ts";
 import { workboardUi } from "../test-helpers/control-ui-workboard-fixture.ts";
 import { compactCronJobFixture } from "../test-helpers/cron.ts";
+import { seedChatSettings } from "./chat-layout-fixtures.test-support.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 import { openSidebarPages, openSidebarPinMenu } from "./sidebar-customization.test-support.ts";
 
@@ -112,17 +112,10 @@ suite.define(() => {
               "workboard.cards.list": { boards, cards: [], statuses: ["todo", "done"] },
             },
           });
-          await page.addInitScript(
-            ({ key, leadEntry }) =>
-              localStorage.setItem(
-                key,
-                JSON.stringify({
-                  sidebarAgentsMode: "roster",
-                  railShortcuts: ["route:sessions", leadEntry, "route:cron"],
-                }),
-              ),
-            { key: controlUiBundledSettingsStorageKey(suite.server.baseUrl), leadEntry: entry },
-          );
+          await seedChatSettings(page, suite.server.baseUrl, {
+            sidebarAgentsMode: "roster",
+            railShortcuts: ["route:sessions", entry, "route:cron"],
+          });
           await page.goto(`${suite.server.baseUrl}${route}`);
           if (label === "Workboard") {
             await page.locator(".workboard-page-title", { hasText: "Operations" }).waitFor();
@@ -795,27 +788,9 @@ suite.define(() => {
       },
       async ({ page }) => {
         await installMockGateway(page, {
-          methodResponses: {
-            "sessions.list": {
-              count: 1,
-              defaults: {
-                contextTokens: null,
-                model: "gpt-5.5",
-                modelProvider: "openai",
-              },
-              path: "",
-              sessions: [
-                {
-                  hasActiveRun: true,
-                  key: "main",
-                  kind: "direct",
-                  status: "running",
-                  updatedAt: 100,
-                },
-              ],
-              ts: 100,
-            },
-          },
+          sessions: [
+            { hasActiveRun: true, key: "main", kind: "direct", status: "running", updatedAt: 100 },
+          ],
         });
 
         await page.goto(`${suite.server.baseUrl}chat`);
