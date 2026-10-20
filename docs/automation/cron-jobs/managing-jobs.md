@@ -229,7 +229,7 @@ Set `cron.skipMissedJobs: true` to skip recurring (`cron` and `every`) slots mis
 
 Disable automatic runs: `cron.enabled: false` or `OPENCLAW_SKIP_CRON=1`. These settings do not prevent manual runs.
 
-To keep scheduled agent turns while blocking automation commands and scripts on the Gateway host, start the Gateway with `OPENCLAW_DISABLE_CRON_HOST_EXECUTION=1` in its launch environment. The Gateway refuses command and script payloads, condition triggers, and process-backed `on-exit` and `stream` schedules, including manual runs. Existing blocked jobs can still be disabled or removed. The restriction does not govern tools used by agent turns and cannot be changed through Gateway configuration; restart with a changed launch environment to change it.
+To keep scheduled agent turns while blocking automation commands and scripts on the Gateway host, start the Gateway with `OPENCLAW_DISABLE_CRON_HOST_EXECUTION=1` in its launch environment. The Gateway refuses command and script payloads, condition triggers, `on-exit` schedules, and Gateway-hosted `stream` sources, including manual runs. Authorized sandbox-backed stream sources remain available. Existing blocked jobs can still be disabled or removed. The restriction does not govern tools used by agent turns and cannot be changed through Gateway configuration; restart with a changed launch environment to change it.
 
 <AccordionGroup>
   <Accordion title="Retry behavior">

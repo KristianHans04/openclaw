@@ -90,7 +90,7 @@ export class TerminalSessionManager {
     this.getBufferedAmount = options.getBufferedAmount ?? (() => undefined);
     this.spawn = options.spawn ?? spawnTerminalPty;
     this.gatewayLocalTerminalBlockReason = options.disableGatewayLocalTerminals
-      ? "Gateway-local terminals are disabled by deployment policy"
+      ? "Gateway-local terminals are disabled by deployment policy; contact the Gateway deployment administrator to enable them."
       : undefined;
     this.withOpenAdmission = options.withOpenAdmission;
     this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;

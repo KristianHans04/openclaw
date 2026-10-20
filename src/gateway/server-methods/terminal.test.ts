@@ -197,7 +197,7 @@ describe("terminal gateway policy", () => {
       expect(openTerminal).not.toHaveBeenCalled();
       expectFailure(respond, {
         code: ErrorCodes.UNAVAILABLE,
-        message: "Gateway-local terminals are disabled by deployment policy",
+        message: expect.stringContaining("contact the Gateway deployment administrator"),
       });
     } finally {
       manager.disposeAll();
