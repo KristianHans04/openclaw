@@ -41,7 +41,7 @@ export function registerSkillsRefreshTests(refreshSkillsDiscoveryMock: ReturnTyp
       });
       setGatewayPluginMetadataSnapshot(previousMetadata);
       let acceptedConfig: OpenClawConfig | undefined;
-      refreshSkillsDiscoveryMock.mockImplementation(async ({ config: candidateConfig }) => {
+      refreshSkillsDiscoveryMock.mockImplementation(({ config: candidateConfig }) => {
         expect(candidateConfig).toEqual(acceptedConfig);
         order.push("skills");
       });
