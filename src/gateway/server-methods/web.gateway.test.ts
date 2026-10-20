@@ -1,19 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
-import { createRequestGatewayMethodRegistry, handleGatewayRequest } from "../server-methods.js";
+import {
+  authorizationClient,
+  dispatchAuthorizationRequest as dispatch,
+} from "../server-methods.authorization.test-support.js";
+import { createRequestGatewayMethodRegistry } from "../server-methods.js";
 import type { GatewayRequestContext } from "./types.js";
 
-afterEach(() => {
-  resetPluginRuntimeStateForTest();
-});
+afterEach(resetPluginRuntimeStateForTest);
+
+const startParams = {
+  accountId: undefined,
+  force: false,
+  timeoutMs: undefined,
+  verbose: false,
+  assertCredentialPersistenceCurrent: expect.any(Function),
+};
 
 function registryEntry(
   id: string,
-  gateway: {
-    loginWithQrStart: ReturnType<typeof vi.fn>;
-    loginWithQrWait?: ReturnType<typeof vi.fn>;
-  },
+  start: ReturnType<typeof vi.fn>,
+  wait?: ReturnType<typeof vi.fn>,
   aliases: string[] = [],
 ) {
   return {
@@ -23,10 +31,8 @@ function registryEntry(
       id,
       config: { listAccountIds: () => ["default"] },
       meta: { aliases },
-      gatewayMethods: gateway.loginWithQrWait
-        ? ["web.login.start", "web.login.wait"]
-        : ["web.login.start"],
-      gateway,
+      gatewayMethods: wait ? ["web.login.start", "web.login.wait"] : ["web.login.start"],
+      gateway: { loginWithQrStart: start, ...(wait ? { loginWithQrWait: wait } : {}) },
     },
   };
 }
@@ -45,71 +51,40 @@ function requestContext(withLogger = false) {
 
 describe("web QR login Gateway dispatch", () => {
   it("routes an alias and forwards the opaque session key through the Gateway", async () => {
-    const weixinStart = vi.fn().mockResolvedValue({
-      message: "scan",
-      sessionKey: "opaque-session",
-    });
-    const weixinWait = vi.fn().mockResolvedValue({
-      connected: true,
-      message: "connected",
-    });
+    const weixinStart = vi.fn().mockResolvedValue({ sessionKey: "opaque-session" });
+    const weixinWait = vi.fn().mockResolvedValue({ connected: true, message: "connected" });
     const whatsappStart = vi.fn();
     const whatsappWait = vi.fn();
     setActivePluginRegistry(
       createTestRegistry([
-        registryEntry("whatsapp", {
-          loginWithQrStart: whatsappStart,
-          loginWithQrWait: whatsappWait,
-        }),
-        registryEntry(
-          "openclaw-weixin",
-          { loginWithQrStart: weixinStart, loginWithQrWait: weixinWait },
-          ["weixin", "wechat"],
-        ),
+        registryEntry("whatsapp", whatsappStart, whatsappWait),
+        registryEntry("openclaw-weixin", weixinStart, weixinWait, ["weixin", "wechat"]),
       ]),
     );
     const context = requestContext(true);
-    const client = {
-      connId: "conn-test",
-      connect: {
-        minProtocol: 1,
-        maxProtocol: 1,
-        role: "operator",
-        scopes: ["operator.admin"],
+    const client = authorizationClient(
+      "conn-test",
+      ["operator.admin"],
+      {},
+      {
         client: { id: "cli", version: "test", platform: "test", mode: "cli" },
       },
-    } as never;
+    );
 
-    const dispatch = async (
-      method: "web.login.start" | "web.login.wait",
-      params: Record<string, unknown>,
-    ) => {
-      const respond = vi.fn();
-      await handleGatewayRequest({
-        req: { type: "req", id: method, method, params },
-        respond,
-        client,
-        isWebchatConnect: () => false,
-        context,
-      });
-      return respond;
-    };
-
-    const startRespond = await dispatch("web.login.start", { channel: "wechat" });
-    const waitRespond = await dispatch("web.login.wait", {
-      channel: "weixin",
-      sessionKey: "opaque-session",
-    });
+    const options = { context, client };
+    const startRespond = await dispatch("web.login.start", { channel: "wechat" }, options);
+    const waitRespond = await dispatch(
+      "web.login.wait",
+      {
+        channel: "weixin",
+        sessionKey: "opaque-session",
+      },
+      options,
+    );
 
     expect(whatsappStart).not.toHaveBeenCalled();
     expect(whatsappWait).not.toHaveBeenCalled();
-    expect(weixinStart).toHaveBeenCalledWith({
-      accountId: undefined,
-      force: false,
-      timeoutMs: undefined,
-      verbose: false,
-      assertCredentialPersistenceCurrent: expect.any(Function),
-    });
+    expect(weixinStart).toHaveBeenCalledWith(startParams);
     expect(weixinWait).toHaveBeenCalledWith({
       accountId: undefined,
       timeoutMs: undefined,
@@ -131,41 +106,28 @@ describe("web QR login Gateway dispatch", () => {
   it("routes explicit selectors through the registry attached to the request", async () => {
     const globalWhatsappStart = vi.fn();
     const scopedWeixinStart = vi.fn().mockResolvedValue({ connected: true });
-    const globalRegistry = createTestRegistry([
-      registryEntry("whatsapp", { loginWithQrStart: globalWhatsappStart }),
-    ]);
+    const globalRegistry = createTestRegistry([registryEntry("whatsapp", globalWhatsappStart)]);
     const scopedRegistry = createTestRegistry([
-      registryEntry("openclaw-weixin", { loginWithQrStart: scopedWeixinStart }, ["wechat"]),
+      registryEntry("openclaw-weixin", scopedWeixinStart, undefined, ["wechat"]),
     ]);
     setActivePluginRegistry(globalRegistry);
     const methodRegistry = {
       ...createRequestGatewayMethodRegistry(),
       pluginRegistry: scopedRegistry,
     };
-    const respond = vi.fn();
-
-    await handleGatewayRequest({
-      methodRegistry,
-      req: {
-        type: "req",
-        id: "scoped",
-        method: "web.login.start",
-        params: { channel: "wechat" },
+    const respond = await dispatch(
+      "web.login.start",
+      { channel: "wechat" },
+      {
+        methodRegistry,
+        client: null,
+        context: requestContext(),
       },
-      respond,
-      client: null,
-      isWebchatConnect: () => false,
-      context: requestContext(),
-    });
+      "scoped",
+    );
 
     expect(globalWhatsappStart).not.toHaveBeenCalled();
-    expect(scopedWeixinStart).toHaveBeenCalledWith({
-      accountId: undefined,
-      force: false,
-      timeoutMs: undefined,
-      verbose: false,
-      assertCredentialPersistenceCurrent: expect.any(Function),
-    });
+    expect(scopedWeixinStart).toHaveBeenCalledWith(startParams);
     expect(respond).toHaveBeenCalledWith(true, { connected: true }, undefined);
   });
 });

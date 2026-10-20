@@ -203,16 +203,10 @@ describe("webHandlers web.login.start", () => {
       context,
     );
 
-    if (stopsChannel) {
-      expect(stopChannel).toHaveBeenCalledWith("whatsapp", "default");
-    } else {
-      expect(stopChannel).not.toHaveBeenCalled();
-    }
-    if (restartsChannel) {
-      expect(startChannel).toHaveBeenCalledWith("whatsapp", "default");
-    } else {
-      expect(startChannel).not.toHaveBeenCalled();
-    }
+    expect({ stop: stopChannel.mock.calls, start: startChannel.mock.calls }).toEqual({
+      stop: stopsChannel ? [["whatsapp", "default"]] : [],
+      start: restartsChannel ? [["whatsapp", "default"]] : [],
+    });
     expect(respond).toHaveBeenCalledWith(true, result, undefined);
   });
 
