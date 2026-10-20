@@ -3,8 +3,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { chromium } from "playwright";
-import { describe, expect, inject, it } from "vitest";
+import { chromium, type Browser } from "playwright";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import type { ModelsListResult } from "../../../packages/gateway-protocol/src/schema/agents-models-skills.js";
 import type { AuthHealthSummary } from "../../../src/agents/auth-health.js";
 import type { ProfileUsageStats } from "../../../src/agents/auth-profiles/types.js";
@@ -42,6 +42,17 @@ type ModelsStatus = {
     oauth: Pick<AuthHealthSummary, "profiles">;
   };
 };
+
+let browser: Browser;
+beforeAll(async () => {
+  browser = await chromium.launch({
+    headless: true,
+    executablePath: inject("controlUiE2eChromium").executablePath,
+  });
+});
+afterAll(async () => {
+  await browser?.close();
+});
 
 function clearSavedBlock(fixture: QuotaFixture): SavedClearReceipt {
   const script = fileURLToPath(
@@ -134,16 +145,12 @@ async function captureFinalStatus(
   expect(dashboard.code, reason ?? dashboard.stderr).toBe(0);
   const url = new URL("settings/model-providers", browserUrl);
   url.hash = new URL(browserUrl).hash;
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: inject("controlUiE2eChromium").executablePath,
+  const context = await browser.newContext({
+    locale: "en-US",
+    serviceWorkers: "block",
+    viewport: { width: 1280, height: 900 },
   });
   try {
-    const context = await browser.newContext({
-      locale: "en-US",
-      serviceWorkers: "block",
-      viewport: { width: 1280, height: 900 },
-    });
     const page = await context.newPage();
     page.setDefaultTimeout(60_000);
     page.on("websocket", (socket) => {
@@ -250,9 +257,8 @@ async function captureFinalStatus(
         });
       }
     }
-    await context.close();
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 
