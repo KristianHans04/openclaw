@@ -5,10 +5,9 @@ import { withEnvAsync } from "../test-utils/env.js";
 
 const mocks = vi.hoisted(() => {
   const logs: string[] = [];
-  const errors: string[] = [];
   const runtime = {
     log: vi.fn((value: unknown) => logs.push(String(value))),
-    error: vi.fn((value: unknown) => errors.push(String(value))),
+    error: vi.fn(),
     writeJson: vi.fn((value: unknown, space = 2) =>
       logs.push(JSON.stringify(value, null, space > 0 ? space : undefined)),
     ),
@@ -19,7 +18,7 @@ const mocks = vi.hoisted(() => {
       throw new Error(`__exit__:${code}`);
     }),
   };
-  return { logs, errors, runtime, searchClawHubPackages: vi.fn() };
+  return { logs, runtime, searchClawHubPackages: vi.fn() };
 });
 
 vi.mock("../runtime.js", () => ({
@@ -35,20 +34,15 @@ vi.mock("../infra/clawhub-packages.js", () => ({
 const { runPluginsSearchCommand } = await import("./plugins-search-command.js");
 const { registerPluginsCli } = await import("./plugins-cli.js");
 
-function result(
-  overrides: Partial<ClawHubPackageSearchResult["package"]>,
-  score = 1,
-): ClawHubPackageSearchResult {
+type Package = ClawHubPackageSearchResult["package"];
+function result(name: string, overrides: Partial<Package> = {}, score = 1) {
   return {
     score,
     package: {
-      name: "plugin",
-      displayName: "Plugin",
+      name,
       family: "bundle-plugin",
       channel: "community",
       isOfficial: false,
-      createdAt: 1,
-      updatedAt: 1,
       ...overrides,
     },
   };
@@ -57,11 +51,7 @@ function result(
 describe("plugins search command", () => {
   beforeEach(() => {
     mocks.logs.length = 0;
-    mocks.errors.length = 0;
-    mocks.runtime.log.mockClear();
-    mocks.runtime.error.mockClear();
-    mocks.runtime.writeJson.mockClear();
-    mocks.runtime.exit.mockClear();
+    vi.clearAllMocks();
     mocks.searchClawHubPackages.mockReset();
   });
 
@@ -75,29 +65,10 @@ describe("plugins search command", () => {
     async (packageName, profile, container, context, spec) => {
       mocks.searchClawHubPackages
         .mockResolvedValueOnce([
-          result(
-            {
-              name: packageName,
-              displayName: "Calendar",
-              family: "code-plugin",
-              summary: "Calendar sync",
-              latestVersion: "1.2.3",
-            },
-            12,
-          ),
+          result(packageName, { family: "code-plugin", summary: "Calendar sync" }, 12),
         ])
         .mockResolvedValueOnce([
-          result(
-            {
-              name: "openclaw-calendar-bundle",
-              displayName: "Calendar Bundle",
-              channel: "official",
-              isOfficial: true,
-              summary: "Calendar bundle",
-              latestVersion: "2.0.0",
-            },
-            10,
-          ),
+          result("openclaw-calendar-bundle", { channel: "official", isOfficial: true }, 10),
         ]);
 
       await withEnvAsync(
@@ -124,7 +95,7 @@ describe("plugins search command", () => {
 
   it("formats catalog version labels while preserving raw JSON values", async () => {
     const results = ["1.2.3", "v1.2.3", "V1.2.3", "canary", "  v1.2.3  ", undefined].map(
-      (latestVersion, index) => result({ name: `plugin-${index}`, latestVersion }),
+      (latestVersion, index) => result(`plugin-${index}`, { latestVersion }),
     );
     mocks.searchClawHubPackages.mockResolvedValue(results);
 
@@ -146,25 +117,20 @@ describe("plugins search command", () => {
     expect(mocks.runtime.writeJson).toHaveBeenCalledExactlyOnceWith({ results }, 2);
   });
 
-  it("leaves missing-query JSON failures to the root renderer", async () => {
-    await expect(runPluginsSearchCommand([], { json: true }, mocks.runtime)).rejects.toThrow(
-      "Usage: openclaw plugins search <query>",
-    );
-
-    expect(mocks.runtime.error).not.toHaveBeenCalled();
-    expect(mocks.runtime.exit).not.toHaveBeenCalled();
-  });
-
-  it("leaves ClawHub JSON failures to the root renderer", async () => {
-    mocks.searchClawHubPackages.mockRejectedValueOnce(new Error("offline fixture"));
-
-    await expect(
-      runPluginsSearchCommand("calendar", { json: true }, mocks.runtime),
-    ).rejects.toThrow("offline fixture");
-
-    expect(mocks.runtime.error).not.toHaveBeenCalled();
-    expect(mocks.runtime.exit).not.toHaveBeenCalled();
-  });
+  it.each([
+    [[], "Usage: openclaw plugins search <query>"],
+    ["calendar", "offline fixture"],
+  ] satisfies [string | string[], string][])(
+    "leaves JSON failure for %j to the root renderer",
+    async (query, message) => {
+      mocks.searchClawHubPackages.mockRejectedValueOnce(new Error("offline fixture"));
+      await expect(runPluginsSearchCommand(query, { json: true }, mocks.runtime)).rejects.toThrow(
+        message,
+      );
+      expect(mocks.runtime.error).not.toHaveBeenCalled();
+      expect(mocks.runtime.exit).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects partial numeric search limits", async () => {
     const program = new Command();

@@ -17,20 +17,17 @@ vi.mock("../plugins/manifest-registry-installed.js", () => ({
 const { listPersistedBundledPluginLocationBridges, listPersistedBundledPluginRecoveryLocations } =
   await import("../plugins/location-bridges.js");
 
-function makeIndex(
-  pluginId: string,
-  overrides: Partial<InstalledPluginIndex["plugins"][number]> = {},
-) {
-  const record: InstalledPluginIndex["plugins"][number] = {
+type BridgeRecord = Pick<
+  InstalledPluginIndex["plugins"][number],
+  "pluginId" | "rootDir" | "origin" | "enabled" | "packageInstall"
+>;
+
+function makeIndex(pluginId: string, overrides: Partial<BridgeRecord> = {}) {
+  const record: BridgeRecord = {
     pluginId,
-    manifestPath: `/app/dist/extensions/${pluginId}/openclaw.plugin.json`,
-    manifestHash: "hash",
-    source: `/app/dist/extensions/${pluginId}/index.js`,
     rootDir: `/app/dist/extensions/${pluginId}`,
     origin: "bundled",
     enabled: true,
-    startup: { sidecar: false, memory: false, agentHarnesses: [] },
-    compat: [],
     ...overrides,
   };
   return { plugins: [record] };
@@ -77,8 +74,6 @@ it("includes exact packaged and legacy paths for disabled bundled records", asyn
 it("does not use a relative persisted bundled root as ownership proof", async () => {
   readPersistedInstalledPluginIndexMock.mockResolvedValue(
     makeIndex("diagnostics-otel", {
-      manifestPath: "extensions/diagnostics-otel/openclaw.plugin.json",
-      source: "extensions/diagnostics-otel/index.js",
       rootDir: "extensions/diagnostics-otel",
     }),
   );

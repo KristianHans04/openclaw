@@ -34,9 +34,7 @@ describe("setPluginEnabledInConfig", () => {
     for (const key of ["allow", "deny"] as const) {
       expect(Object.hasOwn(next.plugins ?? {}, key)).toBe(Object.hasOwn(policy, key));
       expect(next.plugins?.[key]).toEqual(expected[key]);
-      if (Array.isArray(policy[key])) {
-        expect(Object.is(next.plugins?.[key], policy[key])).toBe(false);
-      }
+      expect(Object.is(next.plugins?.[key], policy[key])).toBe(false);
     }
   });
 

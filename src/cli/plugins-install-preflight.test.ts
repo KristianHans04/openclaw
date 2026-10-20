@@ -27,7 +27,11 @@ vi.mock("../plugins/plugin-lifecycle-lease.js", () => ({
   hasPluginLifecycleLease: () => false,
 }));
 
-function expectNoPluginInstallSideEffects(): void {
+async function expectRejected(args: string[], error: string) {
+  await expect(runPluginsCommand(["plugins", "install", ...args, "--force"])).rejects.toThrow(
+    "__exit__:1",
+  );
+  expect(runtimeErrors.at(-1)).toContain(error);
   for (const effect of [
     withPluginLifecycleLeaseMock,
     readConfigFileSnapshotForWriteMock,
@@ -44,14 +48,6 @@ function expectNoPluginInstallSideEffects(): void {
   ]) {
     expect(effect).not.toHaveBeenCalled();
   }
-}
-
-async function expectRejected(args: string[], error: string) {
-  await expect(runPluginsCommand(["plugins", "install", ...args, "--force"])).rejects.toThrow(
-    "__exit__:1",
-  );
-  expect(runtimeErrors.at(-1)).toContain(error);
-  expectNoPluginInstallSideEffects();
 }
 
 describe("plugin install mutation-free preflight", () => {
