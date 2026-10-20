@@ -9,102 +9,89 @@ vi.mock("./sw-refresh.runtime.ts", () => ({
   refreshControlUiServiceWorker: vi.fn(async () => false),
 }));
 
+const disposers: Array<() => void> = [];
 afterEach(() => {
+  disposers.splice(0).forEach((dispose) => dispose());
   vi.mocked(refreshControlUiServiceWorker).mockClear();
   vi.restoreAllMocks();
 });
+
+function setup(phase: ApplicationGatewayPhase, stale = true, hidden = false) {
+  const connect = vi.fn();
+  const visibility = vi.spyOn(document, "visibilityState", "get");
+  visibility.mockReturnValue(hidden ? "hidden" : "visible");
+  const dispose = startGatewayPageActivation(
+    { snapshot: { phase, client: { needsWakeReconnect: stale } }, connect },
+    document,
+    window,
+  );
+  disposers.push(dispose);
+  const foreground = () => {
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+  return { connect, visibility, dispose, foreground };
+}
+const online = () => window.dispatchEvent(new Event("online"));
+const pageshow = (persisted: boolean) =>
+  window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted }));
 
 describe("Gateway page activation", () => {
   it.each(["stopped", "offline", "reload-required"] as const)(
     "preserves %s across page restoration, online, and visibility signals",
     async (phase: ApplicationGatewayPhase) => {
-      const connect = vi.fn();
-      const visibility = vi.spyOn(document, "visibilityState", "get");
-      visibility.mockReturnValue("visible");
-      const dispose = startGatewayPageActivation(
-        { snapshot: { phase, client: { needsWakeReconnect: true } }, connect },
-        document,
-        window,
-      );
-      try {
-        for (const activate of [
-          () => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })),
-          () => window.dispatchEvent(new Event("online")),
-          () => {
-            visibility.mockReturnValue("hidden");
-            document.dispatchEvent(new Event("visibilitychange"));
-            visibility.mockReturnValue("visible");
-            document.dispatchEvent(new Event("visibilitychange"));
-          },
-        ]) {
-          const refreshed = new Promise<void>((resolve) => {
-            vi.mocked(refreshControlUiServiceWorker).mockImplementationOnce(async () => {
-              resolve();
-              return false;
-            });
+      const { connect, visibility, foreground } = setup(phase);
+      for (const activate of [
+        () => pageshow(true),
+        online,
+        () => {
+          visibility.mockReturnValue("hidden");
+          document.dispatchEvent(new Event("visibilitychange"));
+          foreground();
+        },
+      ]) {
+        const refreshed = new Promise<void>((resolve) => {
+          vi.mocked(refreshControlUiServiceWorker).mockImplementationOnce(async () => {
+            resolve();
+            return false;
           });
-          activate();
-          await refreshed;
-        }
-        expect(connect).not.toHaveBeenCalled();
-        expect(refreshControlUiServiceWorker).toHaveBeenCalledTimes(3);
-      } finally {
-        dispose();
+        });
+        activate();
+        await refreshed;
       }
+      expect(connect).not.toHaveBeenCalled();
+      expect(refreshControlUiServiceWorker).toHaveBeenCalledTimes(3);
     },
   );
 
   it("coalesces foreground signals into one stale-client recovery", async () => {
-    const connect = vi.fn();
-    const visibility = vi.spyOn(document, "visibilityState", "get");
-    visibility.mockReturnValue("hidden");
-    const dispose = startGatewayPageActivation(
-      { snapshot: { phase: "reconnecting", client: { needsWakeReconnect: true } }, connect },
-      document,
-      window,
-    );
-
-    visibility.mockReturnValue("visible");
-    document.dispatchEvent(new Event("visibilitychange"));
-    window.dispatchEvent(new Event("online"));
+    const { connect, foreground } = setup("reconnecting", true, true);
+    foreground();
+    online();
     await Promise.resolve();
 
     expect(connect).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(refreshControlUiServiceWorker).toHaveBeenCalledOnce());
-    dispose();
   });
 
   it("keeps a healthy client mounted when the browser reports online", async () => {
-    const connect = vi.fn();
-    const dispose = startGatewayPageActivation(
-      { snapshot: { phase: "connected", client: { needsWakeReconnect: false } }, connect },
-      document,
-      window,
-    );
-
-    window.dispatchEvent(new Event("online"));
+    const { connect } = setup("connected", false);
+    online();
     await Promise.resolve();
 
     expect(connect).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(refreshControlUiServiceWorker).toHaveBeenCalledOnce());
-    dispose();
   });
 
   it("ignores initial pageshow and removes every listener on dispose", async () => {
-    const connect = vi.fn();
-    const dispose = startGatewayPageActivation(
-      { snapshot: { phase: "connecting", client: { needsWakeReconnect: true } }, connect },
-      document,
-      window,
-    );
-
-    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+    const { connect, dispose } = setup("connecting");
+    pageshow(false);
     await Promise.resolve();
     expect(connect).not.toHaveBeenCalled();
 
     dispose();
-    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
-    window.dispatchEvent(new Event("online"));
+    pageshow(true);
+    online();
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });

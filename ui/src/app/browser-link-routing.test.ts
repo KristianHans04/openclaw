@@ -32,21 +32,23 @@ function startBrowserLinkRouting(available = true) {
   nativeRouting = startNativeLinkRouting({
     shouldOpenInControlUiBrowser: () => available,
   });
-}
-
-function collectBrowserRequests(urls: string[]) {
+  const requests: unknown[] = [];
   const listener = (event: Event) => {
-    const detail = (event as CustomEvent<{ url?: string }>).detail;
-    urls.push(detail.url ?? "");
+    requests.push((event as CustomEvent).detail);
   };
   window.addEventListener(BROWSER_PANEL_TOGGLE_EVENT, listener);
   stopCollectingBrowserRequests = () =>
     window.removeEventListener(BROWSER_PANEL_TOGGLE_EVENT, listener);
+  return requests;
 }
 
-beforeEach(() => {
-  document.body.replaceChildren();
-});
+function dispatchLink(href: string, init: MouseEventInit = {}, attributes = {}, middle = false) {
+  const event = mouseEvent(middle ? "auxclick" : "click", init);
+  appendLink(href, attributes).dispatchEvent(event);
+  return event;
+}
+
+beforeEach(() => document.body.replaceChildren());
 
 afterEach(() => {
   nativeRouting?.dispose();
@@ -61,43 +63,30 @@ afterEach(() => {
 describe("Control UI browser link routing", () => {
   it("preserves existing browser behavior by default", async () => {
     startBrowserLinkRouting(false);
-    const event = mouseEvent("click");
-
-    appendLink("https://example.com/report").dispatchEvent(event);
-
-    expect(event.defaultPrevented).toBe(false);
+    expect(dispatchLink("https://example.com/report").defaultPrevented).toBe(false);
   });
 
   it("routes primary, modified, middle, and new-window links to new browser-panel tabs", async () => {
-    const urls: string[] = [];
-    collectBrowserRequests(urls);
-    startBrowserLinkRouting();
-
-    const cases: Array<[HTMLAnchorElement, MouseEvent]> = [
-      [appendLink("https://example.com/primary"), mouseEvent("click")],
-      [appendLink("https://example.com/meta"), mouseEvent("click", { metaKey: true })],
-      [appendLink("https://example.com/control"), mouseEvent("click", { ctrlKey: true })],
-      [appendLink("https://example.com/middle"), mouseEvent("auxclick")],
-      [appendLink("https://example.com/new-window", { target: "_blank" }), mouseEvent("click")],
+    const requests = startBrowserLinkRouting();
+    const cases: Array<[string, MouseEventInit?, Record<string, string>?, boolean?]> = [
+      ["primary"],
+      ["meta", { metaKey: true }],
+      ["control", { ctrlKey: true }],
+      ["middle", {}, {}, true],
+      ["new-window", {}, { target: "_blank" }],
     ];
-
-    for (const [anchor, event] of cases) {
-      anchor.dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(true);
+    for (const [name, init, attributes, middle] of cases) {
+      expect(
+        dispatchLink(`https://example.com/${name}`, init, attributes, middle).defaultPrevented,
+      ).toBe(true);
     }
-    expect(urls).toEqual([
-      "https://example.com/primary",
-      "https://example.com/meta",
-      "https://example.com/control",
-      "https://example.com/middle",
-      "https://example.com/new-window",
-    ]);
+    expect(requests).toEqual(
+      cases.map(([name]) => ({ open: true, url: `https://example.com/${name}` })),
+    );
   });
 
   it("preserves link handlers that cancel navigation", async () => {
-    const urls: string[] = [];
-    collectBrowserRequests(urls);
-    startBrowserLinkRouting();
+    const requests = startBrowserLinkRouting();
     const anchor = appendLink("https://example.com/handled");
     anchor.addEventListener("click", (event) => event.preventDefault());
     const event = mouseEvent("click");
@@ -105,7 +94,7 @@ describe("Control UI browser link routing", () => {
     anchor.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
-    expect(urls).toEqual([]);
+    expect(requests).toEqual([]);
   });
 
   it.each([false, true])(
@@ -121,17 +110,8 @@ describe("Control UI browser link routing", () => {
           },
         },
       });
-      const requests: unknown[] = [];
-      const listener = (event: Event) => requests.push((event as CustomEvent).detail);
-      window.addEventListener(BROWSER_PANEL_TOGGLE_EVENT, listener);
-      stopCollectingBrowserRequests = () =>
-        window.removeEventListener(BROWSER_PANEL_TOGGLE_EVENT, listener);
-      startBrowserLinkRouting(enabled);
-      const event = mouseEvent("click");
-
-      appendLink("https://example.com/report").dispatchEvent(event);
-
-      expect(event.defaultPrevented).toBe(true);
+      const requests = startBrowserLinkRouting(enabled);
+      expect(dispatchLink("https://example.com/report").defaultPrevented).toBe(true);
       expect(postMessage).not.toHaveBeenCalled();
       expect(requests).toEqual([
         {
@@ -144,30 +124,20 @@ describe("Control UI browser link routing", () => {
   );
 
   it("ignores local, download, file, non-web, Shift/Alt, and right-click targets", async () => {
-    const urls: string[] = [];
-    collectBrowserRequests(urls);
-    startBrowserLinkRouting();
-    const cases: Array<[HTMLAnchorElement, MouseEvent]> = [
-      [appendLink(`${location.origin}/usage`), mouseEvent("click")],
-      [
-        appendLink("https://example.com/archive.zip", { download: "archive.zip" }),
-        mouseEvent("click"),
-      ],
-      [
-        appendLink("https://example.com/file", { "data-file-path": "README.md" }),
-        mouseEvent("click"),
-      ],
-      [appendLink("mailto:hello@example.com"), mouseEvent("click")],
-      [appendLink("tel:+15555550123"), mouseEvent("click")],
-      [appendLink("https://example.com/shift"), mouseEvent("click", { shiftKey: true })],
-      [appendLink("https://example.com/alt"), mouseEvent("click", { altKey: true })],
-      [appendLink("https://example.com/context"), mouseEvent("auxclick", { button: 2 })],
+    const requests = startBrowserLinkRouting();
+    const cases: Array<[string, MouseEventInit?, Record<string, string>?, boolean?]> = [
+      [`${location.origin}/usage`],
+      ["https://example.com/archive.zip", {}, { download: "archive.zip" }],
+      ["https://example.com/file", {}, { "data-file-path": "README.md" }],
+      ["mailto:hello@example.com"],
+      ["tel:+15555550123"],
+      ["https://example.com/shift", { shiftKey: true }],
+      ["https://example.com/alt", { altKey: true }],
+      ["https://example.com/context", { button: 2 }, {}, true],
     ];
-
-    for (const [anchor, event] of cases) {
-      anchor.dispatchEvent(event);
-      expect(event.defaultPrevented).toBe(false);
+    for (const args of cases) {
+      expect(dispatchLink(...args).defaultPrevented).toBe(false);
     }
-    expect(urls).toEqual([]);
+    expect(requests).toEqual([]);
   });
 });

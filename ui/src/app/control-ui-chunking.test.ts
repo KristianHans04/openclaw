@@ -7,6 +7,50 @@ import {
   controlUiStableChunkName,
 } from "../../config/control-ui-chunking.ts";
 
+const modulePath = (relative: string) => new URL(relative, import.meta.url).pathname;
+async function buildFixture(
+  entry: string,
+  sources: Map<string, string>,
+  codeSplitting = controlUiCodeSplitting,
+) {
+  const result = await build({
+    configFile: false,
+    publicDir: false,
+    logLevel: "silent",
+    plugins: [
+      {
+        name: "chunking-fixture",
+        enforce: "pre",
+        resolveId: (id) => (sources.has(id) ? id : null),
+        load: (id) => sources.get(id) ?? null,
+      },
+    ],
+    build: {
+      write: false,
+      minify: false,
+      rolldownOptions: {
+        input: entry,
+        preserveEntrySignatures: "allow-extension",
+        output: { codeSplitting, strictExecutionOrder: true },
+      },
+    },
+  });
+  if (Array.isArray(result) || !("output" in result)) {
+    throw new Error("Expected one in-memory build");
+  }
+  const chunks = result.output.filter((asset) => asset.type === "chunk");
+  const staticImports = (file: string, visited = new Set<string>()): Set<string> => {
+    if (!visited.has(file)) {
+      visited.add(file);
+      chunks
+        .find((chunk) => chunk.fileName === file)!
+        .imports.forEach((id) => staticImports(id, visited));
+    }
+    return visited;
+  };
+  return { output: result.output, chunks, staticImports };
+}
+
 describe("Control UI build chunking", () => {
   it("keeps the optional JSON5 parser outside the eager validation graph", async () => {
     const zod = new URL("../../node_modules/zod/index.js", import.meta.url).pathname;
@@ -20,49 +64,14 @@ describe("Control UI build chunking", () => {
       [zod, "export const validate = () => true;"],
       [json5, "export const parse = () => ({});"],
     ]);
-    const result = await build({
-      configFile: false,
-      publicDir: false,
-      logLevel: "silent",
-      plugins: [
-        {
-          name: "config-parser-fixture",
-          enforce: "pre",
-          resolveId: (id) => (sources.has(id) ? id : null),
-          load: (id) => sources.get(id) ?? null,
-        },
-      ],
-      build: {
-        write: false,
-        minify: false,
-        rolldownOptions: {
-          input: entry,
-          preserveEntrySignatures: "allow-extension",
-          output: { codeSplitting: controlUiCodeSplitting, strictExecutionOrder: true },
-        },
-      },
-    });
-    if (Array.isArray(result) || !("output" in result)) {
-      throw new Error("Expected one in-memory build");
-    }
-    const chunks = result.output.filter((asset) => asset.type === "chunk");
+    const { chunks, staticImports } = await buildFixture(entry, sources);
     const entryChunk = chunks.find((chunk) => chunk.isEntry)!;
     const parserChunk = chunks.find((chunk) => json5 in chunk.modules)!;
-    const dependencies = new Set<string>();
-    const visit = (file: string) => {
-      if (dependencies.has(file)) {
-        return;
-      }
-      dependencies.add(file);
-      chunks.find((chunk) => chunk.fileName === file)?.imports.forEach(visit);
-    };
-    visit(entryChunk.fileName);
-    expect(dependencies.has(parserChunk.fileName)).toBe(false);
+    expect(staticImports(entryChunk.fileName)).not.toContain(parserChunk.fileName);
     expect(entryChunk.dynamicImports).toContain(parserChunk.fileName);
   });
 
   it("keeps routes and optional code lazy with one shared stylesheet", async () => {
-    const modulePath = (relative: string) => new URL(relative, import.meta.url).pathname;
     const chat = modulePath("../pages/chat/chat-pane.tsx");
     const newSession = modulePath("../pages/new-session/new-session-page.tsx");
     const optional = modulePath("../components/assistant-panel-content.ts");
@@ -90,60 +99,23 @@ describe("Control UI build chunking", () => {
       [sharedStyle, ".shared-fixture { color: red; }"],
       [sidebarStyle, ".sidebar-fixture { color: blue; }"],
     ]);
-    const result = await build({
-      configFile: false,
-      publicDir: false,
-      logLevel: "silent",
-      plugins: [
-        {
-          name: "cold-load-fixture",
-          enforce: "pre",
-          resolveId: (id) => (sources.has(id) ? id : null),
-          load: (id) => sources.get(id) ?? null,
-        },
-      ],
-      build: {
-        write: false,
-        minify: false,
-        rolldownOptions: {
-          input: entry,
-          preserveEntrySignatures: "allow-extension",
-          output: {
-            codeSplitting: {
-              ...controlUiCodeSplitting,
-              // A stale capture must not pull a lazy page into the shared boot chunk.
-              groups: controlUiCodeSplitting.groups.map((group) =>
-                group.name === "control-ui-boot-shared"
-                  ? { ...group, test: (id: string) => id === devices || group.test(id) }
-                  : group,
-              ),
-            },
-            strictExecutionOrder: true,
-          },
-        },
-      },
+    const { output, chunks, staticImports } = await buildFixture(entry, sources, {
+      ...controlUiCodeSplitting,
+      // A stale capture must not pull a lazy page into the shared boot chunk.
+      groups: controlUiCodeSplitting.groups.map((group) =>
+        group.name === "control-ui-boot-shared"
+          ? { ...group, test: (id: string) => id === devices || group.test(id) }
+          : group,
+      ),
     });
-    if (Array.isArray(result) || !("output" in result)) {
-      throw new Error("Expected one in-memory build");
-    }
-    const styles = result.output.filter(
+    const styles = output.filter(
       (asset) => asset.type === "asset" && asset.fileName.endsWith(".css"),
     );
     expect(styles).toHaveLength(1);
     expect(styles[0]).toMatchObject({ source: expect.stringContaining(".shared-fixture") });
     expect(styles[0]).toMatchObject({ source: expect.stringContaining(".sidebar-fixture") });
-    const chunks = result.output.filter((asset) => asset.type === "chunk");
     const chatChunk = chunks.find((chunk) => chat in chunk.modules)!;
     const newSessionChunk = chunks.find((chunk) => newSession in chunk.modules)!;
-    const staticImports = (fileName: string, visited = new Set<string>()): Set<string> => {
-      if (!visited.has(fileName)) {
-        visited.add(fileName);
-        for (const imported of chunks.find((chunk) => chunk.fileName === fileName)!.imports) {
-          staticImports(imported, visited);
-        }
-      }
-      return visited;
-    };
     expect(staticImports(chatChunk.fileName)).not.toContain(newSessionChunk.fileName);
     expect(staticImports(newSessionChunk.fileName)).not.toContain(chatChunk.fileName);
     const devicesChunk = chunks.find((chunk) => devices in chunk.modules)!;
@@ -174,18 +146,12 @@ describe("Control UI build chunking", () => {
       ],
       ["/tmp/openclaw-pnpm-node-modules/@noble/ed25519/index.js", "gateway-runtime"],
       ["/repo/ui/src/lib/gateway-methods.ts", "gateway-runtime"],
-      [
-        new URL("../components/sidebar-update-card.tsx", import.meta.url).pathname,
-        "sidebar-update-runtime",
-      ],
-      [
-        new URL("../styles/sidebar-update-card.css", import.meta.url).pathname,
-        "sidebar-update-runtime",
-      ],
-      [new URL("../pages/chat/route-entry.ts", import.meta.url).pathname, "chat-route-entry"],
-      [new URL("../pages/cron/cron-page.tsx", import.meta.url).pathname, "cron-page"],
-      [new URL("../pages/plugins/plugins-page.tsx", import.meta.url).pathname, "plugins-page"],
-      [new URL("../components/markdown-parser.ts", import.meta.url).pathname, "markdown-runtime"],
+      [modulePath("../components/sidebar-update-card.tsx"), "sidebar-update-runtime"],
+      [modulePath("../styles/sidebar-update-card.css"), "sidebar-update-runtime"],
+      [modulePath("../pages/chat/route-entry.ts"), "chat-route-entry"],
+      [modulePath("../pages/cron/cron-page.tsx"), "cron-page"],
+      [modulePath("../pages/plugins/plugins-page.tsx"), "plugins-page"],
+      [modulePath("../components/markdown-parser.ts"), "markdown-runtime"],
       ["/repo/ui/src/components/config-form.shared.ts", undefined],
       ["/repo/ui/src/lib/clipboard.ts", undefined],
       ["/repo/ui/src/build-info.ts", undefined],
@@ -199,8 +165,7 @@ describe("Control UI build chunking", () => {
   });
 
   it("lets snapshot prewarming load independently of the measured boot groups", () => {
-    const database = new URL("../pages/chat/session-snapshot-database.ts", import.meta.url)
-      .pathname;
+    const database = modulePath("../pages/chat/session-snapshot-database.ts");
     const stableGroup = controlUiCodeSplitting.groups[0];
     const bootGroup = controlUiCodeSplitting.groups.find(
       (group) =>
@@ -216,9 +181,7 @@ describe("Control UI build chunking", () => {
   });
 
   it("consolidates shared boot without pulling in the chat route or optional panels", () => {
-    // Recursive inclusion is a correctness requirement for this group: merging
-    // the lazy boot graph without it emitted chunks whose execution order broke
-    // at application start.
+    // Without recursive inclusion, merged lazy boot chunks broke execution order at startup.
     const sharedGroup = controlUiCodeSplitting.groups.find(
       (group) => group.name === "control-ui-boot-shared",
     );
@@ -227,45 +190,34 @@ describe("Control UI build chunking", () => {
       test: (id: string) => boolean;
     };
     const repoRoot = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
-    // Representative always-loaded boot surface and a lazy island that must
-    // keep its own chunk (terminal runtime is not part of the default boot).
-    expect(bootGroup.test(`${repoRoot}/ui/src/components/app-sidebar.tsx`)).toBe(true);
-    // Chat reaches narration through a dynamic import without a request of its own.
-    expect(bootGroup.test(`${repoRoot}/ui/src/components/app-sidebar-session-narration.ts`)).toBe(
-      true,
-    );
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/chat/chat-page.ts`)).toBe(false);
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/cron/cron-page.tsx`)).toBe(false);
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/plugins/plugins-page.tsx`)).toBe(false);
-    // Fetched shared chunks once co-located the chat view with modules New Session needs.
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/chat/chat-view.ts`)).toBe(false);
-    expect(bootGroup.test(`${repoRoot}/ui/src/styles/chat.ts`)).toBe(false);
-    expect(bootGroup.test(`${repoRoot}/ui/src/components/assistant-panel-content.ts`)).toBe(false);
-    // Opening state stays cheap; rendering the debug overlay belongs to its lazy graph.
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/debug/debug-overlay-state.ts`)).toBe(true);
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/debug/debug-overlay-content.ts`)).toBe(false);
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/debug/debug-overlay.ts`)).toBe(false);
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/debug/debug-overlay-frame.ts`)).toBe(false);
-    expect(bootGroup.test(`${repoRoot}/ui/src/pages/debug/debug-overlay-loading.ts`)).toBe(false);
+    const expectBoot = (path: string, included = false) =>
+      expect(bootGroup.test(`${repoRoot}/ui/src/${path}`), path).toBe(included);
+    expectBoot("components/app-sidebar.tsx", true);
+    expectBoot("components/app-sidebar-session-narration.ts", true);
+    expectBoot("pages/debug/debug-overlay-state.ts", true);
+    expectBoot("pages/chat/chat-page.ts");
+    expectBoot("pages/cron/cron-page.tsx");
+    expectBoot("pages/plugins/plugins-page.tsx");
+    expectBoot("pages/chat/chat-view.ts");
+    expectBoot("styles/chat.ts");
+    expectBoot("components/assistant-panel-content.ts");
+    expectBoot("pages/debug/debug-overlay-content.ts");
+    expectBoot("pages/debug/debug-overlay.ts");
+    expectBoot("pages/debug/debug-overlay-frame.ts");
+    expectBoot("pages/debug/debug-overlay-loading.ts");
     expect(bootGroup.test(`${repoRoot}/node_modules/ghostty-web/dist/index.js`)).toBe(false);
   });
 
   it("derives stable manifest keys across pnpm layouts and platforms", () => {
-    expect(
-      controlUiBootManifestKey(
-        "/repo/node_modules/.pnpm/nanoid@5.0.0/node_modules/nanoid/index.browser.js",
-      ),
-    ).toBe("node_modules/nanoid/index.browser.js");
-    expect(
-      controlUiBootManifestKey(
-        "/repo/node_modules/@example/control/node_modules/nanoid/index.browser.js",
-      ),
-    ).toBe("node_modules/nanoid/index.browser.js");
+    for (const id of [
+      "/repo/node_modules/.pnpm/nanoid@5.0.0/node_modules/nanoid/index.browser.js",
+      "/repo/node_modules/@example/control/node_modules/nanoid/index.browser.js",
+      String.raw`C:\repo\node_modules\nanoid\index.browser.js`,
+    ]) {
+      expect(controlUiBootManifestKey(id), id).toBe("node_modules/nanoid/index.browser.js");
+    }
     expect(controlUiBootManifestKey("/repo/ui/src/main.ts?html-proxy&index=0.js")).not.toContain(
       "?",
-    );
-    expect(controlUiBootManifestKey(String.raw`C:\repo\node_modules\nanoid\index.browser.js`)).toBe(
-      "node_modules/nanoid/index.browser.js",
     );
   });
 });
