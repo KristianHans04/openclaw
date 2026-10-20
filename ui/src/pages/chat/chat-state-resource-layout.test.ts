@@ -1,8 +1,8 @@
 import { expect, it } from "vitest";
 import { loadSettings, saveSettings } from "../../app/settings.ts";
-import { createChatPageStateContext } from "./chat-page.test-support.ts";
 import { createPageState } from "./chat-state-page.ts";
 import { activatePanel, openSlot } from "./sidebar-layout.ts";
+import { createChatPageStateContext } from "./state.test-support.ts";
 
 it.each(["minimize", "close-resource", "explicit-desktop"])(
   "preserves resource layout intent through %s",

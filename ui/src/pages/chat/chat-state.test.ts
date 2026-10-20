@@ -37,7 +37,6 @@ import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
 import { loadChatHistory } from "./chat-history.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
-import { createChatPageSessions, createChatPageStateContext } from "./chat-page.test-support.ts";
 import { removeQueuedMessage, keepVolatileQueuedMessage } from "./chat-queue.ts";
 import { chatRunPresentation } from "./chat-run-presentation.ts";
 import { requestChatSend } from "./chat-send-request.ts";
@@ -65,6 +64,7 @@ import {
   updateQueuedMessageEdit,
 } from "./queued-message-edit.ts";
 import { applySessionMessagePayload } from "./session-message-apply.ts";
+import { createChatPageSessions, createChatPageStateContext } from "./state.test-support.ts";
 import { buildToolStreamIdentity } from "./tool-stream-identity.ts";
 import { createHost as createToolStreamHost } from "./tool-stream.test-helpers.ts";
 

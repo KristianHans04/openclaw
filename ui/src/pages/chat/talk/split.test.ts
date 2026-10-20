@@ -14,9 +14,9 @@ import {
   createTestGatewayClient,
 } from "../../../test-helpers/gateway-client.ts";
 import { createStorageMock } from "../../../test-helpers/storage.ts";
-import { createChatPageStateContext } from "../chat-page.test-support.ts";
 import { stopChatRealtimeTalk, type ChatRealtimeState } from "../chat-realtime.ts";
 import { createPageState } from "../chat-state-page.ts";
+import { createChatPageStateContext } from "../state.test-support.ts";
 
 type AudioProcessor = {
   onaudioprocess: ((event: { inputBuffer: { getChannelData: () => Float32Array } }) => void) | null;
