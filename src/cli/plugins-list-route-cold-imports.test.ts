@@ -27,6 +27,7 @@ vi.mock("../config/config.js", () => ({
   captureRuntimeConfigAsyncReader: () => async () => testState.config,
 }));
 
+// mock-isolation: Capture cold-route output without process exit or real output streams.
 vi.mock("../runtime.js", () => ({
   defaultRuntime: {
     ...createNonExitingRuntimeEnv(),

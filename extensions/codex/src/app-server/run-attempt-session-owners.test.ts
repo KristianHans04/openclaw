@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
   drainAgents: vi.fn(async () => {}),
 }));
 
+// mock-isolation: Record session ownership without opening real session stores.
 vi.mock("openclaw/plugin-sdk/session-store-runtime", () => ({
   resolveStorePath: () => `${process.env.OPENCLAW_STATE_DIR}/agents/main/sessions/sessions.json`,
   patchSessionEntry: async () => {},
@@ -20,6 +21,7 @@ vi.mock("openclaw/plugin-sdk/session-store-runtime", () => ({
   },
 }));
 
+// mock-isolation: Control database drain failures and ordering without live database owners.
 vi.mock("openclaw/plugin-sdk/sqlite-runtime-testing", () => ({
   withSessionHistoryBudgetSweepsForTest: async <T>(run: () => Promise<T>): Promise<T> => {
     try {

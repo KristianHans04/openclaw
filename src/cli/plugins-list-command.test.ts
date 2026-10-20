@@ -21,6 +21,7 @@ function mockPluginListSnapshot(
     loadConfig: () => config,
     captureRuntimeConfigAsyncReader: () => async () => config,
   }));
+  // mock-isolation: Supply synthetic inventory without discovering installed plugins.
   vi.doMock("../plugins/status-snapshot.js", () => ({
     buildPluginRegistrySnapshotReport: () => ({
       workspaceDir: "/workspace",

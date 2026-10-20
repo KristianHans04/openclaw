@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   providers: [] as PluginWebSearchProviderEntry[],
   beforeImport: vi.fn<() => Promise<void>>(),
 }));
+// mock-isolation: Control profile revocation without querying a live identity database.
 vi.mock("./users-profile-access.js", () => ({
   prepareAuthenticatedProfile: async () => ({
     profileId: "original-profile",

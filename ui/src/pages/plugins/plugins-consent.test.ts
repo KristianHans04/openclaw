@@ -97,7 +97,7 @@ function createConsentHarness(
     listeners,
     progress: consent.read().installProgress,
     message: (key: string) => messages[key],
-    emit(requestId: string, status = "started") {
+    emit: (requestId: string, status = "started") => {
       for (const listener of listeners) {
         listener({
           type: "event",

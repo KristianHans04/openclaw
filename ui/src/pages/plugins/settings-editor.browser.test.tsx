@@ -23,7 +23,7 @@ function typeInto(input: HTMLInputElement, value: string) {
 }
 const textContents = (root: ParentNode, selector: string) =>
   [...root.querySelectorAll(selector)].map((element) => element.textContent?.trim());
-const findElement = <T extends Element = HTMLElement>(root: ParentNode, selector: string) =>
+const findElement = <T extends Element = HTMLElement>(root: ParentNode, selector: string): T =>
   root.querySelector<T>(selector)!;
 const configValue = (config: Record<string, unknown>) => ({
   plugins: { entries: { fixture: { config } } },

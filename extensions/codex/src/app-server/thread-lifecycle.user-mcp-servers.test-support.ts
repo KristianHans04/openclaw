@@ -35,31 +35,35 @@ export function setupUserMcpServerTestHooks(): void {
 }
 
 export async function startPolicyHttpServer(): Promise<string> {
-  const port = await listenForNativeResponses(currentTest, async (request, response) => {
-    const body = await text(request);
-    const message = (body ? JSON.parse(body) : {}) as {
-      id?: string | number;
-      method?: string;
-    };
-    if (message.id === undefined) {
-      response.writeHead(202).end();
-      return;
-    }
-    const result =
-      message.method === "initialize"
-        ? {
-            protocolVersion: "2024-11-05",
-            capabilities: { tools: {} },
-            serverInfo: { name: "policy-http-probe", version: "1" },
-          }
-        : message.method === "tools/list"
+  const port = await listenForNativeResponses(currentTest, (request, response) => {
+    void (async () => {
+      const body = await text(request);
+      const message = (body ? JSON.parse(body) : {}) as {
+        id?: string | number;
+        method?: string;
+      };
+      if (message.id === undefined) {
+        response.writeHead(202).end();
+        return;
+      }
+      const result =
+        message.method === "initialize"
           ? {
-              tools: [{ name: "read_docs", description: "read", inputSchema: { type: "object" } }],
+              protocolVersion: "2024-11-05",
+              capabilities: { tools: {} },
+              serverInfo: { name: "policy-http-probe", version: "1" },
             }
-          : {};
-    response
-      .writeHead(200, { "content-type": "application/json" })
-      .end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+          : message.method === "tools/list"
+            ? {
+                tools: [
+                  { name: "read_docs", description: "read", inputSchema: { type: "object" } },
+                ],
+              }
+            : {};
+      response
+        .writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+    })();
   });
   return `http://127.0.0.1:${port}/mcp`;
 }

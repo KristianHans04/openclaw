@@ -69,6 +69,7 @@ const { GatewayPlugin, HttpsAgent, proxyAgent, MockWebSocket, guardedFetch } = a
   },
 );
 
+// mock-isolation: Exercise Gateway setup with captured sockets instead of a live Discord client.
 vi.mock("../internal/gateway.js", async () => ({
   DISCORD_GATEWAY_WS_CLIENT_OPTIONS: { maxPayload: 16 * 1024 * 1024, handshakeTimeout: 30_000 },
   GatewayIntents: (await import("discord-api-types/v10")).GatewayIntentBits,

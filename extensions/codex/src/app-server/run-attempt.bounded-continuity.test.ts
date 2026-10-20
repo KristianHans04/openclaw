@@ -105,7 +105,12 @@ describe("Codex bounded assistant continuity", () => {
     await run;
     const input = requestParams(harness, "turn/start").input;
     assert(Array.isArray(input));
-    const text = input.map((part) => requireRecord(part, "input").text ?? "").join("\n");
+    const text = input
+      .map((part) => {
+        const partText = requireRecord(part, "input").text;
+        return typeof partText === "string" ? partText : "";
+      })
+      .join("\n");
     expect(harness.requests.map((entry) => entry.method)).toContain("thread/start");
     expect(text).not.toContain("synthetic tool payload");
     expect(text).not.toContain("[input omitted]");
@@ -166,6 +171,7 @@ describe("Codex bounded assistant continuity", () => {
       /\[assistant\]\nprevious turn[\s\S]*<\/conversation_context>\n\nCurrent user request:\nhello$/,
     );
     expect(lastHookInput.prompt).not.toMatch(/queued context|tail context/);
+    assert(typeof lastHookInput.prompt === "string");
     const expectedInput = `queued context\n\n${lastHookInput.prompt}\n\ntail context`;
     expect(hookContext).toMatchObject({
       runId: "run-1",
