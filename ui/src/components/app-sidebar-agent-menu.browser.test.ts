@@ -176,7 +176,14 @@ describe.runIf("__vitest_browser__" in globalThis)("sidebar agent menu layout", 
     );
     expect(tiles).toHaveLength(5);
     await expect.poll(() => document.activeElement).toBe(tiles[1]);
-    const { userEvent } = await import("vitest/browser");
+    const { page, userEvent } = await import("vitest/browser");
+    const activeSettings = query(tiles[1]!, ".sidebar-agent-menu__settings");
+    await page.elementLocator(document.body).hover({ position: { x: 0, y: 0 } });
+    expect(getComputedStyle(activeSettings).opacity).toBe("0");
+    await userEvent.hover(tiles[1]!);
+    expect(getComputedStyle(activeSettings).opacity).toBe("1");
+    await page.elementLocator(document.body).hover({ position: { x: 0, y: 0 } });
+    expect(getComputedStyle(activeSettings).opacity).toBe("0");
     await userEvent.keyboard("{ArrowDown}");
     expect(document.activeElement).toBe(tiles[2]);
     await userEvent.tab();

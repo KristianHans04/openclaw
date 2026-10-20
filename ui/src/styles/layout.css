@@ -4644,7 +4644,7 @@ html.openclaw-native-web-chrome
 }
 
 .sidebar-agent-menu__agent-switch:hover .sidebar-agent-menu__settings,
-.sidebar-agent-menu__agent-switch:focus-within .sidebar-agent-menu__settings {
+.sidebar-agent-menu__settings:focus-visible {
   opacity: 1;
   pointer-events: auto;
 }
