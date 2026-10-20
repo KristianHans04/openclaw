@@ -1005,7 +1005,8 @@ puts JSON.generate(rows)
     expect(row("stalled").elapsed).toBeLessThanOrEqual(120);
     expect(row("unavailable")).toMatchObject({
       selected: null,
-      error: "No available watchOS runtime. Install one for the selected Xcode with: xcodebuild -downloadPlatform watchOS",
+      error:
+        "No available watchOS runtime. Install one for the selected Xcode with: xcodebuild -downloadPlatform watchOS",
       elapsed: 0,
     });
   });
@@ -1239,7 +1240,9 @@ puts JSON.generate(results)
       pngs: 9,
       xcresults: 8,
     });
-    expect(row("no-watch").lifecycle.filter(([operation]) => operation === "create")).toContainEqual([
+    expect(
+      row("no-watch").lifecycle.filter(([operation]) => operation === "create"),
+    ).toContainEqual([
       "create",
       "Apple Watch Ultra 4 (49mm)",
       "watch-ultra-4-type",
