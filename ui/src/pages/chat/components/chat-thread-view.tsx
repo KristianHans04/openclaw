@@ -23,6 +23,7 @@ import { elementRef } from "../../../lib/reactive/element-ref.ts";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { listen } from "../../../lib/reactive/listener.ts";
 import { createParkedProjection } from "../../../lib/reactive/parked-projection.ts";
+import { projectPresentation } from "../../../lib/reactive/presentation.ts";
 import { projectOwner, projectSource } from "../../../lib/reactive/projection.ts";
 import {
   getExpandedToolCards,
@@ -75,6 +76,12 @@ export function ChatThread(input: {
   onSettled(() => root && registerTranscriptElement(paneId(), root));
   const search = createMemo(() =>
     projectOwner(getTranscriptState(paneId()).search, (owner) => owner.snapshot, Object.is),
+  );
+  const geometry = createMemo(() => projectOwner(input.transcript, (owner) => owner));
+  const visibility = createMemo(() => projectPresentation(input.props.transcriptVisible ?? true));
+  const geometryRevision = createParkedProjection(
+    () => geometry().revision(),
+    () => visibility().read(),
   );
   const presentation = createMemo(
     () =>
@@ -169,6 +176,8 @@ export function ChatThread(input: {
         </div>
       );
     }
+    // Geometry changes replay the row plan without rebuilding the pane or transcript data.
+    geometryRevision();
     return current().projection.renderRows(sentinel(), historyHeader());
   });
   const announcement = createMemo(() => {

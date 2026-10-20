@@ -178,7 +178,7 @@ it.each([false, true])("re-observes re-stamped rows (foreign host=%s)", async (f
   transcript.dispose();
 });
 
-it("measures newly inserted rows after Solid connects them", async () => {
+it("publishes measured row sizes without a parent redraw", async () => {
   transcriptDomState.detachedRowHeight = 0;
   const props = threadProps("pane-commentary-insert", "agent:main:session-a", [
     { role: "assistant", content: "commentary", timestamp: 1_000 },
@@ -190,7 +190,7 @@ it("measures newly inserted rows after Solid connects them", async () => {
   transcript.update();
   await flushDeferredRowPrune();
   emitRowSizes(transcriptRows(container), 100);
-  draw();
+  flush();
 
   expect(transcriptSize(container)).toBe(200);
 });

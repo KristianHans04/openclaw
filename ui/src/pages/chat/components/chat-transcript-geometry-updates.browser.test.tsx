@@ -1,17 +1,14 @@
 import { expectDefined } from "@openclaw/normalization-core";
+import { createMemo } from "solid-js";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ApplicationContext } from "../../../app/context.ts";
+import { projectOwner } from "../../../lib/reactive/projection.ts";
 import { createMountedPanes } from "../chat-pane-mounted.test-support.ts";
 import "../../../styles.css";
 import "../../../styles/chat.ts";
 import { ChatPaneRuntime } from "../chat-pane-render.ts";
 import { createPaneTestHost } from "../chat-pane.test-support.ts";
-import {
-  handleChatScroll,
-  lockChatScroll,
-  saveChatSessionScrollPosition,
-  type ChatScrollHost,
-} from "../scroll.ts";
+import { handleChatScroll, lockChatScroll, saveChatSessionScrollPosition } from "../scroll.ts";
 import type { TranscriptRow } from "./chat-transcript-layout.ts";
 import { subscribeTranscriptScroll } from "./chat-transcript-scroll-events.ts";
 import { ChatSessionVirtualizerHost } from "./chat-transcript-virtualizer-host.ts";
@@ -49,8 +46,8 @@ class GeometryPane extends ChatPaneRuntime {
     return expectDefined(this.state, "mounted pane state");
   }
 
-  renderGeometry() {
-    const layout = this.transcript.renderSession(this.sessionKey, (session) => {
+  renderGeometryRows() {
+    return this.transcript.renderSession(this.sessionKey, (session) => {
       if (!(session instanceof ChatSessionVirtualizerHost)) {
         throw new Error("Expected the session virtualizer owner");
       }
@@ -67,13 +64,13 @@ class GeometryPane extends ChatPaneRuntime {
         size: virtualizer.getTotalSize(),
       };
     });
+  }
+
+  renderGeometry() {
     return {
       layout: {
         component: GeometryLayout,
-        props: {
-          ...layout,
-          scroll: this.scrollState,
-        },
+        props: { pane: this },
       },
       dialog: undefined,
       capabilityDialogs: undefined,
@@ -82,25 +79,23 @@ class GeometryPane extends ChatPaneRuntime {
   }
 }
 
-function GeometryLayout(props: {
-  contents: HTMLDivElement;
-  size: number;
-  scroll: Pick<
-    ChatScrollHost,
-    "chatReadingHistory" | "chatNewMessagesBelow" | "chatFollowLocked" | "chatUserNearBottom"
-  >;
-}) {
+function GeometryLayout(props: { pane: GeometryPane }) {
+  const source = createMemo(() => projectOwner(props.pane.transcript, (owner) => owner));
+  const layout = createMemo(() => {
+    source().read();
+    return props.pane.renderGeometryRows();
+  });
   return (
     <div class="chat-thread-viewport" style="height: 400px; flex: none; padding: 20px 0">
       <div class="chat-thread" style="overflow-anchor: none">
-        {props.contents}
+        {layout().contents}
         <output
-          data-reading-history={String(props.scroll.chatReadingHistory)}
-          data-new-messages-below={String(props.scroll.chatNewMessagesBelow)}
-          data-follow-locked={String(props.scroll.chatFollowLocked)}
-          data-near-bottom={String(props.scroll.chatUserNearBottom)}
+          data-reading-history={String(props.pane.scrollState.chatReadingHistory)}
+          data-new-messages-below={String(props.pane.scrollState.chatNewMessagesBelow)}
+          data-follow-locked={String(props.pane.scrollState.chatFollowLocked)}
+          data-near-bottom={String(props.pane.scrollState.chatUserNearBottom)}
         >
-          {props.size}
+          {layout().size}
         </output>
       </div>
     </div>
@@ -183,7 +178,7 @@ it("keeps the initial tail rows mounted while their estimated sizes settle", asy
   }
 });
 
-it("commits each settled pane width with its new transcript rect in exactly one render", async () => {
+it("commits each settled pane width in one transcript render without a pane render", async () => {
   const { host, viewport } = await mountPane();
   const updates = vi.spyOn(host, "render");
   const counts: number[] = [];
@@ -194,7 +189,8 @@ it("commits each settled pane width with its new transcript rect in exactly one 
     await settleLayout();
     counts.push(updates.mock.calls.length);
     expect.soft(host.renderedRects[0]).toEqual({ width: Math.round(width), height: 400 });
-    expect.soft(updates).toHaveBeenCalledTimes(1);
+    expect.soft(host.renderedRects).toHaveLength(1);
+    expect.soft(updates).not.toHaveBeenCalled();
     expect(viewport.getBoundingClientRect().width).toBe(width);
   }
   console.info(`Settled width render counts: ${counts.join(", ")}`);
@@ -246,26 +242,17 @@ it.each(["pending", "committed"] as const)(
     const paint = vi.fn();
     const frame = requestAnimationFrame(paint);
     const measure = () => virtualizer.resizeItem(0, 180);
-    if (phase === "committed") {
-      const commit = host.chatState.commitRender.bind(host.chatState);
-      vi.spyOn(host.chatState, "commitRender").mockImplementationOnce(() => {
-        commit();
-        measure();
-      });
-    }
     host.style.width = "780px";
     session.syncViewportGeometry();
     notification.mockClear();
-    if (phase === "pending") {
-      measure();
+    if (phase === "committed") {
+      await host.updateComplete;
     }
+    measure();
     try {
       await host.updateComplete;
-      if (phase === "committed") {
-        await host.updateComplete;
-      }
       expect(notification).toHaveBeenCalledExactlyOnceWith(virtualizer, false);
-      expect(updates).toHaveBeenCalledTimes(phase === "pending" ? 1 : 2);
+      expect(updates).not.toHaveBeenCalled();
       expect(Number(host.querySelector("output")?.textContent)).toBeCloseTo(12060, 6);
       expect(paint).not.toHaveBeenCalled();
     } finally {
@@ -296,11 +283,11 @@ it.each([
       const rect = { width: Math.round(width), height: Math.round(height) };
       expect(session["virtualizer"].scrollRect).toEqual(rect);
       await host.updateComplete;
-      expect(updates).toHaveBeenCalledTimes(1);
+      expect(updates).not.toHaveBeenCalled();
       await settleLayout();
       expect(observed).toEqual([{ width, height }]);
       expect(session["virtualizer"].scrollRect).toEqual(rect);
-      expect(updates).toHaveBeenCalledTimes(1);
+      expect(updates).not.toHaveBeenCalled();
     } finally {
       observer.disconnect();
     }
