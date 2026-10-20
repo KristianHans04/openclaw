@@ -7,7 +7,7 @@ import { readStyleSheet } from "../../../test/helpers/ui-style-fixtures.js";
 import {
   canRunPlaywrightChromium,
   resolvePlaywrightChromiumExecutablePath,
-} from "../test-helpers/control-ui-e2e.ts";
+} from "../test-helpers/playwright-chromium.ts";
 
 export const readStyles = (...names: string[]) =>
   names.map((name) => readStyleSheet(`ui/src/${name}.css`)).join("\n");
