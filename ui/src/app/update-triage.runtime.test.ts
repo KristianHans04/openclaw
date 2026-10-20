@@ -17,6 +17,7 @@ import { createApplicationOverlays } from "./overlays.ts";
 import { projectUpdateRunFailure } from "./update-overlay-helpers.ts";
 import type { UpdateFailureTriage, UpdateTriageAdmission } from "./update-overlay-helpers.ts";
 import { presentUpdateFailureTriage } from "./update-triage.runtime.ts";
+import "../pages/custodian/custodian-surface.tsx";
 
 const FAILURE: UpdateFailureTriage = {
   id: "recorded-attempt",

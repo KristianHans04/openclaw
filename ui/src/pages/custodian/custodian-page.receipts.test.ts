@@ -5,6 +5,7 @@ import { createApplicationContextProvider } from "../../test-helpers/application
 import { waitForFast } from "../../test-helpers/wait-for.ts";
 import { createContext, mountPage } from "./custodian-page.test-harness.ts";
 import { CustodianSessionStore } from "./custodian-session-store.ts";
+import "./custodian-page.tsx";
 
 type Page = Awaited<ReturnType<typeof mountPage>>["page"];
 
