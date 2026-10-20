@@ -102,21 +102,16 @@ export function registerThreadWebSearchBindingTests({
       { persistent: true, current: false },
       { persistent: true, current: true },
     ]);
-    expect(
-      request.mock.calls
-        .map(([method]) => method)
-        .filter((method) => method === "thread/start" || method === "thread/resume"),
-    ).toEqual(["thread/start", "thread/start", "thread/resume"]);
-    expect(request.mock.calls.find(([method]) => method === "thread/start")?.[1]).toMatchObject({
-      config: { web_search: "cached" },
-    });
-    expect(
-      request.mock.calls.filter(
-        ([method]) => method === "thread/start" || method === "thread/resume",
-      )[1]?.[1],
-    ).toMatchObject({
-      config: { web_search: "disabled" },
-    });
+    const lifecycle = request.mock.calls.filter(
+      ([method]) => method === "thread/start" || method === "thread/resume",
+    );
+    expect(lifecycle.map(([method]) => method)).toEqual([
+      "thread/start",
+      "thread/start",
+      "thread/resume",
+    ]);
+    expect(lifecycle[0]?.[1]).toMatchObject({ config: { web_search: "cached" } });
+    expect(lifecycle[1]?.[1]).toMatchObject({ config: { web_search: "disabled" } });
   });
 
   it("persists config-denied search when runtime toolsAllow also excludes web_search", async () => {
@@ -139,21 +134,17 @@ export function registerThreadWebSearchBindingTests({
     params.toolsAllow = ["message"];
     params.pluginHarnessToolPolicyScope = "conversation";
     await fixture.endTurn("thread-1");
-    const restrictedBinding = await startOrResumeThread({
-      client,
-      params,
-      nativeCodeModeEnabled: false,
-      persistentWebSearchAllowed: false,
-      webSearchAllowed: false,
-    });
+    const startRestricted = () =>
+      startOrResumeThread({
+        client,
+        params,
+        nativeCodeModeEnabled: false,
+        persistentWebSearchAllowed: false,
+        webSearchAllowed: false,
+      });
+    const restrictedBinding = await startRestricted();
     await fixture.endTurn("thread-2");
-    const resumedRestrictedBinding = await startOrResumeThread({
-      client,
-      params,
-      nativeCodeModeEnabled: false,
-      persistentWebSearchAllowed: false,
-      webSearchAllowed: false,
-    });
+    const resumedRestrictedBinding = await startRestricted();
 
     expect(restrictedBinding.threadId).toBe("thread-2");
     expect(resumedRestrictedBinding.threadId).toBe("thread-2");

@@ -18,7 +18,6 @@ export function registerRequiredRootThreadPolicyTests({
     input: Pick<LifecycleInput, "client"> & Partial<LifecycleInput>,
   ) => ReturnType<typeof startOrResumeThreadImpl>;
 }) {
-  const PREFLIGHT_METHODS = ["config/read", "configRequirements/read"];
   it("removes every native capability from a required-workspace thread", async () => {
     const params = createParams(
       path.join(tempDir, "conversation-policy-session.jsonl"),
@@ -55,38 +54,20 @@ export function registerRequiredRootThreadPolicyTests({
     });
 
     expect(request.config).toMatchObject({
-      "features.apps": false,
-      "features.artifact": false,
-      "features.browser_use": false,
-      "features.browser_use_external": false,
-      "features.browser_use_full_cdp_access": false,
-      "features.chronicle": false,
-      "features.computer_use": false,
-      "features.current_time_reminder": false,
-      "features.default_mode_request_user_input": false,
-      "features.deferred_executor": false,
-      "features.hooks": false,
-      "features.image_generation": false,
-      "features.memories": false,
-      "features.multi_agent": false,
-      "features.multi_agent_v2": false,
-      "features.plugins": false,
-      "features.request_permissions_tool": false,
-      "features.skill_search": false,
-      "features.shell_tool": false,
-      "features.standalone_web_search": false,
-      "features.token_budget": false,
-      "features.unified_exec": false,
-      "features.view_image": false,
-      "features.web_search_cached": false,
-      "features.web_search_request": false,
-      "features.workspace_dependencies": false,
-      "orchestrator.mcp.enabled": false,
-      "orchestrator.skills.enabled": false,
-      "skills.bundled.enabled": false,
-      "skills.include_instructions": false,
-      "tools.experimental_request_user_input.enabled": false,
-      "tools.update_plan.enabled": false,
+      ...Object.fromEntries(
+        `features.apps features.artifact features.browser_use features.browser_use_external
+        features.browser_use_full_cdp_access features.chronicle features.computer_use
+        features.current_time_reminder features.default_mode_request_user_input
+        features.deferred_executor features.hooks features.image_generation features.memories
+        features.multi_agent features.multi_agent_v2 features.plugins features.request_permissions_tool
+        features.skill_search features.shell_tool features.standalone_web_search features.token_budget
+        features.unified_exec features.view_image features.web_search_cached features.web_search_request
+        features.workspace_dependencies orchestrator.mcp.enabled orchestrator.skills.enabled
+        skills.bundled.enabled skills.include_instructions tools.experimental_request_user_input.enabled
+        tools.update_plan.enabled`
+          .split(/\s+/)
+          .map((name) => [name, false]),
+      ),
       mcp_servers: { inherited: { command: "unsafe", enabled: false } },
       web_search: "disabled",
     });
@@ -116,6 +97,9 @@ export function registerRequiredRootThreadPolicyTests({
         hostSystemAgentActive: false,
       }),
     ).rejects.toThrow("cannot override required feature hooks");
-    expect(request.mock.calls.map(([method]) => method)).toEqual([...PREFLIGHT_METHODS]);
+    expect(request.mock.calls.map(([method]) => method)).toEqual([
+      "config/read",
+      "configRequirements/read",
+    ]);
   });
 }

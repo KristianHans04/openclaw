@@ -34,34 +34,24 @@ beforeEach(() => setRuntimeConfigSnapshot({}));
 afterEach(() => clearRuntimeConfigSnapshot());
 
 it.each([
-  {
-    label: "monitor without source key",
-    idempotencyKey: undefined,
-    hidden: false,
-    recovery: "available",
-  },
-  {
-    label: "hidden subagent announcement",
-    idempotencyKey: "announce:child:user",
-    hidden: true,
-    recovery: "available",
-  },
-  {
-    label: "removed admitted prompt",
-    idempotencyKey: "removed:user",
-    hidden: false,
-    recovery: "removed",
-  },
-  {
-    label: "closed consultation",
-    idempotencyKey: "closed-consult:user",
-    hidden: true,
-    recovery: "closed",
-  },
-])(
-  "preserves host prompt ownership for an admitted $label",
-  async ({ idempotencyKey, hidden, recovery }) => {
+  ["monitor without source key", undefined, false, "available"],
+  ["hidden subagent announcement", "announce:child:user", true, "available"],
+  ["removed admitted prompt", "removed:user", false, "removed"],
+  ["closed consultation", "closed-consult:user", true, "closed"],
+] as const)(
+  "preserves host prompt ownership for an admitted %s",
+  async (_label, idempotencyKey, hidden, recovery) => {
     const admittedContent = "Check the admitted monitor.";
+    const upstreamUserText = "Check the monitor.";
+    const promptMetadata = {
+      content: admittedContent,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      __openclaw: {
+        mirrorIdentity: "turn-1:prompt",
+        mirrorOrigin: "codex-app-server",
+        upstreamUserText,
+      },
+    };
     const createUserTurnTranscriptRecorder = await loadUserTurnTranscriptRecorderFactoryForTest();
     const base = await createParams();
     const target = {
@@ -73,12 +63,12 @@ it.each([
     await upsertSessionEntry({ ...target, entry: { sessionId: target.sessionId, updatedAt: 1 } });
     const recorder = createUserTurnTranscriptRecorder({
       input: {
-        text: "Check the monitor.",
+        text: upstreamUserText,
         provenance: hidden
           ? { kind: "inter_session", sourceChannel: "internal", sourceTool: "agent_harness_task" }
           : { kind: "internal_system", sourceTool: "heartbeat" },
         ...(hidden ? { display: false } : {}),
-        ...(recovery === "excluded" || recovery === "closed" ? { excludeFromContext: true } : {}),
+        ...(recovery === "closed" ? { excludeFromContext: true } : {}),
         ...(idempotencyKey ? { idempotencyKey } : {}),
       },
       target: { ...target, sessionEntry: undefined },
@@ -99,7 +89,7 @@ it.each([
     const params = {
       ...attempt,
       hostCapabilities:
-        recovery === "unavailable" || recovery === "removed"
+        recovery === "removed"
           ? { ...host.hostCapabilities, annotateCurrentUserTurn: undefined }
           : host.hostCapabilities,
     };
@@ -119,10 +109,7 @@ it.each([
       };
       const beforeMirror =
         recovery === "closed" ? await readSessionTranscriptEvents(target) : undefined;
-      const promptMirror = mirrorPromptAtTurnStartBestEffort({
-        ...mirror,
-        upstreamUserText: "Check the monitor.",
-      });
+      const promptMirror = mirrorPromptAtTurnStartBestEffort({ ...mirror, upstreamUserText });
       if (recovery === "closed") {
         host.closeHost();
       }
@@ -134,7 +121,7 @@ it.each([
         return;
       }
       const projector = new CodexAppServerEventProjector(params, "thread-1", "turn-1", {
-        upstreamUserText: "Check the monitor.",
+        upstreamUserText,
       });
       projector.recordDynamicToolCall({
         callId: "result",
@@ -178,27 +165,11 @@ it.each([
       if (recovery === "available") {
         expect(prompts[0]).toMatchObject({
           message: {
-            content: admittedContent,
+            ...promptMetadata,
             ...(hidden ? { display: false } : {}),
-            ...(idempotencyKey ? { idempotencyKey } : {}),
-            __openclaw: {
-              mirrorIdentity: "turn-1:prompt",
-              mirrorOrigin: "codex-app-server",
-              upstreamUserText: "Check the monitor.",
-            },
           },
         });
-        expect(recorder.getPersistedMessage?.()).toMatchObject({
-          content: admittedContent,
-          ...(idempotencyKey ? { idempotencyKey } : {}),
-          __openclaw: {
-            mirrorIdentity: "turn-1:prompt",
-            mirrorOrigin: "codex-app-server",
-            upstreamUserText: "Check the monitor.",
-          },
-        });
-      } else if (recovery !== "removed") {
-        expect(asOptionalRecord(prompts[0])?.message).toEqual(admitted);
+        expect(recorder.getPersistedMessage?.()).toMatchObject(promptMetadata);
       }
       if (idempotencyKey) {
         expect(recorder.getPersistedMessage?.()?.idempotencyKey).toBe(idempotencyKey);

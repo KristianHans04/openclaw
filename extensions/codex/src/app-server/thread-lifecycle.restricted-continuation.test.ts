@@ -75,12 +75,7 @@ async function createFixture(rejectStartNumber?: number) {
     userMcpServersEnabled: false,
     nativeCodeModeEnabled: false,
   } satisfies CodexAttemptThreadInput;
-  const identity = sessionBindingIdentity({
-    sessionId: attempt.sessionId,
-    sessionKey: attempt.sessionKey,
-    agentId: attempt.agentId,
-    config: attempt.config,
-  });
+  const identity = sessionBindingIdentity(attempt);
   const read = () => testCodexAppServerBindingStore.read(identity);
   const idle = async (
     binding: Awaited<ReturnType<typeof startOrResumeThread>>,
@@ -98,7 +93,32 @@ async function createFixture(rejectStartNumber?: number) {
       ).toBe(true);
     }
   };
-  return { fixture, common, attempt, identity, read, idle };
+  const start = (
+    patch: Partial<CodexAttemptThreadInput["params"]> = {},
+    overrides: Partial<Omit<CodexAttemptThreadInput, "params">> = {},
+  ) => startOrResumeThread({ ...common, ...overrides, params: { ...attempt, ...patch } });
+  const calls = (method: string) => fixture.request.mock.calls.filter(([name]) => name === method);
+  const expectIsolation = async (
+    temporaryStart: (initial: boolean) => ReturnType<typeof start>,
+    durableStart: (runId: "durable" | "ordinary") => ReturnType<typeof start>,
+  ) => {
+    const initial = await temporaryStart(true);
+    expect(initial.lifecycle.preserveExistingBinding).toBe(true);
+    expect(read()).toBeUndefined();
+    await fixture.endTurn(initial.threadId);
+    const durable = await durableStart("durable");
+    const previous = read();
+    await fixture.endTurn(durable.threadId);
+    const temporary = await temporaryStart(false);
+    expect(temporary.lifecycle.preserveExistingBinding).toBe(true);
+    expect(temporary.threadId).not.toBe(durable.threadId);
+    expect(read()).toEqual(previous);
+    await fixture.endTurn(temporary.threadId);
+    const next = await durableStart("ordinary");
+    expect(next).toMatchObject({ threadId: durable.threadId, lifecycle: { action: "resumed" } });
+    expect(read()?.threadId).toBe(durable.threadId);
+  };
+  return { fixture, common, attempt, identity, read, idle, start, calls, expectIsolation };
 }
 
 describe("persistent restricted Codex continuation", () => {
@@ -114,34 +134,24 @@ describe("persistent restricted Codex continuation", () => {
   it.each(["warm", "cold"] as const)(
     "keeps the native ID across no-op wildcard changes for a %s owner",
     async (mode) => {
-      const { fixture, common, attempt, read, idle } = await createFixture();
-      const first = await startOrResumeThread(common);
+      const { read, idle, start, calls } = await createFixture();
+      const first = await start();
       await idle(first, mode);
-      const scheduled = await startOrResumeThread({
-        ...common,
-        params: { ...attempt, runId: "scheduled", toolsAllow: ["*"] },
-      });
+      const scheduled = await start({ runId: "scheduled", toolsAllow: ["*"] });
       expect(scheduled).toMatchObject({
         threadId: first.threadId,
         lifecycle: { action: "resumed" },
       });
       await idle(scheduled, mode);
-      const next = await startOrResumeThread({
-        ...common,
-        params: { ...attempt, runId: "follow-up" },
-      });
+      const next = await start({ runId: "follow-up" });
       expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
       expect(read()).toMatchObject({
         threadId: first.threadId,
         nativeToolPolicyRestricted: true,
         restrictedThreadConfigFingerprint: expect.any(String),
       });
-      expect(
-        fixture.request.mock.calls.filter(([method]) => method === "thread/start"),
-      ).toHaveLength(1);
-      expect(
-        fixture.request.mock.calls.filter(([method]) => method === "thread/resume"),
-      ).toHaveLength(mode === "cold" ? 2 : 0);
+      expect(calls("thread/start")).toHaveLength(1);
+      expect(calls("thread/resume")).toHaveLength(mode === "cold" ? 2 : 0);
       await next.liveThreadOwnership?.release(next.threadId);
     },
   );
@@ -149,16 +159,15 @@ describe("persistent restricted Codex continuation", () => {
   it.each(["warm", "cold"] as const)(
     "recovers safe-denied image_generate drift from a %s owner",
     async (mode) => {
-      const { fixture, common, attempt, read, idle } = await createFixture();
-      const first = await startOrResumeThread(common);
+      const { fixture, read, idle, start, calls } = await createFixture();
+      const first = await start();
       const previous = read();
       await idle(first, mode);
       const changed = {
-        ...attempt,
         runId: "changed-policy",
         pluginHarnessToolPolicySafeDeniedTools: ["image_generate"],
       };
-      const successor = await startOrResumeThread({ ...common, params: changed });
+      const successor = await start(changed);
       expect(successor).toMatchObject({
         threadId: "restricted-2",
         lifecycle: { action: "started" },
@@ -167,41 +176,30 @@ describe("persistent restricted Codex continuation", () => {
         previous?.restrictedThreadConfigFingerprint,
       );
       await fixture.endTurn(successor.threadId);
-      const next = await startOrResumeThread({
-        ...common,
-        params: { ...changed, runId: "recovered" },
-      });
+      const next = await start({ ...changed, runId: "recovered" });
       expect(next).toMatchObject({
         threadId: successor.threadId,
         lifecycle: { action: "resumed" },
       });
       expect(read()?.threadId).toBe(successor.threadId);
-      expect(
-        fixture.request.mock.calls.filter(([method]) => method === "thread/start"),
-      ).toHaveLength(2);
+      expect(calls("thread/start")).toHaveLength(2);
     },
   );
 
   it("keeps a protected warm policy usable after refusing the changed-deny trigger", async () => {
-    const { fixture, common, attempt, read, idle } = await createFixture();
-    const first = await startOrResumeThread(common);
+    const { fixture, read, idle, start } = await createFixture();
+    const first = await start();
     await idle(first, "warm");
     const previous = read();
     const unprotect = protectCodexAppServerLiveThread(fixture.client, first.threadId);
     fixture.request.mockClear();
     try {
       await expect(
-        startOrResumeThread({
-          ...common,
-          params: { ...attempt, pluginHarnessToolPolicySafeDeniedTools: ["image_generate"] },
-        }),
+        start({ pluginHarnessToolPolicySafeDeniedTools: ["image_generate"] }),
       ).rejects.toThrow("claimed by active work");
       expect(read()).toEqual(previous);
       expect(isCodexAppServerLiveThreadClaimed(fixture.client, first.threadId)).toBe(false);
-      const retry = await startOrResumeThread({
-        ...common,
-        params: { ...attempt, runId: "original-policy" },
-      });
+      const retry = await start({ runId: "original-policy" });
       expect(retry).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
       expect(
         fixture.request.mock.calls.some(([method]) =>
@@ -217,55 +215,34 @@ describe("persistent restricted Codex continuation", () => {
   });
 
   it("replaces an unattested legacy owner once, then resumes its attested successor", async () => {
-    const { fixture, common, attempt, read } = await createFixture();
-    const first = await startOrResumeThread(common);
+    const { fixture, identity, read, start, calls } = await createFixture();
+    const first = await start();
     await fixture.endTurn(first.threadId);
-    await testCodexAppServerBindingStore.mutate(
-      sessionBindingIdentity({
-        sessionId: attempt.sessionId,
-        sessionKey: attempt.sessionKey,
-        agentId: attempt.agentId,
-        config: attempt.config,
-      }),
-      {
-        kind: "patch",
-        threadId: first.threadId,
-        patch: { restrictedThreadConfigFingerprint: undefined },
-      },
-    );
-    expect(read()?.restrictedThreadConfigFingerprint).toBeUndefined();
-    const successor = await startOrResumeThread({
-      ...common,
-      params: { ...attempt, runId: "legacy-upgrade" },
+    await testCodexAppServerBindingStore.mutate(identity, {
+      kind: "patch",
+      threadId: first.threadId,
+      patch: { restrictedThreadConfigFingerprint: undefined },
     });
+    expect(read()?.restrictedThreadConfigFingerprint).toBeUndefined();
+    const successor = await start({ runId: "legacy-upgrade" });
     expect(successor).toMatchObject({ threadId: "restricted-2", lifecycle: { action: "started" } });
     expect(read()?.restrictedThreadConfigFingerprint).toEqual(expect.any(String));
     await fixture.endTurn(successor.threadId);
-    const next = await startOrResumeThread({
-      ...common,
-      params: { ...attempt, runId: "after-upgrade" },
-    });
+    const next = await start({ runId: "after-upgrade" });
     expect(next).toMatchObject({ threadId: successor.threadId, lifecycle: { action: "resumed" } });
-    expect(fixture.request.mock.calls.filter(([method]) => method === "thread/start")).toHaveLength(
-      2,
-    );
+    expect(calls("thread/start")).toHaveLength(2);
   });
 
   it("preserves the exact durable predecessor when a changed-policy fresh start fails", async () => {
-    const { fixture, common, attempt, read } = await createFixture(2);
-    const first = await startOrResumeThread(common);
+    const { fixture, read, start, calls } = await createFixture(2);
+    const first = await start();
     const previous = read();
     await fixture.endTurn(first.threadId);
     await expect(
-      startOrResumeThread({
-        ...common,
-        params: { ...attempt, pluginHarnessToolPolicySafeDeniedTools: ["image_generate"] },
-      }),
+      start({ pluginHarnessToolPolicySafeDeniedTools: ["image_generate"] }),
     ).rejects.toThrow("synthetic restricted successor creation failed");
     expect(read()).toEqual(previous);
-    expect(fixture.request.mock.calls.filter(([method]) => method === "thread/start")).toHaveLength(
-      2,
-    );
+    expect(calls("thread/start")).toHaveLength(2);
   });
 
   it.each([
@@ -284,41 +261,21 @@ describe("persistent restricted Codex continuation", () => {
   ] satisfies Array<{ restriction: string; patch: Partial<CodexAttemptThreadInput["params"]> }>)(
     "isolates initial and follow-up $restriction while retaining the durable conversation",
     async ({ patch }) => {
-      const { fixture, common, attempt, read } = await createFixture();
-      const initial = await startOrResumeThread({ ...common, params: { ...attempt, ...patch } });
-      expect(initial.lifecycle.preserveExistingBinding).toBe(true);
-      expect(read()).toBeUndefined();
-      await fixture.endTurn(initial.threadId);
-      const durable = await startOrResumeThread({
-        ...common,
-        params: { ...attempt, runId: "durable" },
-      });
-      const previous = read();
-      await fixture.endTurn(durable.threadId);
-      const temporary = await startOrResumeThread({
-        ...common,
-        params: { ...attempt, ...patch, runId: "temporary" },
-      });
-      expect(temporary.lifecycle.preserveExistingBinding).toBe(true);
-      expect(temporary.threadId).not.toBe(durable.threadId);
-      expect(read()).toEqual(previous);
-      await fixture.endTurn(temporary.threadId);
-      const next = await startOrResumeThread({
-        ...common,
-        params: { ...attempt, runId: "ordinary" },
-      });
-      expect(next).toMatchObject({ threadId: durable.threadId, lifecycle: { action: "resumed" } });
-      expect(read()?.threadId).toBe(durable.threadId);
+      const { start, expectIsolation } = await createFixture();
+      await expectIsolation(
+        (initial) => start({ ...patch, ...(!initial ? { runId: "temporary" } : {}) }),
+        (runId) => start({ runId }),
+      );
     },
   );
 
   it.each(["legacy", "native restoration", "temporary"] as const)(
     "keeps the bound local provider through %s",
     async (transition) => {
-      const { fixture, common, attempt, identity } = await createFixture();
+      const { fixture, attempt, identity, start, calls } = await createFixture();
       attempt.provider = "codex";
       attempt.modelId = "local-model";
-      const first = await startOrResumeThread(common);
+      const first = await start();
       await fixture.endTurn(first.threadId);
       expect(
         await testCodexAppServerBindingStore.mutate(identity, {
@@ -331,28 +288,29 @@ describe("persistent restricted Codex continuation", () => {
           },
         }),
       ).toBe(true);
-      await startOrResumeThread({
-        ...common,
-        nativeCodeModeEnabled: transition === "native restoration",
-        params: {
-          ...attempt,
+      await start(
+        {
           runId: "provider-continuation",
           ...(transition === "native restoration"
             ? { pluginHarnessToolPolicyRestricted: false }
             : {}),
           ...(transition === "temporary" ? { pluginHarnessToolPolicyScope: "turn" as const } : {}),
         },
+        {
+          nativeCodeModeEnabled: transition === "native restoration",
+        },
+      );
+      expect(calls("thread/start").at(-1)?.[1]).toMatchObject({
+        model: "local-model",
+        modelProvider: "lmstudio",
       });
-      expect(
-        fixture.request.mock.calls.findLast(([method]) => method === "thread/start")?.[1],
-      ).toMatchObject({ model: "local-model", modelProvider: "lmstudio" });
     },
   );
 
   it.each(["unchanged", "skills", "generic policy", "safe deny"] as const)(
     "preserves the restricted incognito owner for %s",
     async (change) => {
-      const { fixture, common, attempt, idle } = await createFixture();
+      const { fixture, common, attempt, idle, calls } = await createFixture();
       attempt.sessionKey = "agent:main:dashboard:incognito-restricted";
       const original = {
         ...common,
@@ -383,23 +341,17 @@ describe("persistent restricted Codex continuation", () => {
         change === "generic policy" || change === "safe deny" ? original : changed,
       );
       expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
-      expect(
-        fixture.request.mock.calls.filter(([method]) => method === "thread/start"),
-      ).toHaveLength(1);
-      expect(
-        fixture.request.mock.calls.filter(([method]) => method === "thread/resume"),
-      ).toHaveLength(0);
+      expect(calls("thread/start")).toHaveLength(1);
+      expect(calls("thread/resume")).toHaveLength(0);
       if (change === "skills") {
-        expect(
-          fixture.request.mock.calls.filter(([method]) => method === "thread/inject_items"),
-        ).toHaveLength(1);
+        expect(calls("thread/inject_items")).toHaveLength(1);
       }
       await next.liveThreadOwnership?.release(next.threadId);
     },
   );
 
   it("isolates additive turn grants while native tools remain unrestricted", async () => {
-    const { fixture, common, attempt, read } = await createFixture();
+    const { common, attempt, expectIsolation } = await createFixture();
     const ordinary = {
       ...common,
       nativeCodeModeEnabled: true,
@@ -417,53 +369,37 @@ describe("persistent restricted Codex continuation", () => {
         },
       ],
     };
-    const initial = await startOrResumeThread(granted);
-    expect(initial.lifecycle.preserveExistingBinding).toBe(true);
-    expect(read()).toBeUndefined();
-    await fixture.endTurn(initial.threadId);
-    const durable = await startOrResumeThread(ordinary);
-    const previous = read();
-    await fixture.endTurn(durable.threadId);
-    const temporary = await startOrResumeThread(granted);
-    expect(temporary.lifecycle.preserveExistingBinding).toBe(true);
-    expect(temporary.threadId).not.toBe(durable.threadId);
-    expect(read()).toEqual(previous);
-    await fixture.endTurn(temporary.threadId);
-    const next = await startOrResumeThread(ordinary);
-    expect(next.threadId).toBe(durable.threadId);
+    await expectIsolation(
+      () => startOrResumeThread(granted),
+      () => startOrResumeThread(ordinary),
+    );
   });
 
   it("does not isolate an unrestricted scheduled turn", async () => {
-    const { fixture, common, attempt } = await createFixture();
-    const params = { ...attempt, pluginHarnessToolPolicyRestricted: false };
-    const ordinary = { ...common, params, nativeCodeModeEnabled: true };
-    const first = await startOrResumeThread(ordinary);
+    const { fixture, start } = await createFixture();
+    const params = { pluginHarnessToolPolicyRestricted: false };
+    const first = await start(params, { nativeCodeModeEnabled: true });
     await fixture.endTurn(first.threadId);
-    const next = await startOrResumeThread({
-      ...ordinary,
-      params: { ...params, pluginHarnessToolPolicyScope: "conversation", runId: "scheduled" },
-    });
+    const next = await start(
+      { ...params, pluginHarnessToolPolicyScope: "conversation", runId: "scheduled" },
+      { nativeCodeModeEnabled: true },
+    );
     expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
     expect(next.lifecycle.preserveExistingBinding).toBeUndefined();
   });
 
   it("persists and resumes an empty allowlist from conversation policy", async () => {
-    const { fixture, common, attempt, read } = await createFixture();
-    const configured = { ...attempt, toolsAllow: [] };
-    const first = await startOrResumeThread({ ...common, params: configured });
+    const { fixture, read, start, calls } = await createFixture();
+    const configured = { toolsAllow: [] };
+    const first = await start(configured);
     expect(first.lifecycle.preserveExistingBinding).toBeUndefined();
     expect(read()).toMatchObject({
       threadId: first.threadId,
       restrictedThreadConfigFingerprint: expect.any(String),
     });
     await fixture.endTurn(first.threadId);
-    const next = await startOrResumeThread({
-      ...common,
-      params: { ...configured, runId: "empty-policy" },
-    });
+    const next = await start({ ...configured, runId: "empty-policy" });
     expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
-    expect(fixture.request.mock.calls.filter(([method]) => method === "thread/start")).toHaveLength(
-      1,
-    );
+    expect(calls("thread/start")).toHaveLength(1);
   });
 });
