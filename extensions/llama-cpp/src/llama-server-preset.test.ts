@@ -7,9 +7,7 @@ import { buildLlamaServerPreset, type LlamaServerPresetOptions } from "./llama-s
 import { prepareManagedLlamaServer } from "./managed-server.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-afterEach(() => {
-  vi.unstubAllEnvs();
-});
+afterEach(() => vi.unstubAllEnvs());
 const EMBEDDING = "[embeddinggemma-300m-qat-q8_0]";
 const CAPACITY = "parallel = 1\nctx-size = 2048\nubatch-size = 2048\n";
 
@@ -25,62 +23,47 @@ function refreshEmbedding(
 }
 
 describe("managed embedding capacity defaults", () => {
-  it.each([{ label: "np alias", global: "", section: "np = 2\n" }])(
-    "keeps a preset $label slot count without shrinking its context",
-    ({ global, section }) => {
-      const existing = `version = 1\n\n${global}${EMBEDDING}\nmodel = /models/old.gguf\n${section}embedding = true\n`;
-      const preset = refreshEmbedding(existing);
-      expect(preset).not.toContain("parallel = 1");
-      expect(preset).not.toContain("ctx-size");
-      expect(preset).toContain(`${global}${EMBEDDING}\nmodel = /models/embedding.gguf\n${section}`);
-      expect(preset).toContain("ubatch-size = 2048");
-    },
-  );
+  it("keeps a preset np alias slot count without shrinking its context", () => {
+    const preset = refreshEmbedding(
+      `version = 1\n\n${EMBEDDING}\nmodel = /models/old.gguf\nnp = 2\nembedding = true\n`,
+    );
+    expect(preset).not.toMatch(/parallel = 1|ctx-size/u);
+    expect(preset).toContain(`${EMBEDDING}\nmodel = /models/embedding.gguf\nnp = 2\n`);
+    expect(preset).toContain("ubatch-size = 2048");
+  });
 
-  it.each([
-    {
-      global: "[*]\nLLAMA_ARG_KV_UNIFIED_PER_SLOT = 8192\nLLAMA_ARG_UBATCH = 1024\n\n",
-      section: "",
-    },
-  ])("keeps explicit context and physical batch settings", ({ global, section }) => {
-    const existing = `version = 1\n\n${global}${EMBEDDING}\nmodel = /models/old.gguf\n${section}`;
+  it("keeps explicit context and physical batch settings", () => {
+    const global = "[*]\nLLAMA_ARG_KV_UNIFIED_PER_SLOT = 8192\nLLAMA_ARG_UBATCH = 1024\n\n";
+    const existing = `version = 1\n\n${global}${EMBEDDING}\nmodel = /models/old.gguf\n`;
     const preset = refreshEmbedding(existing);
-    expect(preset).toContain(`${global}${EMBEDDING}\nmodel = /models/embedding.gguf\n${section}`);
+    expect(preset).toContain(`${global}${EMBEDDING}\nmodel = /models/embedding.gguf\n`);
     expect(preset).toContain("parallel = 1");
     expect(preset).not.toMatch(/ctx-size|ubatch-size/u);
   });
 
-  it.each([{ label: "-np arg", serviceSettings: { args: ["-np", "3"] } }])(
-    "keeps the router service's $label slot/context policy",
-    ({ serviceSettings }) => {
-      const preset = refreshEmbedding(undefined, { serviceSettings });
-      expect(preset).not.toMatch(/parallel|ctx-size/u);
-      expect(preset).toContain("ubatch-size = 2048");
-    },
-  );
+  it("keeps the router service's -np slot/context policy", () => {
+    const preset = refreshEmbedding(undefined, { serviceSettings: { args: ["-np", "3"] } });
+    expect(preset).not.toMatch(/parallel|ctx-size/u);
+    expect(preset).toContain("ubatch-size = 2048");
+  });
 
-  it.each(["--kv_unified_per_slot"])(
-    "preserves native per-slot sizing from the service's %s option",
-    (option) => {
+  it("preserves native per-slot sizing from --kv_unified_per_slot", () => {
+    const preset = refreshEmbedding(undefined, {
+      serviceSettings: { args: ["--kv_unified_per_slot", "8192"] },
+    });
+    expect(preset).not.toContain("ctx-size");
+    expect(preset).toContain("parallel = 1");
+    expect(preset).toContain("ubatch-size = 2048");
+  });
+
+  it("matches Windows environment names case-insensitively", () => {
+    withMockedPlatform("win32", () => {
       const preset = refreshEmbedding(undefined, {
-        serviceSettings: { args: [option, "8192"] },
+        serviceSettings: { env: { Llama_Arg_N_Parallel: "4" } },
       });
-      expect(preset).not.toContain("ctx-size");
-      expect(preset).toContain("parallel = 1");
-      expect(preset).toContain("ubatch-size = 2048");
-    },
-  );
-
-  it.each([{ platform: "win32", key: "Llama_Arg_N_Parallel", expectedDefault: false }] as const)(
-    "matches $platform environment names for $key",
-    ({ platform, key, expectedDefault }) => {
-      withMockedPlatform(platform, () => {
-        const preset = refreshEmbedding(undefined, { serviceSettings: { env: { [key]: "4" } } });
-        expect(preset.includes("parallel = 1")).toBe(expectedDefault);
-        expect(preset.includes("ctx-size = 2048")).toBe(expectedDefault);
-      });
-    },
-  );
+      expect(preset).not.toMatch(/parallel = 1|ctx-size = 2048/u);
+    });
+  });
 });
 
 describe("managed embedding capacity through server preparation", () => {

@@ -5,6 +5,7 @@ import { recommendLlamaCppModel, resolveLlamaCppCatalogArtifact } from "./model-
 const GIB = 1024 ** 3;
 const SMALL_MODEL = "qwen3.5-4b-q4_k_m";
 const MEDIUM_MODEL = "qwen3.5-9b-q4_k_m";
+const cachedModel = { modelIds: new Set([SMALL_MODEL]), embedding: true };
 
 function hardware(memoryGiB: number): LlamaCppHardware {
   return {
@@ -20,17 +21,12 @@ function hardware(memoryGiB: number): LlamaCppHardware {
 }
 
 describe("local model recommendation", () => {
-  it.each([{ ram: 64, backend: "cpu" as const, modelId: MEDIUM_MODEL }])(
-    "recommends a resident 64K model for $ram GiB on $backend",
-    ({ ram, backend, modelId }) => {
-      const result = recommendLlamaCppModel(hardware(ram), backend);
-
-      expect(result).toMatchObject({
-        kind: "recommended",
-        recipe: { model: { id: modelId, contextWindow: 65536 } },
-      });
-    },
-  );
+  it("recommends a resident 64K model for 64 GiB on CPU", () => {
+    expect(recommendLlamaCppModel(hardware(64), "cpu")).toMatchObject({
+      kind: "recommended",
+      recipe: { model: { id: MEDIUM_MODEL, contextWindow: 65536 } },
+    });
+  });
 
   it("uses the smaller cache budget on a 24 GiB NVIDIA card", () => {
     const host = hardware(64);
@@ -56,22 +52,11 @@ describe("local model recommendation", () => {
   it("charges only missing artifacts when retrying a cached model", () => {
     const host = { ...hardware(8), availableDiskBytes: 128 * 1024 ** 2 };
     expect(recommendLlamaCppModel(host, "metal")).toMatchObject({ kind: "unavailable" });
-    expect(
-      recommendLlamaCppModel(host, "metal", {
-        modelIds: new Set([SMALL_MODEL]),
-        embedding: true,
-        runtime: true,
-      }),
-    ).toMatchObject({
+    expect(recommendLlamaCppModel(host, "metal", { ...cachedModel, runtime: true })).toMatchObject({
       kind: "recommended",
       recipe: { model: { id: SMALL_MODEL } },
     });
-    expect(
-      recommendLlamaCppModel(host, "metal", {
-        modelIds: new Set([SMALL_MODEL]),
-        embedding: true,
-      }),
-    ).toMatchObject({ kind: "unavailable" });
+    expect(recommendLlamaCppModel(host, "metal", cachedModel).kind).toBe("unavailable");
   });
 
   it.each([
@@ -80,21 +65,15 @@ describe("local model recommendation", () => {
   ])(
     "checks separate cache/runtime volumes ($cacheGiB/$runtimeGiB GiB)",
     ({ cacheGiB, runtimeGiB, cached, kind }) => {
-      const host = {
-        ...hardware(8),
-        availableDiskBytes: cacheGiB * GIB,
-        availableRuntimeDiskBytes: runtimeGiB * GIB,
-        sharedDisk: false,
-      };
       const result = recommendLlamaCppModel(
-        host,
+        {
+          ...hardware(8),
+          availableDiskBytes: cacheGiB * GIB,
+          availableRuntimeDiskBytes: runtimeGiB * GIB,
+          sharedDisk: false,
+        },
         "metal",
-        cached
-          ? {
-              modelIds: new Set([SMALL_MODEL]),
-              embedding: true,
-            }
-          : {},
+        cached ? cachedModel : {},
       );
 
       expect(result.kind).toBe(kind);

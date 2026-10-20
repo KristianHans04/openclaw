@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LlamaCppHardware } from "./hardware.js";
 import {
   LLAMA_CPP_MEDIA_RECIPES,
-  recommendLlamaCppMedia,
+  recommendLlamaCppMedia as recommend,
   resolveLlamaCppMediaArtifact,
 } from "./media-catalog.js";
 
@@ -20,6 +20,13 @@ function hardware(overrides: Partial<LlamaCppHardware> = {}): LlamaCppHardware {
     accelerator: { kind: "cpu", reason: "CPU host" },
     ...overrides,
   };
+}
+
+function expectUnavailable(host: LlamaCppHardware, reason: RegExp) {
+  expect(recommend(host)).toMatchObject({
+    kind: "unavailable",
+    reason: expect.stringMatching(reason),
+  });
 }
 
 describe("managed local media catalog", () => {
@@ -46,15 +53,9 @@ describe("managed local media catalog", () => {
     expect(resolveLlamaCppMediaArtifact("hf:unknown/model/mmproj.gguf")).toBeUndefined();
   });
 
-  it.each([{ host: hardware({ totalMemoryBytes: 4 * GIB }), reason: /total RAM/u }])(
-    "rejects incomplete pairs under total and available memory limits",
-    ({ host, reason }) => {
-      expect(recommendLlamaCppMedia(host)).toMatchObject({
-        kind: "unavailable",
-        reason: expect.stringMatching(reason),
-      });
-    },
-  );
+  it("rejects incomplete pairs under total and available memory limits", () => {
+    expectUnavailable(hardware({ totalMemoryBytes: 4 * GIB }), /total RAM/u);
+  });
 
   it("charges separate volumes separately and shared capacity only once", () => {
     const host = hardware({
@@ -62,50 +63,36 @@ describe("managed local media catalog", () => {
       availableRuntimeDiskBytes: 2 * GIB,
       sharedDisk: false,
     });
-    expect(recommendLlamaCppMedia(host)).toMatchObject({
-      kind: "recommended",
-    });
-    expect(recommendLlamaCppMedia({ ...host, sharedDisk: true }).kind).toBe("unavailable");
-    expect(recommendLlamaCppMedia({ ...host, availableRuntimeDiskBytes: GIB })).toMatchObject({
-      kind: "unavailable",
-      reason: expect.stringContaining("runtime directory"),
-    });
+    expect(recommend(host).kind).toBe("recommended");
+    expect(recommend({ ...host, sharedDisk: true }).kind).toBe("unavailable");
+    expectUnavailable({ ...host, availableRuntimeDiskBytes: GIB }, /runtime directory/u);
   });
 
   it("credits verified models and projectors independently on retry", () => {
-    const initial = recommendLlamaCppMedia(hardware());
+    const initial = recommend(hardware());
     if (initial.kind !== "recommended") {
       throw new Error(initial.reason);
     }
-    const artifacts = [
-      initial.ocr.model,
-      initial.ocr.projector,
-      initial.vision.model,
-      initial.vision.projector,
-    ];
+    const artifacts = [initial.ocr, initial.vision].flatMap(({ model, projector }) => [
+      model,
+      projector,
+    ]);
     const artifactSha256 = new Set(artifacts.map((artifact) => artifact.expectedSha256));
     const host = hardware({ availableDiskBytes: 1024 ** 2, availableRuntimeDiskBytes: 1024 ** 2 });
-    expect(recommendLlamaCppMedia(host, { artifactSha256, runtime: true })).toMatchObject({
+    expect(recommend(host, { artifactSha256, runtime: true })).toMatchObject({
       kind: "recommended",
       requiredDiskBytes: 0,
     });
     artifactSha256.delete(initial.vision.projector.expectedSha256);
-    expect(recommendLlamaCppMedia(host, { artifactSha256, runtime: true }).kind).toBe(
-      "unavailable",
-    );
-    expect(recommendLlamaCppMedia(hardware(), { artifactSha256, runtime: true })).toMatchObject({
+    expect(recommend(host, { artifactSha256, runtime: true }).kind).toBe("unavailable");
+    expect(recommend(hardware(), { artifactSha256, runtime: true })).toMatchObject({
       kind: "recommended",
       requiredDiskBytes: initial.vision.projector.expectedSize,
     });
-    expect(recommendLlamaCppMedia(host, { artifactSha256 }).kind).toBe("unavailable");
+    expect(recommend(host, { artifactSha256 }).kind).toBe("unavailable");
   });
 
   it("does not guess when runtime free space is unknown", () => {
-    expect(
-      recommendLlamaCppMedia(hardware({ availableRuntimeDiskBytes: undefined })),
-    ).toMatchObject({
-      kind: "unavailable",
-      reason: expect.stringContaining("permissions"),
-    });
+    expectUnavailable(hardware({ availableRuntimeDiskBytes: undefined }), /permissions/u);
   });
 });
