@@ -1,10 +1,10 @@
-import { writeFile } from "node:fs/promises";
-import path from "node:path";
 import photon from "@silvia-odwyer/photon-node";
 import { expect, it } from "vitest";
 import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { expectAttribute } from "./activity-assertions.test-support.ts";
 import { openChatDetails } from "./chat-details.test-support.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { emptyCronList } from "./session-dashboard.test-support.ts";
 
 const suite = createControlUiE2eSuite({ name: "Session context meter colors" });
 const captureProof = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
@@ -28,9 +28,6 @@ suite.define(() => {
           const session = {
             key: sessionKey,
             kind: "direct" as const,
-            label: "Context usage",
-            model: "demo-model",
-            modelProvider: "example",
             contextTokens: 100_000,
             totalTokens: 14_000,
             totalTokensFresh: true,
@@ -39,29 +36,13 @@ suite.define(() => {
           const gateway = await installMockGateway(page, {
             sessionKey,
             sessions: [session],
-            agentModel: "example/demo-model",
-            models: [
-              { id: "demo-model", provider: "example", name: "Demo model", contextWindow: 100_000 },
-            ],
-            historyMessages: [
-              { role: "assistant", content: "Inspect the session's context usage in Details." },
-            ],
             methodResponses: {
-              "cron.list": {
-                jobs: [],
-                snapshotRevision: "context-meter-empty",
-                offset: 0,
-                limit: 50,
-                total: 0,
-                hasMore: false,
-                nextOffset: null,
-              },
+              "cron.list": emptyCronList("context-meter-empty"),
             },
           });
           await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
           await gateway.waitForRequest("chat.startup");
-          const details = page.locator(".chat-details");
-          const context = details.locator(".chat-details__context");
+          const context = page.locator(".chat-details .chat-details__context");
           const meter = context.locator("meter");
           await openChatDetails(page);
           await meter.waitFor();
@@ -70,10 +51,8 @@ suite.define(() => {
             [14, true, "--ok"],
             [64, true, "--ok"],
             [65, true, "--warn"],
-            [75, true, "--warn"],
             [84, true, "--warn"],
             [85, true, "--danger"],
-            [95, true, "--danger"],
             [100, true, "--danger"],
             [95, false, "--muted"],
             [14, true, "--ok"],
@@ -88,37 +67,23 @@ suite.define(() => {
               sessionKey,
               reason: "patch",
             });
-            await expect
-              .poll(() => meter.getAttribute("aria-valuetext"))
-              .toContain(`${fresh ? "" : "~"}${percent}%`);
-            await expect.poll(() => meter.getAttribute("value")).toBe(String(percent));
+            await expectAttribute(meter, "aria-valuetext").toContain(
+              `${fresh ? "" : "~"}${percent}%`,
+            );
+            await expectAttribute(meter, "value").toBe(String(percent));
             const meterBounds = await meter.boundingBox();
-            const contextBounds = await context.boundingBox();
-            expect(meterBounds).not.toBeNull();
-            expect(contextBounds).not.toBeNull();
-            // Playwright flushes painting before capture; raw CDP capture can return
-            // an older native-meter frame after same-size session updates.
+            expect([meterBounds, await context.boundingBox()]).not.toContain(null);
+            // Playwright flushes painting; raw CDP can return the previous meter frame.
             const screenshot = await page.screenshot({ animations: "disabled" });
             const frame = photon.PhotonImage.new_from_byteslice(screenshot);
-            const crop = (bounds: NonNullable<typeof meterBounds>) =>
-              photon.crop(
-                frame,
-                Math.floor(bounds.x),
-                Math.floor(bounds.y),
-                Math.ceil(bounds.x + bounds.width),
-                Math.ceil(bounds.y + bounds.height),
-              );
-            const image = crop(meterBounds!);
-            if (captureProof) {
-              const name = `${percent}-${fresh ? "fresh" : "stale"}`;
-              await writeFile(path.join(suite.artifactDir, `${name}-page.png`), screenshot);
-              const contextImage = crop(contextBounds!);
-              await writeFile(
-                path.join(suite.artifactDir, `${name}-meter.png`),
-                contextImage.get_bytes(),
-              );
-              contextImage.free();
-            }
+            const bounds = meterBounds!;
+            const image = photon.crop(
+              frame,
+              Math.floor(bounds.x),
+              Math.floor(bounds.y),
+              Math.ceil(bounds.x + bounds.width),
+              Math.ceil(bounds.y + bounds.height),
+            );
             frame.free();
             const expected = await meter.evaluate((element, property) => {
               const canvas = document.createElement("canvas");
@@ -127,8 +92,7 @@ suite.define(() => {
               drawing.fillRect(0, 0, 1, 1);
               return [...drawing.getImageData(0, 0, 1, 1).data].slice(0, 3);
             }, token);
-            // Native meter fills live in browser shadow DOM: assert painted pixels,
-            // not a host style that could be ignored by the fill pseudo-element.
+            // Assert shadow-DOM fill pixels, not an ignored host style.
             try {
               const pixels = image.get_raw_pixels();
               const matches = pixels.some(

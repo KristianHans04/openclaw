@@ -2,8 +2,19 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Locator, Page } from "playwright";
 import { takeControlUiScreenshotFrame } from "../test-helpers/control-ui-e2e-screenshot.ts";
+import { board } from "./chat-layout-fixtures.test-support.ts";
 
 export const sessionKey = "agent:main:dashboard";
+const emptyBoard = board(sessionKey);
+export const emptyCronList = (snapshotRevision: string) => ({
+  jobs: [],
+  snapshotRevision,
+  offset: 0,
+  limit: 50,
+  total: 0,
+  hasMore: false,
+  nextOffset: null,
+});
 export function dashboardWidget<T extends object>(name: string, title: string, overrides: T) {
   return {
     name,
@@ -20,10 +31,9 @@ export function dashboardWidget<T extends object>(name: string, title: string, o
 }
 
 export const boardSnapshot = {
-  sessionKey,
-  revision: 1,
+  ...emptyBoard,
   tabs: [
-    { tabId: "main", title: "Main", position: 0, chatDock: "right" },
+    ...emptyBoard.tabs,
     { tabId: "research", title: "Research", position: 1, chatDock: "right" },
   ],
   widgets: [
@@ -31,33 +41,24 @@ export const boardSnapshot = {
     dashboardWidget("sources", "Sources", { tabId: "research", frameUrl: "about:blank#sources" }),
   ],
 };
-export const pinnedBoardSnapshot = {
-  ...boardSnapshot,
-  revision: 2,
-  widgets: [
-    ...boardSnapshot.widgets,
-    dashboardWidget("canvas-cv_release", "Release status", {
-      position: 1,
-      frameUrl: "about:blank#canvas-cv_release",
-    }),
-  ],
-};
-export const pinnedMcpAppBoardSnapshot = {
-  ...boardSnapshot,
-  revision: 2,
-  widgets: [
-    ...boardSnapshot.widgets,
-    dashboardWidget("mcp-app-28b65635ecaa78ac", "Demo App", {
-      contentKind: "mcp-app",
-      position: 1,
-      instanceId: "instance-pinned-app",
-    }),
-  ],
-};
+function withPinnedWidget<T extends object>(widget: T) {
+  return { ...boardSnapshot, revision: 2, widgets: [...boardSnapshot.widgets, widget] };
+}
+export const pinnedBoardSnapshot = withPinnedWidget(
+  dashboardWidget("canvas-cv_release", "Release status", {
+    position: 1,
+    frameUrl: "about:blank#canvas-cv_release",
+  }),
+);
+export const pinnedMcpAppBoardSnapshot = withPinnedWidget(
+  dashboardWidget("mcp-app-28b65635ecaa78ac", "Demo App", {
+    contentKind: "mcp-app",
+    position: 1,
+    instanceId: "instance-pinned-app",
+  }),
+);
 export const pluginWidgetBoardSnapshot = {
-  sessionKey,
-  revision: 1,
-  tabs: [{ tabId: "main", title: "Main", position: 0, chatDock: "right" }],
+  ...emptyBoard,
   widgets: [
     dashboardWidget("workboard-card", "Priority card", {
       contentKind: "plugin",

@@ -1,5 +1,3 @@
-import { writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { Locator } from "playwright";
 import { expect, it } from "vitest";
 import type { SessionProcessSummary } from "../../../packages/gateway-protocol/src/schema/session-processes.js";
@@ -12,14 +10,15 @@ import {
   installMockGateway,
 } from "../test-helpers/control-ui-e2e.ts";
 import { cronListResponseFixture } from "../test-helpers/cron.ts";
+import { expectAttribute, expectCount, expectText } from "./activity-assertions.test-support.ts";
 import { openChatDetails } from "./chat-details.test-support.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { emptyCronList } from "./session-dashboard.test-support.ts";
 
 const suite = createControlUiE2eSuite({ name: "Session Details background work" });
 const now = 1_800_000_000_000;
 const parentKey = "agent:main:details-background";
 
-// The mock Gateway's fixture rows always carry a numeric updatedAt.
 type SessionFixture = GatewaySessionRow & { updatedAt: number };
 
 function child(
@@ -140,25 +139,9 @@ suite.define(() => {
           const gateway = await installMockGateway(page, {
             sessionKey: parentKey,
             sessions: [parent, ...children],
-            historyMessages: [
-              {
-                role: "assistant",
-                content: "Delegating the review and starting the dev server.",
-                timestamp: now - 290_000,
-                __openclaw: { id: "delegating", seq: 1 },
-              },
-            ],
             featureMethods: [...defaultControlUiFeatureMethods, "sessions.processes.list"],
             methodResponses: {
-              "cron.list": cronListResponseFixture({
-                jobs: [],
-                snapshotRevision: "details-background",
-                total: 0,
-                offset: 0,
-                limit: 50,
-                hasMore: false,
-                nextOffset: null,
-              }),
+              "cron.list": cronListResponseFixture(emptyCronList("details-background")),
               "sessions.processes.list": {
                 sessionId: "details-background",
                 processes,
@@ -171,21 +154,11 @@ suite.define(() => {
           const details = await openChatDetails(pane);
           const subagents = details.locator('[data-details-group="subagents"]');
           const processGroup = details.locator('[data-details-group="processes"]');
-          const capture = async (
-            name: string,
-            content: Locator,
-            elements = [details],
-            pageName?: string,
-          ) => {
-            const frame = await takeControlUiScreenshotFrame(page, details, [content], {
+          const capture = (content: Locator, elements = [details]) =>
+            takeControlUiScreenshotFrame(page, details, [content], {
               animations: "disabled",
               elements,
             });
-            await writeFile(path.join(suite.artifactDir, `${name}.png`), frame.elements[0]!.png);
-            if (pageName) {
-              await writeFile(path.join(suite.artifactDir, `${pageName}.png`), frame.png);
-            }
-          };
           await expect
             .poll(() =>
               details
@@ -193,7 +166,6 @@ suite.define(() => {
                 .allTextContents(),
             )
             .toEqual(["2 running · 3 done · 1 failed", "2 running · 1 done · 1 failed"]);
-          // Live work leads, failures follow, and the rest waits behind Show more.
           await subagents.locator(".chat-subagent-activity__status").first().waitFor();
           expect(
             await subagents.locator(".chat-subagent-activity__status").allTextContents(),
@@ -214,18 +186,13 @@ suite.define(() => {
             headline: "Comparing light and dark Details",
             planProgress: { completed: 2, total: 4 },
           });
-          await expect
-            .poll(() => subagents.locator(".chat-subagent-activity__steps").textContent())
-            .toBe("2/4");
+          await expectText(subagents.locator(".chat-subagent-activity__steps")).toBe("2/4");
 
-          await capture(`details-background-${colorScheme}`, details);
-          // Every full-width action should give its contents the same breathing room,
-          // whether Details is docked, floating, or opened from the mobile menu.
           for (const width of [1728, 1100, 390]) {
             await page.setViewportSize({ width, height: 1100 });
-            await expect
-              .poll(() => pane.locator(".chat-details").getAttribute("role"))
-              .toBe(width === 1728 ? "complementary" : "dialog");
+            await expectAttribute(pane.locator(".chat-details"), "role").toBe(
+              width === 1728 ? "complementary" : "dialog",
+            );
             await openChatDetails(pane);
             const controls = details.locator(
               ".chat-subagent-activity__row, .chat-details__process, .chat-details__more, .chat-details__navigation",
@@ -254,10 +221,8 @@ suite.define(() => {
               }),
             );
             for (const inset of rowInsets) {
-              expect(inset.left, inset.label).toBeGreaterThanOrEqual(7.5);
-              expect(inset.right, inset.label).toBeGreaterThanOrEqual(7.5);
-              expect(inset.top, inset.label).toBeGreaterThanOrEqual(5.5);
-              expect(inset.bottom, inset.label).toBeGreaterThanOrEqual(5.5);
+              expect(Math.min(inset.left, inset.right), inset.label).toBeGreaterThanOrEqual(7.5);
+              expect(Math.min(inset.top, inset.bottom), inset.label).toBeGreaterThanOrEqual(5.5);
             }
             const firstRow = subagents.locator("button.chat-subagent-activity__row").first();
             await firstRow.hover({ position: { x: 4, y: 10 } });
@@ -267,24 +232,16 @@ suite.define(() => {
                 return row.contains(document.elementFromPoint(bounds.left + 4, bounds.top + 10));
               }),
             ).toBe(true);
-            await capture(
-              `details-padding-${colorScheme}-${width}-rows`,
-              firstRow,
-              [subagents, processGroup],
-              `details-padding-${colorScheme}-${width}`,
-            );
+            await capture(firstRow, [details, subagents, processGroup]);
           }
           await page.setViewportSize({ width: 1728, height: 1100 });
           await openChatDetails(pane);
           await subagents.getByRole("button", { name: "Show 3 more" }).click();
-          await expect.poll(() => subagents.locator("[data-subagent-session-key]").count()).toBe(6);
-          // A collapsed group keeps its counts and bar in the heading.
+          await expectCount(subagents.locator("[data-subagent-session-key]")).toBe(6);
           await processGroup.locator("summary").click();
-          await expect
-            .poll(() => processGroup.evaluate((group) => (group as HTMLDetailsElement).open))
-            .toBe(false);
+          await expectAttribute(processGroup, "open").toBeNull();
           expect(await processGroup.locator("summary .chat-details__tally").isVisible()).toBe(true);
-          await capture(`details-background-${colorScheme}-expanded`, details);
+          await capture(details);
           await processGroup.locator("summary").click();
           await processGroup.getByRole("button", { name: "All processes" }).click();
           await page.locator("openclaw-chat-processes-panel").first().waitFor();

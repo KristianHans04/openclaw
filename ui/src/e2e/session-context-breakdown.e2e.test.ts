@@ -1,13 +1,13 @@
-import { writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { Locator } from "playwright";
 import { expect, it } from "vitest";
 import type { SessionSystemPromptReport } from "../../../src/config/sessions/session-system-prompt-report.js";
 import { takeControlUiScreenshotFrame } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import { controlUiSessionUrl, installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { expectText, showText } from "./activity-assertions.test-support.ts";
 import { openChatDetails } from "./chat-details.test-support.ts";
 import { controlUiE2eBuiltModuleRequest } from "./control-ui-built-module.test-support.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { emptyCronList } from "./session-dashboard.test-support.ts";
 
 const suite = createControlUiE2eSuite({ name: "Sidebar context breakdown" });
 const sessionKey = "agent:main:context-breakdown";
@@ -82,7 +82,6 @@ suite.define(() => {
             key: sessionKey,
             sessionId: "context-instance",
             kind: "direct",
-            label: "Context breakdown",
             model: "demo-model",
             modelProvider: "example",
             contextTokens: 100000,
@@ -90,31 +89,12 @@ suite.define(() => {
             totalTokensFresh: true,
           },
         ],
-        agentModel: "example/demo-model",
-        models: [
-          { id: "demo-model", provider: "example", name: "Demo model", contextWindow: 100000 },
-        ],
-        historyMessages: [
-          {
-            role: "assistant",
-            content:
-              "The context inspector separates conversation, workspace memory, skills, and tools.",
-          },
-        ],
         methodResponses: {
           "sessions.compact": { ok: true, compacted: true },
           "sessions.usage": {
             sessions: [{ key: sessionKey, sessionId: "context-instance", contextWeight: report }],
           },
-          "cron.list": {
-            jobs: [],
-            snapshotRevision: "empty",
-            offset: 0,
-            limit: 50,
-            total: 0,
-            hasMore: false,
-            nextOffset: null,
-          },
+          "cron.list": emptyCronList("empty"),
         },
       });
       await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
@@ -122,20 +102,16 @@ suite.define(() => {
       await openChatDetails(page);
       const panel = page.locator(".chat-details");
       const context = panel.locator(".chat-details__context");
-      const capture = async (name: string, content: Locator, fullPage = false) => {
-        const frame = await takeControlUiScreenshotFrame(page, panel, [content], {
+      const category = (id: string) => context.locator(`[data-context-category="${id}"]`);
+      const capture = (content: Locator) =>
+        takeControlUiScreenshotFrame(page, panel, [content], {
           elements: [panel],
           animations: "disabled",
         });
-        await writeFile(path.join(suite.artifactDir, `${name}-panel.png`), frame.elements[0]!.png);
-        if (fullPage) {
-          await writeFile(path.join(suite.artifactDir, `${name}.png`), frame.png);
-        }
-      };
       expect(breakdownRequests).toHaveLength(0);
       await context.locator(":scope > summary").click();
-      await capture(`context-initial-${width}`, context, true);
-      await context.getByText("Workspace files", { exact: true }).waitFor();
+      await capture(context);
+      await showText(context, "Workspace files");
       expect(breakdownRequests).toHaveLength(1);
       const request = await gateway.waitForRequest("sessions.usage");
       expect(request.params).toMatchObject({
@@ -143,40 +119,31 @@ suite.define(() => {
         includeContextWeight: true,
         limit: 1,
       });
-      await expect
-        .poll(() => context.locator('[data-context-category="system"]').textContent())
-        .toContain("4k");
-      await expect
-        .poll(() => context.locator('[data-context-category="messages"]').textContent())
-        .toContain("37k");
+      await expectText(category("system")).toContain("4k");
+      await expectText(category("messages")).toContain("37k");
       await context.locator('[data-context-details="files"] > summary').click();
       await context.getByText("AGENTS.md", { exact: true }).first().waitFor();
       expect(await context.getByText("AGENTS.md", { exact: true }).count()).toBe(2);
-      await context.getByText("Agent workspace", { exact: true }).waitFor();
-      await context.getByText("Project · openclaw", { exact: true }).waitFor();
-      await context.getByText("/projects/openclaw/AGENTS.md", { exact: true }).waitFor();
-      await context.getByText("Available on demand", { exact: true }).waitFor();
+      for (const text of [
+        "Agent workspace",
+        "Project · openclaw",
+        "/projects/openclaw/AGENTS.md",
+        "Available on demand",
+      ]) {
+        await showText(context, text);
+      }
       await context.getByRole("button", { name: "Compact session", exact: true }).waitFor();
-      await capture(
-        `context-expanded-${width}`,
-        context.getByText("AGENTS.md", { exact: true }).first(),
-        true,
-      );
+      await capture(context.getByText("AGENTS.md", { exact: true }).first());
       expect(await context.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
         true,
       );
       await context.locator('[data-context-details="files"] > summary').click();
       await context.locator('[data-context-details="tools"] > summary').click();
-      await context.getByText("System tools", { exact: true }).waitFor();
-      await context
-        .locator('[data-context-details="tools"]')
-        .getByText("MCP tools · Docs", { exact: true })
-        .waitFor();
+      await showText(context, "System tools");
+      await showText(context.locator('[data-context-details="tools"]'), "MCP tools · Docs");
       await context.locator('[data-context-details="deferred"] > summary').click();
-      await context.getByText("search_docs", { exact: true }).waitFor();
-      expect(await context.locator('[data-context-category="tools"]').textContent()).toContain(
-        "3k",
-      );
+      await showText(context, "search_docs");
+      expect(await category("tools").textContent()).toContain("3k");
       if (width > 900) {
         const draft = page.locator(
           'openclaw-chat-pane[aria-hidden="false"] .agent-chat__composer-combobox > textarea',
@@ -188,8 +155,8 @@ suite.define(() => {
         expect(await draft.inputValue()).toBe("Keep this unsent draft");
         await gateway.setMethodResponse("sessions.usage", { sessions: [] });
         await context.getByRole("button", { name: "Refresh", exact: true }).click();
-        await context.getByText("No matching context report.", { exact: false }).waitFor();
-        await capture("context-unavailable", context);
+        await showText(context, "No matching context report.", false);
+        await capture(context);
         const nativeReport: SessionSystemPromptReport = {
           ...report,
           injectedWorkspaceFiles: [
@@ -210,13 +177,11 @@ suite.define(() => {
           ],
         });
         await context.getByRole("button", { name: "Refresh", exact: true }).click();
-        await context.getByText("Workspace files", { exact: true }).waitFor();
+        await showText(context, "Workspace files");
         await context.locator('[data-context-details="files"] > summary').click();
-        await context.getByText("Unverified", { exact: true }).waitFor();
-        await expect
-          .poll(() => context.locator('[data-context-category="messages"]').textContent())
-          .toContain("—");
-        await capture("context-unverified", context.getByText("Unverified", { exact: true }));
+        await showText(context, "Unverified");
+        await expectText(category("messages")).toContain("—");
+        await capture(context.getByText("Unverified", { exact: true }));
       }
     });
   });

@@ -1,10 +1,12 @@
 import { expect, it } from "vitest";
+import type { UiSettings } from "../app/settings-contract.ts";
 import { selectChatLayoutAction } from "../test-helpers/chat-layout-menu.ts";
 import {
   controlUiBundledSettingsStorageKey,
   controlUiSessionUrl,
   installMockGateway,
 } from "../test-helpers/control-ui-e2e.ts";
+import { board } from "./chat-layout-fixtures.test-support.ts";
 import { openChatSidePanelType } from "./chat-side-panel.test-support.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 
@@ -14,12 +16,7 @@ const suite = createControlUiE2eSuite({
 });
 
 const sessionKey = "agent:main:dashboard";
-const boardSnapshot = {
-  sessionKey,
-  revision: 1,
-  tabs: [{ tabId: "main", title: "Main", position: 0, chatDock: "right" }],
-  widgets: [],
-};
+const boardSnapshot = board(sessionKey);
 
 suite.define(() => {
   it.each([
@@ -76,10 +73,14 @@ suite.define(() => {
         const answer = page
           .locator("openclaw-chat-session-rail")
           .getByText("Keep this side conversation visible.", { exact: true });
-        await expect.poll(() => selectedTab.getAttribute("aria-selected")).toBe("true");
-        if (side === "Side chat") {
-          await answer.waitFor();
-        }
+        const expectSelection = async () => {
+          await selectedTab.waitFor();
+          await expect.poll(() => selectedTab.getAttribute("aria-selected")).toBe("true");
+          if (side === "Side chat") {
+            await answer.waitFor();
+          }
+        };
+        await expectSelection();
         if (view === "closed side") {
           await selectChatLayoutAction(page, /^(Side panel|Minimize side panel)$/);
         } else if (view === "focused Chat") {
@@ -95,11 +96,7 @@ suite.define(() => {
           await expect.poll(() => page.locator(".sidebar-region--expanded").count()).toBe(1);
           await selectChatLayoutAction(page, "Restore split");
         }
-        await selectedTab.waitFor();
-        await expect.poll(() => selectedTab.getAttribute("aria-selected")).toBe("true");
-        if (side === "Side chat") {
-          await answer.waitFor();
-        }
+        await expectSelection();
       });
     },
   );
@@ -109,36 +106,28 @@ suite.define(() => {
       const settingsKey = controlUiBundledSettingsStorageKey(suite.server.baseUrl);
       await page.addInitScript(
         ({ key, storageKey }) => {
-          const settings = JSON.parse(localStorage.getItem(storageKey) ?? "{}") as Record<
-            string,
-            unknown
-          >;
+          const settings: Partial<UiSettings> = JSON.parse(
+            localStorage.getItem(storageKey) ?? "{}",
+          );
           settings.boardSessionViews = { [key]: { activeTabId: "main" } };
-          const sidebarSessionLayouts =
-            settings.sidebarSessionLayouts && typeof settings.sidebarSessionLayouts === "object"
-              ? (settings.sidebarSessionLayouts as Record<string, unknown>)
-              : {};
-          settings.sidebarSessionLayouts = {
-            ...sidebarSessionLayouts,
-            [key]: sidebarSessionLayouts[key] ?? {
-              columns: [
-                {
-                  id: "side-panel-column",
-                  side: "right",
-                  panels: [
-                    { id: "terminal", slot: "terminal" },
-                    { id: "dashboard", slot: "dashboard" },
-                    { id: "conversation", slot: "conversation" },
-                  ],
-                  activePanelId: "dashboard",
-                  height: 360,
-                  width: 480,
-                },
-              ],
-              dock: "right",
-              mainPanelId: "terminal",
-              open: true,
-            },
+          const layouts = (settings.sidebarSessionLayouts ??= {});
+          layouts[key] ??= {
+            columns: [
+              {
+                id: "side-panel-column",
+                side: "right",
+                panels: (["terminal", "dashboard", "conversation"] as const).map((slot) => ({
+                  id: slot,
+                  slot,
+                })),
+                activePanelId: "dashboard",
+                height: 360,
+                width: 480,
+              },
+            ],
+            dock: "right",
+            mainPanelId: "terminal",
+            open: true,
           };
           localStorage.setItem(storageKey, JSON.stringify(settings));
         },
