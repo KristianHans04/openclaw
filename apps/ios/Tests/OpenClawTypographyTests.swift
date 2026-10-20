@@ -24,8 +24,12 @@ struct RootSidebarTypographyTests {
 struct OpenClawTypographyTests {
     @Test func `About support links use the branded shared row`() throws {
         let settings = try String(contentsOf: Self.sourceURL("Design/SettingsProTabSections.swift"), encoding: .utf8)
-        #expect(settings.contains("title: \"Support\""))
-        #expect(settings.contains("Text(title)\n                        .font(OpenClawType.subheadSemiBold)"))
+        let compact = settings.filter { !$0.isWhitespace }
+        #expect(compact.contains(
+            "self.aboutLinkRow(title:\"Support\",icon:\"questionmark.circle\",color:.blue,url:URL(string:\"https://community.openclaw.ai/\")!)"))
+        let linkRow = try Self.extract(settings, from: "func aboutLinkRow(", to: "\n    }")
+        #expect(linkRow.filter { !$0.isWhitespace }.contains(
+            "Text(title).font(OpenClawType.subheadSemiBold)"))
     }
 
     @Test func `Access actions use native branded controls`() throws {
