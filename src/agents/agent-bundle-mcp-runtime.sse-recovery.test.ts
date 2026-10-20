@@ -31,6 +31,10 @@ it.each([
     vi.useFakeTimers();
     const encoder = new TextEncoder();
     const streams = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
+    const send = (endpoint: string, message: unknown) =>
+      streams
+        .get(endpoint)
+        ?.enqueue(encoder.encode(`event: message\ndata: ${JSON.stringify(message)}\n\n`));
     const calls: string[] = [];
     const lists: string[] = [];
     let sessionCount = 0;
@@ -92,13 +96,7 @@ it.each([
             ? { tools: [{ name: "probe", inputSchema: { type: "object" } }] }
             : { content: [{ type: "text", text: endpoint }] };
       if (message.id !== undefined) {
-        streams
-          .get(endpoint)
-          ?.enqueue(
-            encoder.encode(
-              `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n\n`,
-            ),
-          );
+        send(endpoint, { jsonrpc: "2.0", id: message.id, result });
       }
       return new Response(null, { status: 202 });
     };
@@ -148,13 +146,7 @@ it.each([
           expect(runtime.peekCatalog()?.diagnostics).toBeUndefined();
         }
       } else {
-        streams
-          .get("/messages/1")
-          ?.enqueue(
-            encoder.encode(
-              'event: message\ndata: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n',
-            ),
-          );
+        send("/messages/1", { jsonrpc: "2.0", method: "notifications/tools/list_changed" });
         await vi.advanceTimersByTimeAsync(0);
         const failedCatalog = await runtime.getCatalog();
         expect(failedCatalog.tools).toHaveLength(1);

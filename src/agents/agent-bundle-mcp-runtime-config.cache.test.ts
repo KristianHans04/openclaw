@@ -1,7 +1,7 @@
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { loadEnabledBundleLspConfig } from "../plugins/bundle-lsp.js";
 import { loadEnabledBundleMcpConfig } from "../plugins/bundle-mcp.js";
 import {
@@ -61,103 +61,84 @@ async function createBundle() {
     cache,
   );
   const cfg = { plugins: { entries: { "cache-bundle": { enabled: true } } } };
+  const scope = <T>(current: typeof snapshot, read: () => T) =>
+    withPluginMetadataSnapshotScope(current, read, { config: cfg, trustConfigIdentity: true });
   return {
     rootDir,
     cache,
     snapshot,
     cfg,
+    scope,
     params: { workspaceDir: rootDir, cfg, manifestRegistry: snapshot.manifestRegistry },
     settingsParams: { cwd: rootDir, cfg, pluginMetadataSnapshot: snapshot },
   };
 }
 
-describe("bundle metadata cache ownership", () => {
-  it.each(["provided", "current"] as const)(
-    "keeps %s bundle discovery isolated between plugin cache generations",
-    async (registrySource) => {
-      const bundle = await createBundle();
-      const params = {
-        ...bundle.params,
-        manifestRegistry:
-          registrySource === "provided" ? bundle.snapshot.manifestRegistry : undefined,
-      };
-      const read = () => loadSessionMcpConfig(params).loaded.mcpServers.bundled?.command;
-      const readOriginal = () =>
-        withPluginMetadataSnapshotScope(bundle.snapshot, read, {
-          config: bundle.cfg,
-          trustConfigIdentity: true,
-        });
-      expect(readOriginal()).toBe("original");
-      await fs.writeFile(
-        path.join(bundle.rootDir, ".mcp.json"),
-        JSON.stringify({ mcpServers: { bundled: { command: "replacement" } } }),
-      );
-      const candidate = cachedSnapshot([...bundle.snapshot.plugins]);
-      expect(
-        withPluginMetadataSnapshotScope(candidate, read, {
-          config: bundle.cfg,
-          trustConfigIdentity: true,
-        }),
-      ).toBe("replacement");
-      expect(readOriginal()).toBe("original");
-    },
-  );
-
-  it("reuses bundle file facts across MCP, LSP, settings, and live session policy", async () => {
+it.each(["provided", "current"] as const)(
+  "keeps %s bundle discovery isolated between plugin cache generations",
+  async (registrySource) => {
     const bundle = await createBundle();
-    await withPluginCache(bundle.cache, async () => {
-      const { params, settingsParams } = bundle;
-      loadEnabledBundleMcpConfig(params);
-      loadEnabledBundleLspConfig(params);
-      loadEnabledBundleAgentSettingsSnapshot(settingsParams);
-      loadSessionMcpConfig(params);
-      const probes = [
-        vi.spyOn(fsSync, "existsSync"),
-        vi.spyOn(fsSync, "realpathSync"),
-        vi.spyOn(fsSync, "readFileSync"),
-        vi.spyOn(fsSync, "readSync"),
-        vi.spyOn(fsSync, "statSync"),
-        vi.spyOn(fsSync, "lstatSync"),
-      ];
-      const current = loadSessionMcpConfig({
-        ...params,
-        cfg: { ...bundle.cfg, mcp: { servers: { custom: { command: "custom" } } } },
-      });
-      expect(current.loaded.mcpServers.bundled?.command).toBe("original");
-      expect(current.loaded.mcpServers.custom?.command).toBe("custom");
-      expect(
-        loadSessionMcpConfig({ ...params, toolOverrides: { mcpServers: { bundled: false } } })
-          .loaded.mcpServers,
-      ).toEqual({});
-      expect(loadEnabledBundleMcpConfig(params).config.mcpServers.bundled?.command).toBe(
-        "original",
-      );
-      expect(loadEnabledBundleLspConfig(params).config.lspServers.language?.command).toBe(
-        "language",
-      );
-      const settings = loadEnabledBundleAgentSettingsSnapshot(settingsParams);
-      expect(settings.hideThinkingBlock).toBe(true);
-      expect(settings.shellPath).toBeUndefined();
-      for (const probe of probes) {
-        expect(probe).not.toHaveBeenCalled();
-      }
-    });
-  });
-
-  it("reads explicitly supplied settings snapshots from their original plugin cache", async () => {
-    const bundle = await createBundle();
-    const params = bundle.settingsParams;
-    expect(
-      withPluginCache(bundle.cache, () => loadEnabledBundleAgentSettingsSnapshot(params))
-        .hideThinkingBlock,
-    ).toBe(true);
+    const params = {
+      ...bundle.params,
+      manifestRegistry:
+        registrySource === "provided" ? bundle.snapshot.manifestRegistry : undefined,
+    };
+    const read = () => loadSessionMcpConfig(params).loaded.mcpServers.bundled?.command;
+    const readOriginal = () => bundle.scope(bundle.snapshot, read);
+    expect(readOriginal()).toBe("original");
     await fs.writeFile(
-      path.join(bundle.rootDir, "settings.json"),
-      JSON.stringify({ hideThinkingBlock: false }),
+      path.join(bundle.rootDir, ".mcp.json"),
+      JSON.stringify({ mcpServers: { bundled: { command: "replacement" } } }),
     );
+    const candidate = cachedSnapshot([...bundle.snapshot.plugins]);
+    expect(bundle.scope(candidate, read)).toBe("replacement");
+    expect(readOriginal()).toBe("original");
+  },
+);
+
+it("reuses bundle file facts across MCP, LSP, settings, and live session policy", async () => {
+  const bundle = await createBundle();
+  await withPluginCache(bundle.cache, async () => {
+    const { params, settingsParams } = bundle;
+    loadEnabledBundleMcpConfig(params);
+    loadEnabledBundleLspConfig(params);
+    loadEnabledBundleAgentSettingsSnapshot(settingsParams);
+    loadSessionMcpConfig(params);
+    const probes = (
+      ["existsSync", "realpathSync", "readFileSync", "readSync", "statSync", "lstatSync"] as const
+    ).map((method) => vi.spyOn(fsSync, method));
+    const current = loadSessionMcpConfig({
+      ...params,
+      cfg: { ...bundle.cfg, mcp: { servers: { custom: { command: "custom" } } } },
+    });
+    expect(current.loaded.mcpServers).toMatchObject({
+      bundled: { command: "original" },
+      custom: { command: "custom" },
+    });
     expect(
-      withPluginCache(createPluginCache(), () => loadEnabledBundleAgentSettingsSnapshot(params))
-        .hideThinkingBlock,
-    ).toBe(true);
+      loadSessionMcpConfig({ ...params, toolOverrides: { mcpServers: { bundled: false } } }).loaded
+        .mcpServers,
+    ).toEqual({});
+    expect(loadEnabledBundleMcpConfig(params).config.mcpServers.bundled?.command).toBe("original");
+    expect(loadEnabledBundleLspConfig(params).config.lspServers.language?.command).toBe("language");
+    const settings = loadEnabledBundleAgentSettingsSnapshot(settingsParams);
+    expect(settings.hideThinkingBlock).toBe(true);
+    expect(settings.shellPath).toBeUndefined();
+    for (const probe of probes) {
+      expect(probe).not.toHaveBeenCalled();
+    }
   });
+});
+
+it("reads explicitly supplied settings snapshots from their original plugin cache", async () => {
+  const bundle = await createBundle();
+  const params = bundle.settingsParams;
+  const read = (cache: typeof bundle.cache) =>
+    withPluginCache(cache, () => loadEnabledBundleAgentSettingsSnapshot(params).hideThinkingBlock);
+  expect(read(bundle.cache)).toBe(true);
+  await fs.writeFile(
+    path.join(bundle.rootDir, "settings.json"),
+    JSON.stringify({ hideThinkingBlock: false }),
+  );
+  expect(read(createPluginCache())).toBe(true);
 });

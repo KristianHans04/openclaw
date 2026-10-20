@@ -31,35 +31,30 @@ const metadataSnapshot = createPluginMetadataSnapshotFixture({
   ],
 });
 
+const alias = { pin: "latest", expected: "middle" };
+const prefix = { pin: "custom/model", expected: "custom/model" };
+const collidingPolicy = ["custom/default", "custom/model"];
 it.each([
-  { name: "legacy raw alias once", pin: "latest", expected: "middle", raw: true },
+  { name: "legacy raw alias once", ...alias, raw: true },
   {
     name: "configured default retained by an exact-only policy",
-    pin: "latest",
-    expected: "middle",
+    ...alias,
     use: "default",
     allow: ["custom/other"],
   },
-  { name: "explicit alias once", pin: "latest", expected: "middle", use: "explicit" },
+  { name: "explicit alias once", ...alias, use: "explicit" },
   {
     name: "resolved prefix rejected by colliding policy",
-    pin: "custom/model",
+    ...prefix,
     expected: "default",
-    allow: ["custom/default", "custom/model"],
+    allow: [...collidingPolicy],
   },
   {
     name: "resolved prefix allowed by namespace wildcard",
-    pin: "custom/model",
-    expected: "custom/model",
+    ...prefix,
     allow: ["custom/default", "custom/custom/*"],
   },
-  {
-    name: "locked resolved prefix",
-    pin: "custom/model",
-    expected: "custom/model",
-    allow: ["custom/default", "custom/model"],
-    locked: true,
-  },
+  { name: "locked resolved prefix", ...prefix, allow: [...collidingPolicy], locked: true },
 ])("preserves $name through command selection", async (fixture) => {
   await withStateDirEnv("command-resolved-pin-", async ({ stateDir }) => {
     const cfg: OpenClawConfig = {

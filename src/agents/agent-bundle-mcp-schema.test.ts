@@ -72,21 +72,27 @@ it("preserves draft-07 format and non-mutating validation semantics", () => {
   expect(schema).toEqual(originalSchema);
 });
 
-it("reports malformed annotation formats at their original schema path", () => {
-  expect(() =>
-    compileDraft({
-      type: "object",
-      properties: {
-        node: {
-          type: ["object", "null"],
-          // Deliberately malformed external schema must reach runtime shape validation.
-          $defs: { Leaf: { type: "string", format: 42 as never } },
-        },
+it.each<{ name: string; properties: Schema["properties"]; message: string }>([
+  {
+    name: "malformed annotation at its original path",
+    properties: {
+      node: {
+        type: ["object", "null"],
+        // Deliberately malformed external schema must reach runtime shape validation.
+        $defs: { Leaf: { type: "string", format: 42 as never } },
       },
-    }),
-  ).toThrow(
+    },
+    message: "<schema>.properties.node.$defs.Leaf.format",
+  },
+  {
+    name: "compiler failure attributed to the MCP schema",
+    properties: { value: { type: "string", pattern: "[" } },
+    message: "Invalid MCP draft-2020-12 JSON Schema: Invalid regular expression",
+  },
+])("reports $name", ({ properties, message }) => {
+  expect(() => compileDraft({ type: "object", properties })).toThrow(
     expect.objectContaining({
-      message: expect.stringContaining("<schema>.properties.node.$defs.Leaf.format"),
+      message: expect.stringContaining(message),
       cause: expect.any(Error),
     }),
   );
@@ -99,35 +105,17 @@ it("accepts draft-2020-12 local refs, boolean schemas, and dynamic anchors", () 
   });
   expect(neverValidator("anything").valid).toBe(false);
 
-  const anchorValidator = compileDraft({
-    $defs: { Value: { $anchor: "value", type: "string" } },
-    $ref: "#value",
-  });
-  expect(anchorValidator("ok").valid).toBe(true);
-  expect(anchorValidator(1).valid).toBe(false);
-
-  const dynamicRefValidator = compileDraft({
-    $defs: { Value: { $dynamicAnchor: "value", type: "string" } },
-    $dynamicRef: "#value",
-  });
-  expect(dynamicRefValidator("ok").valid).toBe(true);
-  expect(dynamicRefValidator(1).valid).toBe(false);
-});
-
-it("attributes draft-2020-12 compiler failures to the MCP schema", () => {
-  expect(() =>
-    compileDraft({
-      type: "object",
-      properties: { value: { type: "string", pattern: "[" } },
-    }),
-  ).toThrow(
-    expect.objectContaining({
-      message: expect.stringContaining(
-        "Invalid MCP draft-2020-12 JSON Schema: Invalid regular expression",
-      ),
-      cause: expect.any(Error),
-    }),
-  );
+  for (const [anchor, ref] of [
+    ["$anchor", "$ref"],
+    ["$dynamicAnchor", "$dynamicRef"],
+  ] as const) {
+    const validator = compileDraft({
+      $defs: { Value: { [anchor]: "value", type: "string" } },
+      [ref]: "#value",
+    });
+    expect(validator("ok").valid).toBe(true);
+    expect(validator(1).valid).toBe(false);
+  }
 });
 
 it("compiles draft-2020-12 patterns with redundant unicode-invalid escapes", () => {

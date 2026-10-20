@@ -6,7 +6,7 @@ import {
   setRuntimeConfigSnapshot,
 } from "../config/runtime-snapshot.js";
 import { withSessionTurn } from "../sessions/session-controller.admission.js";
-import { getCurrentSessionControllerOwner } from "../sessions/session-controller.context.js";
+import { getCurrentSessionControllerOwner as currentOwner } from "../sessions/session-controller.context.js";
 import {
   agentCommand,
   compactionTestRuntime,
@@ -24,106 +24,83 @@ beforeEach(() => {
   setRuntimeConfigSnapshot(expectDefined(state.cfg, "compaction fixture config"));
 });
 
-async function createCommandTarget() {
-  const target = {
-    agentId: "main",
-    sessionId: "outer-command-identity",
-    sessionKey: "agent:main:explicit:outer-command-identity",
-    storePath: requireCompactionStorePath(),
-  };
+type Owner = NonNullable<ReturnType<typeof currentOwner>>;
+const identity = { sessionId: "outer", sessionKey: "agent:main:explicit:outer" };
+const commandOptions = { ...identity, message: "test" };
+const result = (sessionId: string) =>
+  makeCompactionResult({ sessionId, text: "done", runner: "embedded" });
+
+async function withCommandTarget(run: (owner: Owner) => Promise<void>) {
+  const target = { ...identity, agentId: "main", storePath: requireCompactionStorePath() };
   await compactionTestRuntime.replaceSessionEntry(target, {
     sessionId: target.sessionId,
     updatedAt: Date.now(),
   });
-  return target;
+  return withSessionTurn(target, (operation) =>
+    run(expectDefined(operation, "outer command owner")),
+  );
 }
 
 it.each(["owned", "detached"] as const)(
-  "reports %s command identity changes only to its admitted owner",
+  "scopes %s command identity changes to its owner",
   async (ownership) => {
-    const target = await createCommandTarget();
-    const reportedId = "reported-command-identity";
+    const reportedId = "reported";
     const onSessionIdChanged = vi.fn();
 
-    await withSessionTurn(target, async (operation) => {
-      const outer = expectDefined(operation, "outer command owner");
+    await withCommandTarget(async (outer) => {
       state.runAgentAttemptMock.mockImplementationOnce(async (params) => {
-        expect(getCurrentSessionControllerOwner()).toBe(ownership === "owned" ? outer : undefined);
+        expect(currentOwner()).toBe(ownership === "owned" ? outer : undefined);
         params.opts.onSessionIdChanged?.(reportedId);
-        return makeCompactionResult({
-          sessionId: params.sessionId,
-          text: "Synthetic command result",
-          runner: "embedded",
-        });
+        return result(params.sessionId);
       });
 
       await agentCommand({
-        message: "Report the command identity",
-        sessionId: target.sessionId,
-        sessionKey: target.sessionKey,
+        ...commandOptions,
         ...(ownership === "detached" ? { sessionEffects: "internal" as const } : {}),
         onSessionIdChanged,
       });
 
       expect(state.runAgentAttemptMock).toHaveBeenCalledOnce();
       expect(onSessionIdChanged).toHaveBeenCalledExactlyOnceWith(reportedId);
-      expect(getCurrentSessionControllerOwner()).toBe(outer);
-      expect(outer.sessionId).toBe(ownership === "owned" ? reportedId : target.sessionId);
+      expect(currentOwner()).toBe(outer);
+      expect(outer.sessionId).toBe(ownership === "owned" ? reportedId : identity.sessionId);
       expect(outer.hasOwnedSessionId(reportedId)).toBe(ownership === "owned");
-      expect(outer.abortSignal.aborted).toBe(false);
-      expect(outer.result).toBeNull();
+      expect(outer).toMatchObject({ abortSignal: { aborted: false }, result: null });
     });
   },
 );
 
-it("cancels a nested command without cancelling the borrowed outer turn", async () => {
-  const target = await createCommandTarget();
+it("cancels a nested command without aborting its outer turn", async () => {
   const caller = new AbortController();
   const reason = new Error("nested command cancelled");
   const entered = createDeferred();
   const release = createDeferred();
   let attemptSignal: AbortSignal | undefined;
 
-  await withSessionTurn(target, async (operation) => {
-    const outer = expectDefined(operation, "outer command owner");
+  await withCommandTarget(async (outer) => {
     state.runAgentAttemptMock.mockImplementationOnce(async (params) => {
-      expect(getCurrentSessionControllerOwner()).toBe(outer);
+      expect(currentOwner()).toBe(outer);
       attemptSignal = params.opts.abortSignal;
       entered.resolve();
       await release.promise;
       attemptSignal?.throwIfAborted();
-      return makeCompactionResult({
-        sessionId: params.sessionId,
-        text: "Synthetic command result",
-        runner: "embedded",
-      });
+      return result(params.sessionId);
     });
-    const command = agentCommand({
-      message: "Run until cancelled",
-      sessionId: target.sessionId,
-      sessionKey: target.sessionKey,
-      abortSignal: caller.signal,
-    });
+    const command = agentCommand({ ...commandOptions, abortSignal: caller.signal });
     const outcome = command.then(
       () => undefined,
       (error: unknown) => error,
     );
     try {
-      await awaitGateBeforeSettlement(
-        entered.promise,
-        command,
-        "Command never reached its runtime",
-      );
+      await awaitGateBeforeSettlement(entered.promise, command, "Runtime did not start");
       caller.abort(reason);
       expect(attemptSignal?.aborted).toBe(true);
       expect(attemptSignal?.reason).toBe(reason);
-      expect(outer.abortSignal.aborted).toBe(false);
-      expect(outer.result).toBeNull();
+      expect(outer).toMatchObject({ abortSignal: { aborted: false }, result: null });
       release.resolve();
       expect(await outcome).toBe(reason);
-      expect(getCurrentSessionControllerOwner()).toBe(outer);
-      expect(outer.abortSignal.aborted).toBe(false);
-      expect(outer.result).toBeNull();
+      expect(currentOwner()).toBe(outer);
+      expect(outer).toMatchObject({ abortSignal: { aborted: false }, result: null });
     } finally {
       caller.abort(reason);
       release.resolve();

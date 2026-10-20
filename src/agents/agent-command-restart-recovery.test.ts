@@ -4,8 +4,8 @@ import {
   mergeRestartRecoveryTerminalDeliveryEvidence,
 } from "../config/sessions/restart-recovery-state.js";
 import {
-  buildCurrentRunRestartRecoveryClaim,
-  buildRestartRecoveryTerminalDeliveryEvidence,
+  buildCurrentRunRestartRecoveryClaim as claim,
+  buildRestartRecoveryTerminalDeliveryEvidence as capture,
 } from "./agent-command-restart-recovery.js";
 import { hasMessagingToolDeliveryToSource } from "./subagents/announce/subagent-announce-completion-delivery.js";
 import { createDirectAnnounceResponseClassifier } from "./subagents/announce/subagent-announce-direct-response.js";
@@ -23,7 +23,7 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
 
   it("persists a scoped restart-safe policy and clears retired media constraints", () => {
     expect(
-      buildCurrentRunRestartRecoveryClaim({
+      claim({
         disableMessageTool: true,
         entry: {
           ...session,
@@ -49,7 +49,7 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
 
   it("preserves the claimed route when delivery preparation resolves an alias", () => {
     expect(
-      buildCurrentRunRestartRecoveryClaim({
+      claim({
         deliveryContext: { channel: "telegram", to: "telegram:-100123:topic:1", threadId: 1 },
         entry: {
           ...scopedPolicy,
@@ -68,7 +68,7 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
 
   it("requires explicit ownership for a new source claim", () => {
     expect(() =>
-      buildCurrentRunRestartRecoveryClaim({
+      claim({
         entry: session,
         runId: "media-run",
         sourceRunId: "media-run",
@@ -78,15 +78,13 @@ describe("buildCurrentRunRestartRecoveryClaim", () => {
 });
 
 describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
-  type TerminalDeliveryInput = Parameters<typeof buildRestartRecoveryTerminalDeliveryEvidence>[0];
+  type TerminalDeliveryInput = Parameters<typeof capture>[0];
   type PayloadOutcome = NonNullable<
     NonNullable<TerminalDeliveryInput["deliveryStatus"]>["payloadOutcomes"]
   >[number];
 
   function project(result: TerminalDeliveryInput) {
-    const persisted = JSON.stringify([
-      { runId: "original", ...buildRestartRecoveryTerminalDeliveryEvidence(result) },
-    ]);
+    const persisted = JSON.stringify([{ runId: "original", ...capture(result) }]);
     return getRestartRecoveryTerminalDeliveryEvidence(
       {
         ...session,
@@ -301,7 +299,7 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
   );
 
   it("marks bounded messaging-tool target evidence as truncated", () => {
-    const evidence = buildRestartRecoveryTerminalDeliveryEvidence({
+    const evidence = capture({
       messagingToolSentTargets: Array.from({ length: 65 }, (_, index) => ({
         provider: "discord",
         to: `channel:${index}`,
@@ -313,24 +311,21 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
     expect(evidence?.messagingToolSentTargetsTruncated).toBe(true);
   });
 
-  it("preserves a prepared literal token as visible without inventing a silence fact", () => {
-    const evidence = buildRestartRecoveryTerminalDeliveryEvidence({
-      payloads: [{ text: "NO_REPLY" }],
-    });
-    expect(evidence.payloads).toEqual([{ visible: true }]);
+  it.each([
+    { name: "literal silence token", payload: { text: "NO_REPLY" }, expected: { visible: true } },
+    {
+      name: "explicitly hidden payload",
+      payload: { visible: false, mediaUrls: ["/tmp/private.png"] },
+      expected: { mediaUrls: ["/tmp/private.png"], visible: false },
+    },
+  ])("preserves $name visibility", ({ payload, expected }) => {
+    const evidence = capture({ payloads: [payload] });
+    expect(evidence.payloads).toEqual([expected]);
     expect(evidence.meta?.terminalReply).toBeUndefined();
   });
 
-  it("preserves explicit hidden-payload visibility", () => {
-    const evidence = buildRestartRecoveryTerminalDeliveryEvidence({
-      payloads: [{ visible: false, mediaUrls: ["/tmp/private.png"] }],
-    });
-
-    expect(evidence?.payloads).toEqual([{ mediaUrls: ["/tmp/private.png"], visible: false }]);
-  });
-
   it("retains mixed unaccounted aggregate delivery as ambiguous evidence", () => {
-    const evidence = buildRestartRecoveryTerminalDeliveryEvidence({
+    const evidence = capture({
       didSendViaMessagingTool: true,
       messagingToolSentMediaUrls: ["/tmp/one.png", "/tmp/two.png"],
       messagingToolSentTargets: [{ ...target, mediaUrls: ["/tmp/one.png"] }],
@@ -347,7 +342,7 @@ describe("buildRestartRecoveryTerminalDeliveryEvidence", () => {
   });
 
   it("preserves explicit negative messaging-target visibility", () => {
-    const evidence = buildRestartRecoveryTerminalDeliveryEvidence({
+    const evidence = capture({
       messagingToolSentTargets: [{ ...target, text: "" }],
     });
 

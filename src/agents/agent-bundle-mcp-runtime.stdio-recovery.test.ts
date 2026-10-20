@@ -22,19 +22,18 @@ let receipts: FixtureReceiptChannel;
 beforeAll(async () => {
   receipts = await openFixtureReceiptChannel();
 });
-afterAll(async () => {
-  await receipts.close();
-});
+afterAll(() => receipts.close());
 
 function toolBytes(tools: Awaited<ReturnType<typeof materializeBundleMcpToolsForRun>>["tools"]) {
   return JSON.stringify(
-    tools.map(({ name, description, parameters }) => ({
-      name,
-      description,
-      parameters,
-    })),
+    tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
   );
 }
+
+const config = (servers: Record<string, { command: string; args?: string[] }>) => ({
+  plugins: { enabled: false },
+  mcp: { servers },
+});
 
 it.skipIf(process.platform === "win32")(
   "prepares the same session after removing an unavailable process-group server",
@@ -50,10 +49,7 @@ it.skipIf(process.platform === "win32")(
       workspaceDir,
       manifestRegistry: { plugins: [] },
     };
-    const cfg = {
-      plugins: { enabled: false },
-      mcp: { servers: { missing: { command: path.join(workspaceDir, "absent-executable") } } },
-    };
+    const cfg = config({ missing: { command: path.join(workspaceDir, "absent-executable") } });
     let release: (() => void) | undefined;
     try {
       const original = await manager.acquire({ ...params, cfg });
@@ -68,7 +64,7 @@ it.skipIf(process.platform === "win32")(
       release();
       release = undefined;
 
-      const removed = { plugins: { enabled: false }, mcp: { servers: {} } };
+      const removed = config({});
       await manager.reloadConfig({ cfg: removed, manifestRegistry: params.manifestRegistry });
       const next = await manager.acquire({ ...params, cfg: removed });
       release = next.releaseLease;
@@ -93,41 +89,36 @@ it.skipIf(process.platform === "win32")(
 
 it("reconnects after an MCP child process exits", async ({ signal }) => {
   const tempDir = tempDirs.make("bundle-mcp-child-exit-");
-  const serverPath = path.join(tempDir, "server.mjs");
-  const logPath = path.join(tempDir, "server.log");
+  async function server(
+    name: string,
+    options: Omit<
+      Parameters<typeof writeListToolsMcpServerFixture>[0],
+      "filePath" | "logPath"
+    > = {},
+  ) {
+    const fixture = {
+      ...options,
+      filePath: path.join(tempDir, `${name}.mjs`),
+      logPath: path.join(tempDir, `${name}.log`),
+    };
+    await writeListToolsMcpServerFixture(fixture, receipts.endpoint);
+    return { ...fixture, launch: { command: process.execPath, args: [fixture.filePath] } };
+  }
   const pidPath = path.join(tempDir, "server.pid");
   const listToolsReleasePath = path.join(tempDir, "list-tools.release");
-  const healthyServerPath = path.join(tempDir, "healthy.mjs");
-  const healthyLogPath = path.join(tempDir, "healthy.log");
   await fs.writeFile(listToolsReleasePath, "release", "utf8");
-  await writeListToolsMcpServerFixture(
-    {
-      filePath: serverPath,
-      logPath,
-      pidPath,
-      listToolsReleasePath,
-      capabilities: { tools: {}, resources: {}, prompts: {} },
-    },
-    receipts.endpoint,
-  );
-  await writeListToolsMcpServerFixture(
-    { filePath: healthyServerPath, logPath: healthyLogPath },
-    receipts.endpoint,
-  );
+  const child = await server("server", {
+    pidPath,
+    listToolsReleasePath,
+    capabilities: { tools: {}, resources: {}, prompts: {} },
+  });
+  const healthy = await server("healthy");
 
   const runtime = createSessionMcpRuntime({
     sessionId: "session-child-exit",
     sessionKey: "agent:test:session-child-exit",
     workspaceDir: "/workspace",
-    cfg: {
-      plugins: { enabled: false },
-      mcp: {
-        servers: {
-          child: { command: process.execPath, args: [serverPath] },
-          healthy: { command: process.execPath, args: [healthyServerPath] },
-        },
-      },
-    },
+    cfg: config({ child: child.launch, healthy: healthy.launch }),
   });
 
   try {
@@ -158,7 +149,7 @@ it("reconnects after an MCP child process exits", async ({ signal }) => {
     await expect(runtime.callTool("child", "slow_tool", {})).rejects.toThrow(
       /^bundle-mcp server "child" is (?:not connected|disconnected: mcp transport closed)$/,
     );
-    await withinTest(receipts.waitFor(logPath, "recv tools/list", 2), signal);
+    await withinTest(receipts.waitFor(child.logPath, "recv tools/list", 2), signal);
     await expect(runtime.callTool("child", "slow_tool", {})).rejects.toThrow(
       'bundle-mcp server "child" is not connected',
     );
