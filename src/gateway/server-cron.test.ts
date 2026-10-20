@@ -497,7 +497,8 @@ describe("buildGatewayCronService", () => {
       activity: { resultSettled: false, lastOutputAtMs: Date.now() },
       runId: "sandbox-stream",
     }));
-    vi.doMock("./cron-stream-sandbox.js", () => ({
+    vi.doMock("./cron-stream-sandbox.js", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("./cron-stream-sandbox.js")>()),
       createCronStreamSandboxExecutor: () => ({ spawn: spawnSandbox, recover: async () => {} }),
     }));
     try {
