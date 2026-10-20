@@ -1,6 +1,7 @@
 import "../test-utils/prepare-compiled-subprocesses.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isRecord } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GatewayPendingRequests } from "../../packages/gateway-client/src/pending-request.js";
 import { GatewayClientRequestError } from "../../packages/gateway-client/src/request-error.js";
@@ -35,23 +36,27 @@ async function dispatch(...args: Parameters<PluginLifecycleGateway>) {
 }
 
 async function createPluginRefusalResponse(retryAfterMs = 1_000) {
-  const id = "plugin-refusal";
   const pending = new GatewayPendingRequests({
-    createRequestId: () => id,
+    createRequestId: () => "plugin-refusal",
     nowMs: Date.now,
     createRequestError: (error) => new GatewayClientRequestError(error),
   });
+  let requestId = "";
   const response = pending.request(
     {
       send: (data) => {
-        expect(JSON.parse(data)).toMatchObject({ id });
+        const frame: unknown = JSON.parse(data);
+        if (!isRecord(frame) || typeof frame.id !== "string") {
+          throw new Error("Gateway request omitted its ID");
+        }
+        requestId = frame.id;
       },
     },
     "plugins.setEnabled",
   );
   pending.handleResponse({
     type: "res",
-    id,
+    id: requestId,
     ok: false,
     error: {
       code: "UNAVAILABLE",
