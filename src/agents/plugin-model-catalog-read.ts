@@ -1,3 +1,5 @@
+import { isMainThread } from "node:worker_threads";
+import { getDatabaseEngineInput } from "../infra/database-engine/context.js";
 import { collectNestedErrorCandidates } from "../infra/error-graph-internal.js";
 import { resolveRuntimeProcessEntrypointUrl } from "../infra/runtime-process-url.js";
 import { captureRuntimeWorkerSource } from "../infra/runtime-worker-generation.js";
@@ -73,6 +75,14 @@ export async function readPluginModelCatalogsInWorker(
   input: PluginModelCatalogReadInput,
   signal: AbortSignal,
 ): Promise<PersistedPluginModelCatalog[]> {
+  if (!isMainThread && getDatabaseEngineInput("agent")) {
+    // The current worker can share its agent reader with catalog auth preparation.
+    signal.throwIfAborted();
+    const { PLUGIN_MODEL_CATALOG_CACHE_SCOPE, readPluginModelCatalogEntries } =
+      await import("./plugin-model-catalog.kernel.js");
+    signal.throwIfAborted();
+    return readPluginModelCatalogEntries(input, PLUGIN_MODEL_CATALOG_CACHE_SCOPE, input.pluginIds);
+  }
   const { timeoutMs } = readSqliteInspectionBudget("plugin catalog read", input.path);
   let catalogs: PersistedPluginModelCatalog[] = [];
   const transfer = createSqliteWorkerTransferCollector("catalogs", (value) => {

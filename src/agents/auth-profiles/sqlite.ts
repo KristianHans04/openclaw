@@ -19,7 +19,10 @@ import type { DatabaseFileIdentity } from "../../infra/sqlite-worker-identity.js
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { openAgentEngineStore } from "../../state/openclaw-agent-db-engine.js";
 import { agentDatabaseLifecycle } from "../../state/openclaw-agent-db-lifecycle.js";
-import { openOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
+import {
+  openOpenClawAgentDatabaseReadOnly,
+  withOpenClawAgentDatabaseReadOnly,
+} from "../../state/openclaw-agent-db-readonly.js";
 import {
   assertExistingAgentSchemaOwner,
   readExistingAgentSchemaMeta,
@@ -112,7 +115,13 @@ function prepareAuthProfileSharedOwner(env: NodeJS.ProcessEnv) {
 }
 
 type AuthProfileDatabaseTarget =
-  | { kind: "agent"; agentId: string; path: string; env: NodeJS.ProcessEnv }
+  | {
+      kind: "agent";
+      agentId: string;
+      registeredAgentId?: string;
+      path: string;
+      env: NodeJS.ProcessEnv;
+    }
   | { kind: "shared-state"; path: string; env: NodeJS.ProcessEnv };
 
 const authProfileTransactions = new WeakMap<AuthProfileDatabase, PreparedAuthProfileStoreOwner>();
@@ -144,9 +153,11 @@ function resolveAuthProfileDatabaseOptions(
     return { kind: "shared-state", path: pathname, env };
   }
   const dir = path.dirname(pathname);
+  const registeredAgentId = resolveRegisteredAgentIdForDir(dir);
   return {
     kind: "agent",
-    agentId: resolveRegisteredAgentIdForDir(dir) ?? inferAgentIdFromDir(dir),
+    agentId: registeredAgentId ?? inferAgentIdFromDir(dir),
+    ...(registeredAgentId ? { registeredAgentId } : {}),
     path: pathname,
     env,
   };
@@ -220,10 +231,19 @@ export function assertAuthProfileStoreAgentOwner(agentDir: string, agentId: stri
 }
 
 function readSelectedAgentAuthDatabase<T>(
-  target: { path: string; env?: NodeJS.ProcessEnv },
+  target: { path: string; env?: NodeJS.ProcessEnv; registeredAgentId?: string },
   read: (db: EngineConnection) => T,
 ): { value: T } | undefined {
   assertEngineStoreExecutionAllowed();
+  if (target.registeredAgentId) {
+    const result = withOpenClawAgentDatabaseReadOnly(({ db }) => read(db), {
+      agentId: target.registeredAgentId,
+      path: target.path,
+      ...(target.env ? { env: target.env } : {}),
+    });
+    return result.found ? { value: result.value } : undefined;
+  }
+  // Ownerless inspection also accepts custom paths whose stored owner cannot be inferred.
   if (isMissingDatabasePath(target.path)) {
     return undefined;
   }
@@ -247,7 +267,10 @@ function readSelectedAgentAuthDatabase<T>(
 }
 
 export function inspectAuthProfileJsonCellReadOnly(
-  databaseTarget: Pick<AuthProfileDatabaseTarget, "kind" | "path"> & { env?: NodeJS.ProcessEnv },
+  databaseTarget: Pick<AuthProfileDatabaseTarget, "kind" | "path"> & {
+    env?: NodeJS.ProcessEnv;
+    registeredAgentId?: string;
+  },
   target: "store" | "state",
 ): PersistedAuthProfileStoreInspection {
   if (databaseTarget.kind === "shared-state") {

@@ -288,7 +288,9 @@ async function runCatalogRequest(
     }
     const credentials = {
       ...resolveSyntheticCredentials(request.providerIds ?? value.providerIds),
-      ...resolveAgentCredentialMapFromStore(authStore, { config: value.input.config }),
+      ...withPluginRuntimeGenerationScope(pluginGenerationScope, () =>
+        resolveAgentCredentialMapFromStore(authStore, { config: value.input.config }),
+      ),
     };
     if (request.kind === "auth-refresh") {
       return {

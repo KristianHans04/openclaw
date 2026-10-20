@@ -168,11 +168,15 @@ Unconfirmed native cleanup quarantines its slot without releasing that custody.
 Reads use remaining healthy capacity; four quarantined slots reject visibly
 instead of launching another process or waiting indefinitely.
 
-Plugin model catalogs use a read-only task worker with the Gateway's admission
-relay. Each task closes its native reader before transferring the result in
+Main-thread and SQLite plugin catalog reads use a task worker with the Gateway's
+admission relay. Each task closes its native reader before transferring the result in
 bounded frames, while physical admission facts survive for subsequent reads.
 Owner-published schema and quarantine changes invalidate those facts. Catalog
 rows are read on every request, and reads do not create missing databases.
+Catalog calls already running in a PostgreSQL worker use its existing agent
+reader instead of starting another task worker. Auth reads for registered agents
+share that lifecycle-owned reader; unregistered custom-path inspection retains
+its explicit open and close.
 
 Paced page-cache warming leases one of those same slots until its caller scope
 closes. Its iterator stays in one exclusive child across `begin` and `step`
