@@ -8,6 +8,7 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { build, createServer, loadConfigFromFile, type Plugin } from "vite";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { controlUiPluginDistributionsPlugin } from "../../config/control-ui-plugin-distributions.ts";
+import { normalizeControlUiBuildInfo } from "../build-info-normalizers.ts";
 
 let root: string;
 beforeEach(async () => {
@@ -80,8 +81,19 @@ async function fixture() {
 }
 
 async function compile(inputs = new Set<string>()) {
+  // Distribution fixtures need real builds, but not checkout-specific Git metadata.
+  const configEnv = {
+    command: "build" as const,
+    mode: "production",
+    buildInfo: normalizeControlUiBuildInfo({
+      version: "1.0.0",
+      commit: "a".repeat(40),
+      dirty: false,
+      release: process.env.OPENCLAW_CONTROL_UI_RELEASE_BUILD?.trim() === "1",
+    }),
+  };
   const loaded = await loadConfigFromFile(
-    { command: "build", mode: "production" },
+    configEnv,
     fileURLToPath(new URL("../../vite.config.ts", import.meta.url)),
   );
   if (!loaded) {
