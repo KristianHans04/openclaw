@@ -5,7 +5,7 @@ import { readStyleSheet } from "../../../../test/helpers/ui-style-fixtures.js";
 import {
   canRunPlaywrightChromium,
   resolvePlaywrightChromiumExecutablePath,
-} from "../../test-helpers/control-ui-e2e.ts";
+} from "../../test-helpers/playwright-chromium.ts";
 
 const chromiumExecutablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
 const describeBrowser = canRunPlaywrightChromium(chromiumExecutablePath) ? describe : describe.skip;

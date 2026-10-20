@@ -5,7 +5,7 @@ import { withBrowserPage } from "../test-helpers/browser-page.ts";
 import {
   canRunPlaywrightChromium,
   resolvePlaywrightChromiumExecutablePath,
-} from "../test-helpers/control-ui-e2e.ts";
+} from "../test-helpers/playwright-chromium.ts";
 
 const chromiumExecutablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
 const chromiumAvailable = canRunPlaywrightChromium(chromiumExecutablePath);

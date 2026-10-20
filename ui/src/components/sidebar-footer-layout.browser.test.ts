@@ -6,13 +6,13 @@ import { setupSidebarTest } from "../test-helpers/app-sidebar-setup.ts";
 import { createGateway, createSessions, mountSidebar } from "../test-helpers/app-sidebar.ts";
 import "./app-sidebar.tsx";
 import {
-  canRunPlaywrightChromium,
-  resolvePlaywrightChromiumExecutablePath,
-} from "../test-helpers/control-ui-e2e.ts";
-import {
   clearNativeGatewayTestState,
   setNativeGatewayTestState,
 } from "../test-helpers/native-gateways.ts";
+import {
+  canRunPlaywrightChromium,
+  resolvePlaywrightChromiumExecutablePath,
+} from "../test-helpers/playwright-chromium.ts";
 
 const chromiumExecutablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
 const chromiumAvailable = canRunPlaywrightChromium(chromiumExecutablePath);

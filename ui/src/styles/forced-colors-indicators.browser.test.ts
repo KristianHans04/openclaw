@@ -7,7 +7,7 @@ import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-ar
 import {
   canRunPlaywrightChromium,
   resolvePlaywrightChromiumExecutablePath,
-} from "../test-helpers/control-ui-e2e.ts";
+} from "../test-helpers/playwright-chromium.ts";
 
 const chromiumExecutablePath = resolvePlaywrightChromiumExecutablePath(chromium.executablePath());
 const describeForcedColors = canRunPlaywrightChromium(chromiumExecutablePath)

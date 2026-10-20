@@ -1,11 +1,11 @@
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readStyleSheet } from "../../../../../test/helpers/ui-style-fixtures.js";
+import { mountSolid } from "../../../test-helpers/mount-solid.ts";
 import {
   canRunPlaywrightChromium,
   resolvePlaywrightChromiumExecutablePath,
-} from "../../../test-helpers/control-ui-e2e.ts";
-import { mountSolid } from "../../../test-helpers/mount-solid.ts";
+} from "../../../test-helpers/playwright-chromium.ts";
 import { flush } from "../../../test-helpers/solid-settle.ts";
 import { CompactAttachmentCard } from "./chat-attachment-card-solid.tsx";
 
