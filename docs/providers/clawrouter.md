@@ -196,7 +196,7 @@ content-retention state.
 `GET /v1/catalog` returns `{ providers: [...] }`, where each provider entry
 lists its own `models[]` (with upstream id, capabilities, and pricing) and its
 supported request routes. OpenClaw does not ship a second, fixed list of
-ClawRouter models. A catalog model is advertised as an OpenClaw model when:
+ClawRouter text models. A catalog model is advertised as an OpenClaw text model when:
 
 - the ClawRouter key's policy grants its provider;
 - the catalog model advertises a supported LLM capability (`llm.responses`,
@@ -243,6 +243,44 @@ schemas without them. A catalog provider exposing only an
 unsupported request format is intentionally not advertised as an OpenClaw
 text model. Normalize those providers to one of the supported contracts in
 ClawRouter rather than sending an incompatible payload.
+
+## Image generation
+
+The bundled plugin also registers ClawRouter with the native image runtime,
+`image_generate` tool, and `openclaw infer image generate` CLI. This is **JSON
+generation only** through `/v1/images/generations`: edits, masks, variations, and
+streaming are not supported. The ClawRouter deployment must support this route.
+Plugin readiness alone does not mean the current key can generate images.
+
+Supported wire-model IDs are `openai/gpt-image-2.5-flare`,
+`openai/gpt-image-2.5-sunburst`, and their `-2026-09-08` snapshots. These IDs are
+protocol support, not grants. Image discovery advertises a model only when the
+same key's live `/v1/catalog` contains its `image.generation` capability and an
+eligible HTTP offer for the unified `/v1/images/generations` route.
+Request-dependent affordability remains selectable; the service decides the
+actual request's grant and budget. Missing, unknown, empty, or failed catalogs
+never fall back to a static list or a previous successful image lookup.
+
+There is no implicit ClawRouter image default. Select an entitled image model
+explicitly; do not substitute the direct OpenAI provider's default. For example,
+only if your key's image catalog grants this model:
+
+```bash
+openclaw infer image generate \
+  --model clawrouter/openai/gpt-image-2.5-flare \
+  --prompt "A blue square on a white background" \
+  --size 1024x1024 --output-format png --output ./square.png
+```
+
+Generation and the immediately preceding catalog check use the same resolved
+ClawRouter credential, including a configured auth-profile binding. A missing
+or rejected bound profile does not switch to another profile or an upstream
+OpenAI key. HTTP failures preserve their status and do not retry a paid image
+request. Result URLs are fetched without provider credentials, with bounded
+downloads and private-network checks. Cancellation and the request deadline
+cover catalog lookup, generation, and result downloads. Prompt, image-count, and
+explicit size bounds come from that model’s current catalog generation limits;
+unknown limits do not authorize generation.
 
 ## Quotas and usage
 
