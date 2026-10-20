@@ -10,7 +10,7 @@ import { createPluginPreview } from "./skill-preview.tsx";
 
 afterEach(() => vi.restoreAllMocks());
 
-function setup() {
+async function setup(open = false) {
   const client = new GatewayBrowserClient({ url: "ws://fixture.invalid" });
   const request = vi.spyOn(client, "request");
   const { gateway, publish } = createApplicationGateway();
@@ -22,7 +22,11 @@ function setup() {
     onTestFinished(dispose);
     return createPluginPreview(binding, () => {});
   });
-  return { preview, request, gateway, publish, client };
+  if (open) {
+    request.mockResolvedValueOnce(lazyResult);
+    await preview.open(params);
+  }
+  return { preview, request, gateway, publish };
 }
 
 const params = { source: "installed", pluginId: "example", skillName: "guide" } as const;
@@ -46,32 +50,21 @@ const lazyResult: PluginsSkillsReadResult = {
 };
 const selectedResult = (path: string): PluginsSkillsReadResult => ({
   ...lazyResult,
-  files: lazyResult.files.map((file) =>
-    file.path === path
-      ? { ...file, status: "ready", content: path }
-      : { ...file, status: "deferred", content: undefined },
-  ),
+  files: [{ path, sizeBytes: 1, status: "ready", content: path }],
 });
+const selectedParams = (path: string) => ({ ...params, version: "1.0.0", path });
 
 it("fetches only selected bodies, deduplicates pending reads and retains late sibling bodies without changing selection", async () => {
-  const { preview, request } = setup();
+  const { preview, request } = await setup(true);
   const a = createDeferred<PluginsSkillsReadResult>();
   const b = createDeferred<PluginsSkillsReadResult>();
-  request
-    .mockResolvedValueOnce(lazyResult)
-    .mockReturnValueOnce(a.promise)
-    .mockReturnValueOnce(b.promise);
-  await preview.open(params);
+  request.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
   expect(request).toHaveBeenCalledTimes(1);
   const pendingA = preview.select("a.md");
   await preview.select("a.md");
   const pendingB = preview.select("b.md");
   expect(request).toHaveBeenCalledTimes(3);
-  expect(request).toHaveBeenLastCalledWith("plugins.skills.read", {
-    ...params,
-    version: "1.0.0",
-    path: "b.md",
-  });
+  expect(request).toHaveBeenLastCalledWith("plugins.skills.read", selectedParams("b.md"));
   b.resolve(selectedResult("b.md"));
   await pendingB;
   a.resolve(selectedResult("a.md"));
@@ -88,23 +81,17 @@ it("fetches only selected bodies, deduplicates pending reads and retains late si
 });
 
 it("keeps selected-file failures retryable without refetching the entry or losing the inventory", async () => {
-  const { preview, request } = setup();
+  const { preview, request } = await setup(true);
   request
-    .mockResolvedValueOnce(lazyResult)
     .mockRejectedValueOnce(new Error("Read failed"))
     .mockResolvedValueOnce(selectedResult("a.md"));
-  await preview.open(params);
   await preview.select("a.md");
   expect(preview.state?.fileErrors.get("a.md")).toBe("Read failed");
   expect(preview.state?.result?.files[0]?.content).toBe("Full instructions.");
   await preview.select("a.md");
   expect(preview.state?.fileErrors.size).toBe(0);
   expect(preview.state?.pendingPaths.size).toBe(0);
-  expect(request).toHaveBeenLastCalledWith("plugins.skills.read", {
-    ...params,
-    version: "1.0.0",
-    path: "a.md",
-  });
+  expect(request).toHaveBeenLastCalledWith("plugins.skills.read", selectedParams("a.md"));
 });
 
 it.each([
@@ -115,12 +102,8 @@ it.each([
 ])(
   "retires late preview responses (selected file: $selectedFile, change: $change)",
   async ({ selectedFile, change }) => {
-    const { preview, request, gateway, publish } = setup();
+    const { preview, request, gateway, publish } = await setup(selectedFile);
     const response = createDeferred<PluginsSkillsReadResult>();
-    if (selectedFile) {
-      request.mockResolvedValueOnce(lazyResult);
-      await preview.open(params);
-    }
     request
       .mockReturnValueOnce(response.promise)
       .mockResolvedValueOnce(

@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { page } from "vitest/browser";
 import type { ApplicationContext } from "../../app/context.ts";
 import { REDACTED_SENTINEL, type JsonSchema } from "../../lib/config-form-utils.ts";
-import type { GatewayPageBinding } from "../../lib/gateway-page-binding.ts";
+import { GatewayPageBinding } from "../../lib/gateway-page-binding.ts";
 import { ControlUiPluginRuntime } from "../../plugins/control-ui-runtime.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import {
   createApplicationGateway,
   createSolidApplicationContextProvider,
 } from "../../test-helpers/solid-application-context.tsx";
-import { createContext } from "./plugins-page.test-support.ts";
+import { createClient, createContext, createGateway } from "./plugins-page.test-support.ts";
 import { PluginSettingsEditor, type PluginSettingsEditorProps } from "./settings-editor.tsx";
 import type { PluginSettingsEditorModel } from "./settings-model.ts";
 import { renderPluginSettingsInventory as PluginSettingsInventory } from "./settings-view.tsx";
@@ -37,8 +37,15 @@ const objectSchema = (properties: Record<string, JsonSchema>): JsonSchema => ({
   additionalProperties: false,
   properties,
 });
-async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
-  const model: PluginSettingsEditorModel = {
+const mountConfig = (value: Record<string, unknown>, properties: Record<string, JsonSchema>) =>
+  mount({
+    configHints: {},
+    configValue: configValue(value),
+    configSchema: objectSchema(properties),
+  });
+const textSchema = (title: string): JsonSchema => ({ type: "string", title });
+function makeModel(overrides: Partial<PluginSettingsEditorModel> = {}): PluginSettingsEditorModel {
+  return {
     pluginId: "fixture",
     result: null,
     connected: true,
@@ -46,13 +53,8 @@ async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
     configSchema: objectSchema({
       enabled: { type: "boolean", title: "Enabled", default: false },
       storage: {
-        type: "object",
-        additionalProperties: false,
+        ...objectSchema({ path: textSchema("Path"), mode: textSchema("Mode") }),
         default: { path: "original", mode: "keep" },
-        properties: {
-          path: { type: "string", title: "Path" },
-          mode: { type: "string", title: "Mode" },
-        },
       },
       timeout: { type: "integer", title: "Timeout", default: 30 },
     }),
@@ -77,6 +79,9 @@ async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
     onBack: vi.fn(),
     ...overrides,
   };
+}
+async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
+  const model = makeModel(overrides);
   const [props, setProps] = createSignal<PluginSettingsEditorProps>({ model });
   const host = document.createElement("div");
   document.body.append(host);
@@ -100,13 +105,29 @@ async function settle() {
   await Promise.resolve();
   flush();
 }
+function editField(
+  model: PluginSettingsEditorModel,
+  input: HTMLInputElement,
+  before: string,
+  after: string,
+  path: string[],
+  value: unknown,
+) {
+  expect(input).not.toBeNull();
+  expect(input.value).toBe(before);
+  input.focus();
+  typeInto(input, after);
+  expect(model.onConfigPatch).not.toHaveBeenCalled();
+  input.blur();
+  expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath(...path), value);
+}
 afterEach(() => {
   document.body.replaceChildren();
 });
 describe("grouped plugin settings", () => {
   it("keeps typing and focus in Advanced settings when configuration updates", async () => {
     const [value, setValue] = createSignal({ plugins: { label: "" } });
-    const schema = objectSchema({ label: { type: "string", title: "Label" } });
+    const schema = objectSchema({ label: textSchema("Label") });
     const onPatch = vi.fn((_path: Array<string | number>, next: unknown) => {
       setValue({ plugins: { label: String(next) } });
     });
@@ -115,13 +136,13 @@ describe("grouped plugin settings", () => {
     onTestFinished(() => plugins.dispose());
     const context: ApplicationContext = { ...createContext(gateway), plugins };
     const provider = createSolidApplicationContextProvider(context);
+    const model = makeModel({ configHints: {} });
     const mounted = mountSolid(
       () => (
         <PluginSettingsInventory
+          {...model}
           tab="advanced"
           query=""
-          result={null}
-          connected
           loading={false}
           error={null}
           busy={{}}
@@ -130,17 +151,8 @@ describe("grouped plugin settings", () => {
           canMutate
           mutationBlockedReason={null}
           configValue={value()}
-          configHints={{}}
-          configUnsupportedPaths={[]}
           advancedSchema={schema}
-          canEditConfig
-          configBusy={false}
-          configSchemaLoading={false}
-          configError={null}
           onConfigPatch={onPatch}
-          onConfigRemove={vi.fn()}
-          onConfigReadRetry={vi.fn()}
-          onConfigWriteRetry={vi.fn()}
           onConfigReload={vi.fn()}
           onRefresh={vi.fn()}
           onTabChange={vi.fn()}
@@ -228,165 +240,95 @@ describe("grouped plugin settings", () => {
     await update({ model: { ...model, configHints: {} } });
     expect(editor.querySelector(".plugin-editor__nav")).toBeNull();
   });
-  it.each<{
-    name: string;
-    overrides: Partial<PluginSettingsEditorModel>;
-    fields: { label: string; value: string; placeholder?: string }[];
-  }>([
-    {
-      name: "an automatic numeric placeholder",
-      overrides: {
-        configHints: { [`${prefix}.timeout`]: { placeholder: "Automatic" } },
-        configSchema: {
+  it("does not persist an automatic numeric placeholder on blur", async () => {
+    const { editor, model } = await mount({
+      configHints: { [`${prefix}.timeout`]: { placeholder: "Automatic" } },
+      configSchema: {
+        type: "object",
+        properties: { timeout: { type: "integer", title: "Timeout" } },
+      },
+    });
+    const input = getField(editor, "Timeout");
+    expect(input).toMatchObject({ value: "", placeholder: "Automatic" });
+    input.focus();
+    input.blur();
+    expect(model.onConfigPatch).not.toHaveBeenCalled();
+  });
+  it("persists inherited defaults only after editing, without losing siblings", async () => {
+    const { editor, model } = await mount();
+    for (const [label, value] of [
+      ["Storage: Path", "original"],
+      ["Timeout", "30"],
+    ]) {
+      const input = getField(editor, label!);
+      expect(input.value).toBe(value);
+      input.focus();
+      input.blur();
+    }
+    expect(model.onConfigPatch).not.toHaveBeenCalled();
+    editField(model, getField(editor, "Storage: Path"), "original", "changed", ["storage"], {
+      path: "changed",
+      mode: "keep",
+    });
+  });
+  it("edits a searched descendant inside a retained object on blur", async () => {
+    const { editor, model } = await mountConfig(
+      { storage: { path: "original" } },
+      {
+        storage: {
           type: "object",
-          properties: { timeout: { type: "integer", title: "Timeout" } },
+          title: "Storage",
+          properties: { path: textSchema("Directory") },
         },
       },
-      fields: [{ label: "Timeout", value: "", placeholder: "Automatic" }],
-    },
-    {
-      name: "inherited string and numeric defaults",
-      overrides: {},
-      fields: [
-        { label: "Storage: Path", value: "original" },
-        { label: "Timeout", value: "30" },
-      ],
-    },
-  ])(
-    "does not persist $name when an unchanged field loses focus",
-    async ({ overrides, fields }) => {
-      const { editor, model } = await mount(overrides);
-      for (const { label, value, placeholder } of fields) {
-        const input = getField(editor, label);
-        expect(input.value).toBe(value);
-        if (placeholder !== undefined) {
-          expect(input.placeholder).toBe(placeholder);
-        }
-        input.focus();
-        input.blur();
-      }
-      expect(model.onConfigPatch).not.toHaveBeenCalled();
-    },
-  );
-  it.each<{
-    name: string;
-    overrides: Partial<PluginSettingsEditorModel>;
-    selector: string;
-    index?: number;
-    initial?: string;
-    replacement?: string;
-    path: string[];
-    value: unknown;
-    search?: string;
-    array?: boolean;
-    flat?: boolean;
-  }>([
-    {
-      name: "an inherited nested value without losing its sibling",
-      overrides: {},
-      selector: 'input[aria-label="Storage: Path"]',
-      path: ["storage"],
-      value: { path: "changed", mode: "keep" },
-    },
-    {
-      name: "a searched descendant inside a retained object",
-      overrides: {
-        configHints: {},
-        configValue: configValue({ storage: { path: "original" } }),
-        configSchema: objectSchema({
-          storage: {
-            type: "object",
-            title: "Storage",
-            properties: { path: { type: "string", title: "Directory" } },
-          },
-        }),
-      },
-      selector: 'input[aria-label="Directory"]',
-      search: "directory",
-      path: ["storage", "path"],
-      value: "changed",
-    },
-    {
-      name: "an inherited array item without losing its sibling",
-      overrides: {
-        configHints: {},
-        configValue: configValue({}),
-        configSchema: objectSchema({
-          tags: {
-            type: "array",
-            title: "Tags",
-            default: ["alpha", "beta"],
-            items: { type: "string" },
-          },
-        }),
-      },
-      selector: '[data-setting="tags"] input',
-      index: 1,
-      initial: "beta",
-      replacement: "edited",
-      array: true,
-      path: ["tags"],
-      value: ["alpha", "edited"],
-    },
-    {
-      name: "a literal dotted property without splitting its identity",
-      overrides: {
-        configHints: {},
-        configValue: configValue({ "model.name": "first" }),
-        configSchema: objectSchema({
-          "model.name": { type: "string", title: "Model name" },
-          empty: { type: "integer" },
-        }),
-      },
-      selector: 'input[aria-label="Model name"]',
-      initial: "first",
-      replacement: "second",
-      flat: true,
-      path: ["model.name"],
-      value: "second",
-    },
-  ])("edits $name on blur", async (entry) => {
-    const { editor, model } = await mount(entry.overrides);
-    if (entry.search) {
-      await searchSettings(editor, entry.search);
-    }
-    if (entry.array) {
-      const row = findElement(editor, '[data-setting="tags"]');
-      expect(
-        [...row.querySelectorAll<HTMLInputElement>("input")].map((input) => input.value),
-      ).toEqual(["alpha", "beta"]);
-      expect(row.textContent).not.toContain("2 items");
-    }
-    if (entry.flat) {
-      expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
-      expect(editor.querySelectorAll("h2")).toHaveLength(0);
-    }
-    const input = editor.querySelectorAll<HTMLInputElement>(entry.selector).item(entry.index ?? 0)!;
-    expect(input).not.toBeNull();
-    expect(input.value).toBe(entry.initial ?? "original");
-    input.focus();
-    typeInto(input, entry.replacement ?? "changed");
-    expect(model.onConfigPatch).not.toHaveBeenCalled();
-    input.blur();
-    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-      configPath(...entry.path),
-      entry.value,
     );
+    await searchSettings(editor, "directory");
+    const input = getField(editor, "Directory");
+    editField(model, input, "original", "changed", ["storage", "path"], "changed");
+  });
+  it("edits inherited array items on blur without losing siblings", async () => {
+    const { editor, model } = await mountConfig(
+      {},
+      {
+        tags: {
+          type: "array",
+          title: "Tags",
+          default: ["alpha", "beta"],
+          items: { type: "string" },
+        },
+      },
+    );
+    const row = findElement(editor, '[data-setting="tags"]');
+    const inputs = row.querySelectorAll<HTMLInputElement>("input");
+    expect([...inputs].map((input) => input.value)).toEqual(["alpha", "beta"]);
+    expect(row.textContent).not.toContain("2 items");
+    editField(model, inputs[1]!, "beta", "edited", ["tags"], ["alpha", "edited"]);
+  });
+  it("edits a literal dotted property on blur without splitting its identity", async () => {
+    const { editor, model } = await mountConfig(
+      { "model.name": "first" },
+      {
+        "model.name": textSchema("Model name"),
+        empty: { type: "integer" },
+      },
+    );
+    expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
+    expect(editor.querySelectorAll("h2")).toHaveLength(0);
+    editField(model, getField(editor, "Model name"), "first", "second", ["model.name"], "second");
   });
   it("keeps object array inputs aligned beside removal and finds their descendants", async () => {
-    const { editor, model } = await mount({
-      configHints: {},
-      configValue: configValue({ targets: [{ path: "first", mode: "keep" }] }),
-      configSchema: objectSchema({
+    const { editor, model } = await mountConfig(
+      { targets: [{ path: "first", mode: "keep" }] },
+      {
         targets: {
           type: "array",
           items: objectSchema({
-            path: { type: "string", title: "Directory" },
-            mode: { type: "string", title: "Mode" },
+            path: textSchema("Directory"),
+            mode: textSchema("Mode"),
           }),
         },
-      }),
-    });
+      },
+    );
     editor.style.width = "1000px";
     const inputs = [...editor.querySelectorAll<HTMLInputElement>(".cfg-array__item input")];
     expect(inputs).toHaveLength(2);
@@ -426,24 +368,17 @@ describe("grouped plugin settings", () => {
           }),
         }),
       });
-      const scope = {
-        client: {
-          request: vi.fn().mockResolvedValue({
-            baseHash: "revision",
-            credential:
-              typeof value === "string"
-                ? { kind: "literal" }
-                : { kind: "reference", ref: value, unresolved: false },
-          }),
-        },
-        epoch: 1,
-      };
-      const gateway = {
-        epoch: 1,
-        connected: true,
-        capture: () => scope,
-        isCurrent: (candidate: unknown) => candidate === scope,
-      } as unknown as GatewayPageBinding;
+      const { client } = createClient(async () => ({
+        baseHash: "revision",
+        credential:
+          typeof value === "string"
+            ? { kind: "literal" }
+            : { kind: "reference", ref: value, unresolved: false },
+      }));
+      const application = createGateway(client).gateway;
+      const gateway = new GatewayPageBinding(vi.fn(), { getGateway: () => application });
+      gateway.connect();
+      onTestFinished(() => gateway.dispose());
       await update({
         resolveCredential: (field) =>
           field.path.at(-1) === "apiKey"
@@ -602,10 +537,9 @@ describe("grouped editor field discovery", () => {
 describe("plugin map layout", () => {
   it.each([1728, 390])("keeps map labels, keys, and values usable at %s pixels", async (width) => {
     await page.viewport(width, 913);
-    const { editor, model } = await mount({
-      configHints: {},
-      configValue: configValue({ populated: { first: 15 } }),
-      configSchema: objectSchema({
+    const { editor, model } = await mountConfig(
+      { populated: { first: 15 } },
+      {
         empty: {
           type: "object",
           title: "Empty overrides",
@@ -616,8 +550,8 @@ describe("plugin map layout", () => {
           title: "Populated overrides",
           additionalProperties: { type: "number" },
         },
-      }),
-    });
+      },
+    );
     editor.style.width = width > 768 ? "880px" : "100%";
     try {
       expect(textContents(editor, ".plugin-editor__title")).toEqual([

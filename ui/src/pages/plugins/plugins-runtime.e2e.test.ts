@@ -1,4 +1,3 @@
-// Enablement applies its runtime receipt without reconnecting; removal remains available.
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { buildCapabilityConsentErrorDetails } from "../../../../packages/gateway-protocol/src/capability-consent-error-details.js";
 import {
@@ -6,6 +5,7 @@ import {
   calendarPlugin,
   captureScreenshot,
   describeControlUiE2e,
+  enabledWorkboardCapabilities,
   installMockGateway,
   inventory,
   mobileViewport,
@@ -34,16 +34,17 @@ describeControlUiE2e("Control UI plugin runtime actions", () => {
     try {
       await page.goto(`${server.baseUrl}settings/plugins/calendar-plus#lifecycle`);
       const row = page.locator(".plugin-catalog-detail");
+      const button = (name: string, within = row) =>
+        within.getByRole("button", { name, exact: true });
+      const setEnabled = "plugins.setEnabled";
+      const enableParams = { pluginId: "calendar-plus", enabled: true };
       await row.waitFor({ state: "visible" });
       const connects = (await gateway.getRequests("connect")).length;
       await captureScreenshot(page, "runtime-01-before-desktop.png");
-      await gateway.deferNext("plugins.setEnabled");
-      await row.getByRole("button", { name: "Enable Calendar Plus", exact: true }).click();
-      expect((await gateway.waitForRequest("plugins.setEnabled")).params).toEqual({
-        pluginId: "calendar-plus",
-        enabled: true,
-      });
-      await gateway.rejectDeferred("plugins.setEnabled", {
+      await gateway.deferNext(setEnabled);
+      await button("Enable Calendar Plus").click();
+      expect((await gateway.waitForRequest(setEnabled)).params).toEqual(enableParams);
+      await gateway.rejectDeferred(setEnabled, {
         code: "INVALID_REQUEST",
         message: "Changed capabilities need review",
         details: buildCapabilityConsentErrorDetails({
@@ -52,40 +53,31 @@ describeControlUiE2e("Control UI plugin runtime actions", () => {
         }),
       });
       const consent = page.locator('[data-plugin-consent="enable"]');
-      const accept = consent.getByRole("button", { name: "Enable Calendar Plus", exact: true });
+      const accept = button("Enable Calendar Plus", consent);
       await accept.waitFor({ state: "visible" });
       await expect.poll(() => accept.isEnabled()).toBe(true);
       await captureScreenshot(page, "runtime-02-consent-desktop.png");
-      await gateway.deferNext("plugins.setEnabled");
+      await gateway.deferNext(setEnabled);
       await accept.click();
-      const retry = await gateway.waitForRequest("plugins.setEnabled", { after: 1 });
+      const retry = await gateway.waitForRequest(setEnabled, { after: 1 });
       expect(retry.params).toEqual({
-        pluginId: "calendar-plus",
-        enabled: true,
+        ...enableParams,
         acknowledgeCapabilities: { reviewToken: calendarInspection.reviewToken },
       });
       await gateway.setMethodResponse("plugins.list", inventory([calendarPlugin], 2));
       await gateway.setMethodResponse("plugins.uiDescriptors", {
-        ok: true,
+        ...enabledWorkboardCapabilities(),
         generation: 2,
-        descriptors: [],
-        methods: pluginMethods,
         controlUiTabs: [],
-        controlUiWidgetKinds: [],
-        pluginSurfaceUrls: {},
       });
       await gateway.emitGatewayEvent("plugins.changed", { generation: 2 });
-      await gateway.resolveDeferred("plugins.setEnabled", {
+      await gateway.resolveDeferred(setEnabled, {
         ok: true,
         plugin: calendarPlugin,
         restartRequired: false,
         runtime: { operationId: "enable-calendar", generation: 2, pluginIds: ["calendar-plus"] },
       });
-      await expect
-        .poll(() =>
-          row.getByRole("button", { name: "Disable Calendar Plus", exact: true }).isEnabled(),
-        )
-        .toBe(true);
+      await expect.poll(() => button("Disable Calendar Plus").isEnabled()).toBe(true);
       expect(await row.locator('.plugins-row-message[role="status"]').count()).toBe(0);
       await captureScreenshot(page, "runtime-03-after-desktop.png");
       await page.setViewportSize(mobileViewport);
@@ -98,15 +90,13 @@ describeControlUiE2e("Control UI plugin runtime actions", () => {
           ),
         )
         .toBeLessThanOrEqual(1);
-      for (const button of [
-        row.getByRole("button", { name: "Disable Calendar Plus", exact: true }),
-        row.getByRole("button", { name: "Uninstall Calendar Plus", exact: true }),
-      ]) {
-        await button.waitFor({ state: "visible" });
+      for (const action of ["Disable Calendar Plus", "Uninstall Calendar Plus"]) {
+        const control = button(action);
+        await control.waitFor({ state: "visible" });
         // A resize can replace the control after a separate visibility check.
         await expect
           .poll(async () => {
-            const box = await button.boundingBox();
+            const box = await control.boundingBox();
             expect(box).not.toBeNull();
             expect(box!.x).toBeGreaterThanOrEqual(0);
             expect(box!.x + box!.width).toBeLessThanOrEqual(mobileViewport.width);
@@ -120,10 +110,10 @@ describeControlUiE2e("Control UI plugin runtime actions", () => {
         "/synthetic/var/folders/aa/0123456789abcdef0123456789abcd/T/openclaw-plugin-build/" +
         "package-0/node_modules/calendar-plus/helper.ts:1:30\n" +
         "Gateway generation 2: replacement not applied.";
-      await gateway.deferNext("plugins.setEnabled");
-      await row.getByRole("button", { name: "Disable Calendar Plus", exact: true }).click();
-      await gateway.waitForRequest("plugins.setEnabled", { after: 2 });
-      await gateway.rejectDeferred("plugins.setEnabled", {
+      await gateway.deferNext(setEnabled);
+      await button("Disable Calendar Plus").click();
+      await gateway.waitForRequest(setEnabled, { after: 2 });
+      await gateway.rejectDeferred(setEnabled, {
         code: "UNAVAILABLE",
         message: loadError,
         details: {
@@ -145,23 +135,23 @@ describeControlUiE2e("Control UI plugin runtime actions", () => {
       const failureBounds = await failure.boundingBox();
       expect(failureBounds!.x + failureBounds!.width).toBeLessThanOrEqual(mobileViewport.width);
       await gateway.setMethodResponse("plugins.list", inventory([], 3));
-      await row.getByRole("button", { name: "Uninstall Calendar Plus", exact: true }).click();
+      await button("Uninstall Calendar Plus").click();
       const confirmation = page.locator("openclaw-modal-dialog");
       await confirmation.waitFor();
       expect(await confirmation.textContent()).toContain("all of its entries");
       expect(await gateway.getRequests("plugins.uninstall")).toHaveLength(0);
-      await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+      await button("Cancel", confirmation).click();
       await confirmation.waitFor({ state: "detached" });
       expect(await gateway.getRequests("plugins.uninstall")).toHaveLength(0);
-      await row.getByRole("button", { name: "Uninstall Calendar Plus", exact: true }).click();
-      await confirmation.getByRole("button", { name: "Remove", exact: true }).click();
+      await button("Uninstall Calendar Plus").click();
+      await button("Remove", confirmation).click();
       await row.waitFor({ state: "detached" });
       await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/plugins");
       expect(await page.locator('[data-plugin-id="calendar-plus"]').count()).toBe(0);
       expect((await gateway.waitForRequest("plugins.uninstall")).params).toEqual({
         pluginId: "calendar-plus",
       });
-      expect(await gateway.getRequests("plugins.setEnabled")).toHaveLength(3);
+      expect(await gateway.getRequests(setEnabled)).toHaveLength(3);
       expect(await gateway.getRequests("plugins.install")).toHaveLength(0);
       expect(await gateway.getRequests("connect")).toHaveLength(connects);
       expect(await gateway.getRequests("gateway.restart.request")).toHaveLength(0);
