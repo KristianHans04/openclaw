@@ -1,24 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { LlamaCppHardware } from "./hardware.js";
+import { GIB, hardware } from "./catalog.test-support.js";
 import { recommendLlamaCppModel, resolveLlamaCppCatalogArtifact } from "./model-catalog.js";
 
-const GIB = 1024 ** 3;
 const SMALL_MODEL = "qwen3.5-4b-q4_k_m";
 const MEDIUM_MODEL = "qwen3.5-9b-q4_k_m";
 const cachedModel = { modelIds: new Set([SMALL_MODEL]), embedding: true };
-
-function hardware(memoryGiB: number): LlamaCppHardware {
-  return {
-    platform: "darwin",
-    arch: "arm64",
-    totalMemoryBytes: memoryGiB * GIB,
-    availableMemoryBytes: memoryGiB * GIB,
-    availableDiskBytes: 100 * GIB,
-    availableRuntimeDiskBytes: 100 * GIB,
-    sharedDisk: true,
-    accelerator: { kind: "metal" },
-  };
-}
 
 describe("local model recommendation", () => {
   it("recommends a resident 64K model for 64 GiB on CPU", () => {
@@ -38,7 +24,6 @@ describe("local model recommendation", () => {
           totalMemoryBytes: 24 * GIB,
           availableMemoryBytes: 24 * GIB,
           driverVersion: "580.65.06",
-          computeCapability: 8.9,
         },
       ],
     };

@@ -18,6 +18,10 @@ const localChoice =
 const memory = { search: { provider: "local" as const } };
 const other = { baseUrl: "http://localhost:8080/v1", models: [] };
 
+function agentMemory(modelPath: string, provider?: "local") {
+  return { memory: { search: { provider, local: { modelPath } } } };
+}
+
 function serverConfig(managed: boolean): ProviderAuthMethodNonInteractiveContext["config"] {
   const models = managed
     ? [buildLlamaCppModel({ id: "chat", name: "Chat", source: "/models/chat.gguf" })]
@@ -69,15 +73,12 @@ async function setup(ctx: ProviderAuthMethodNonInteractiveContext) {
 }
 
 describe("managed llama.cpp non-interactive onboarding", () => {
-  it.each([undefined, false, "true"])(
-    "requires explicit boolean download consent (%s)",
-    async (consent) => {
-      const ctx = setupContext();
-      ctx.opts.llamaCppEmbeddingOnly = consent;
-      await expect(setup(ctx)).rejects.toThrow("--llama-cpp-embedding-only");
-      expectNoDownloads();
-    },
-  );
+  it.each([undefined, false, "true"])("requires boolean download consent (%s)", async (consent) => {
+    const ctx = setupContext();
+    ctx.opts.llamaCppEmbeddingOnly = consent;
+    await expect(setup(ctx)).rejects.toThrow("--llama-cpp-embedding-only");
+    expectNoDownloads();
+  });
 
   it("downloads only embeddings and preserves chat, unrelated providers and auth bindings", async () => {
     const ctx = setupContext();
@@ -114,13 +115,7 @@ describe("managed llama.cpp non-interactive onboarding", () => {
     const ctx = setupContext();
     ctx.config = {
       agents: {
-        entries: {
-          research: {
-            memory: {
-              search: { ...memory.search, local: { modelPath: "/models/custom-embedding.gguf" } },
-            },
-          },
-        },
+        entries: { research: agentMemory("/models/custom-embedding.gguf", "local") },
       },
     };
     await setup(ctx);
@@ -142,8 +137,8 @@ describe("managed llama.cpp non-interactive onboarding", () => {
         memory,
         agents: {
           entries: {
-            alpha: { memory: { search: { local: { modelPath: "/models/alpha.gguf" } } } },
-            beta: { memory: { search: { local: { modelPath: "/models/beta.gguf" } } } },
+            alpha: agentMemory("/models/alpha.gguf"),
+            beta: agentMemory("/models/beta.gguf"),
           },
         },
       },

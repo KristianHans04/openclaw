@@ -1,10 +1,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type {
-  ProviderAppGuidedSetupContext,
-  ProviderAuthContext,
-} from "openclaw/plugin-sdk/plugin-entry";
+import type { ProviderAuthContext } from "openclaw/plugin-sdk/plugin-entry";
+import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-shared";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, vi } from "vitest";
 
@@ -45,30 +43,25 @@ vi.mock("./hardware.js", async (importOriginal) => ({
   detectLlamaCppHardware: mocks.hardware,
 }));
 
+import { GIB, hardware } from "./catalog.test-support.js";
 import { LLAMA_CPP_PROVIDER_ID } from "./defaults.js";
 import { resolveLlamaCppCatalogArtifact } from "./model-catalog.js";
 
-export const GIB = 1024 ** 3;
+export { GIB };
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 export let tempRoot: string;
 export let modelPath: string;
 
 beforeEach(async () => {
+  for (const mock of Object.values(mocks)) {
+    mock.mockReset();
+  }
   vi.spyOn(os, "totalmem").mockReturnValue(16 * GIB);
   vi.spyOn(os, "hostname").mockReturnValue("gateway-host");
-  mocks.hardware.mockReset().mockImplementation(async () => ({
-    platform: "darwin",
-    arch: "arm64",
-    accelerator: { kind: "metal" },
-    totalMemoryBytes: os.totalmem(),
-    availableMemoryBytes: os.totalmem(),
-    availableDiskBytes: 100 * GIB,
-    availableRuntimeDiskBytes: 100 * GIB,
-    sharedDisk: true,
-  }));
+  mocks.hardware.mockImplementation(async () => hardware(os.totalmem() / GIB));
   tempRoot = await fs.realpath(tempDirs.make("llama-server-setup-"));
   modelPath = path.join(tempRoot, "model.gguf");
-  mocks.ensureModel.mockReset().mockImplementation(async ({ source, download }) => {
+  mocks.ensureModel.mockImplementation(async ({ source, download }) => {
     if (!download) {
       throw new Error("not cached");
     }
@@ -76,38 +69,33 @@ beforeEach(async () => {
       ? modelPath
       : path.join(tempRoot, "embedding.gguf");
   });
-  mocks.prepareServer.mockReset().mockResolvedValue({
+  mocks.prepareServer.mockResolvedValue({
     command: path.join(tempRoot, "llama-server"),
     baseUrl: "http://127.0.0.1:19432/v1",
     healthUrl: "http://127.0.0.1:19432/health",
     args: ["--host", "127.0.0.1", "--port", "19432"],
   });
-  mocks.removeProfiles.mockReset().mockResolvedValue({ version: 1, profiles: {} });
-  mocks.progressUpdate.mockReset();
-  mocks.downloadFetch.mockReset();
-  mocks.ensureServerInstalled.mockReset().mockImplementation(async ({ asset }) => ({
+  mocks.removeProfiles.mockResolvedValue({ version: 1, profiles: {} });
+  mocks.ensureServerInstalled.mockImplementation(async ({ asset }) => ({
     command: path.join(tempRoot, "llama-server"),
     asset,
   }));
 });
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.restoreAllMocks());
 
-export function config(): ProviderAppGuidedSetupContext["config"] {
+export function provider(overrides: Partial<ModelProviderConfig> = {}): ModelProviderConfig {
   return {
-    models: {
-      providers: {
-        [LLAMA_CPP_PROVIDER_ID]: {
-          baseUrl: "http://127.0.0.1:19432/v1",
-          api: "openai-completions",
-          params: { modelCacheDir: tempRoot },
-          models: [],
-        },
-      },
-    },
+    baseUrl: "http://127.0.0.1:19432/v1",
+    params: { modelCacheDir: tempRoot },
+    models: [],
+    ...overrides,
   };
+}
+
+export function config(): ProviderAuthContext["config"] {
+  const providers = { [LLAMA_CPP_PROVIDER_ID]: provider({ api: "openai-completions" }) };
+  return { models: { providers } };
 }
 
 export function authContext(confirm: boolean): ProviderAuthContext {

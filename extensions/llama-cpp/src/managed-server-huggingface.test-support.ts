@@ -6,31 +6,25 @@ import { vi } from "vitest";
 const TEST_GGUF_SHA256 = "b83633aa785344791618f2fddf131b010ea04912a60430760b070bad293f65bd";
 
 export async function withHuggingFaceMetadataFixture(
-  fixture: { cacheDir: string; servers: http.Server[] },
+  { cacheDir, servers }: { cacheDir: string; servers: http.Server[] },
   endpoint: "manifest" | "file" | "tree",
   run: (params: {
     cacheDir: string;
     setMetadataAvailable: (available: boolean) => void;
     setPadding: (target: "manifest" | "file" | "tree", padding: string) => void;
-    pathInfoBodies: unknown[];
-    requestedUrls: string[];
     source: string;
   }) => Promise<void>,
   source = "hf:owner/repo",
 ): Promise<void> {
-  const { cacheDir, servers } = fixture;
   await fs.writeFile(path.join(cacheDir, "hf_owner_repo_model.gguf"), "GGUF");
   let padding = "x".repeat(1024 * 1024);
   let metadataAvailable = true;
-  const pathInfoBodies: unknown[] = [];
-  const requestedUrls: string[] = [];
   const paddedFiles = (target: typeof endpoint) => [
     { path: "model.gguf", size: 4, lfs: { oid: TEST_GGUF_SHA256 } },
     ...(endpoint === target ? [padding] : []),
   ];
   const server = http.createServer((req, res) => {
     res.setHeader("content-type", "application/json");
-    requestedUrls.push(req.url ?? "");
     const send = (body: unknown) => res.end(JSON.stringify(body));
     if (!metadataAvailable) {
       res.statusCode = 503;
@@ -41,12 +35,8 @@ export async function withHuggingFaceMetadataFixture(
         ...(endpoint === "manifest" ? { padding } : {}),
       });
     } else if (req.url?.startsWith("/api/models/owner/repo/paths-info/")) {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
-      req.on("end", () => {
-        pathInfoBodies.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        send(paddedFiles("file"));
-      });
+      req.on("end", () => send(paddedFiles("file")));
+      req.resume();
     } else if (req.url?.startsWith("/api/models/owner/repo/tree/")) {
       send(paddedFiles("tree"));
     } else {
@@ -63,13 +53,12 @@ export async function withHuggingFaceMetadataFixture(
     throw new Error("missing test server address");
   }
   const realFetch = globalThis.fetch;
-  const localFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const upstream = new URL(
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
     );
     return await realFetch(`http://127.0.0.1:${address.port}${upstream.pathname}`, init);
   });
-  vi.stubGlobal("fetch", localFetch);
   try {
     await run({
       cacheDir,
@@ -81,8 +70,6 @@ export async function withHuggingFaceMetadataFixture(
           padding = next;
         }
       },
-      pathInfoBodies,
-      requestedUrls,
       source,
     });
   } finally {
