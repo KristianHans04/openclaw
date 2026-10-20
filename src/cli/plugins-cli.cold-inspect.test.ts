@@ -40,21 +40,22 @@ function createFixture(enabled: boolean) {
     },
   });
   const configPath = path.join(root, "openclaw.json");
-  fs.writeFileSync(
-    configPath,
-    JSON.stringify({
-      plugins: {
-        load: { paths: [pluginRoot] },
-        entries: { [pluginId]: { enabled } },
-      },
-    }),
-  );
+  writeConfig(configPath, [pluginRoot], { [pluginId]: { enabled } });
   vi.stubEnv("OPENCLAW_HOME", root);
   vi.stubEnv("OPENCLAW_STATE_DIR", path.join(root, "state"));
   vi.stubEnv("OPENCLAW_CONFIG_PATH", configPath);
   vi.stubEnv("OPENCLAW_BUNDLED_PLUGINS_DIR", bundledRoot);
   resetConfigRuntimeState();
   return fixture;
+}
+
+function writeConfig(
+  configPath: string,
+  paths: string[],
+  entries: Record<string, { enabled: boolean }>,
+) {
+  fs.writeFileSync(configPath, JSON.stringify({ plugins: { load: { paths }, entries } }));
+  resetConfigRuntimeState();
 }
 
 async function runPluginsCommand(args: string[]): Promise<unknown> {
@@ -73,12 +74,7 @@ async function runPluginsCommand(args: string[]): Promise<unknown> {
 
 it("registered plugins list/info/inspect retain disabled cold CLI capabilities", async () => {
   const fixture = createFixture(false);
-  const plugin = {
-    id: pluginId,
-    enabled: false,
-    status: "disabled",
-    cliBackendIds,
-  };
+  const plugin = { id: pluginId, enabled: false, status: "disabled", cliBackendIds };
   expect(await runPluginsCommand(["list"])).toMatchObject({
     plugins: [expect.objectContaining(plugin)],
   });
@@ -127,16 +123,10 @@ it.each([false, true])(
       packageVersion: "2026.9.6",
       manifest: { providers: [], channels: [], providerAuthChoices: [] },
     });
-    fs.writeFileSync(
-      path.join(root, "openclaw.json"),
-      JSON.stringify({
-        plugins: {
-          load: { paths: [healthy.rootDir, incompatibleRoot] },
-          entries: { [pluginId]: { enabled: true }, codex: { enabled: true } },
-        },
-      }),
-    );
-    resetConfigRuntimeState();
+    writeConfig(path.join(root, "openclaw.json"), [healthy.rootDir, incompatibleRoot], {
+      [pluginId]: { enabled: true },
+      codex: { enabled: true },
+    });
     const runtimeArgs = runtime ? ["--runtime"] : [];
     const incompatibleReport = {
       plugin: {

@@ -1,7 +1,7 @@
-// Plugins list command tests cover plugin list command execution and output.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { OutputRuntimeEnv } from "../runtime.js";
+import type { PluginsListOptions } from "./plugins-list-command.js";
 
 function createJsonRuntime(writes: unknown[]): OutputRuntimeEnv {
   return {
@@ -50,42 +50,33 @@ function mockPluginListSnapshot(
 }
 
 function mockHumanListModules(importedModules: string[] = []): void {
-  vi.doMock("../plugins/source-display.js", () => {
-    importedModules.push("source-display");
-    return {
+  const identity = (value: string) => value;
+  const modules = {
+    "../plugins/source-display.js": {
       formatPluginSourceForTable: vi.fn(),
       resolvePluginSourceRoots: vi.fn(),
-    };
-  });
-  vi.doMock("../../packages/terminal-core/src/table.js", () => {
-    importedModules.push("table");
-    return {
+    },
+    "../../packages/terminal-core/src/table.js": {
       getTerminalTableWidth: vi.fn(),
       renderTable: vi.fn(),
-    };
-  });
-  vi.doMock("../../packages/terminal-core/src/theme.js", () => {
-    importedModules.push("theme");
-    return {
-      theme: {
-        muted: (value: string) => value,
-        warn: (value: string) => value,
-      },
-    };
-  });
-  vi.doMock("./command-format.js", () => {
-    importedModules.push("command-format");
-    return {
-      formatCliCommand: (value: string) => `formatted(${value})`,
-    };
-  });
-  vi.doMock("./plugins-list-format.js", () => {
-    importedModules.push("plugins-list-format");
-    return {
-      formatPluginLine: vi.fn(),
-      formatPluginStatus: vi.fn(),
-    };
-  });
+    },
+    "../../packages/terminal-core/src/theme.js": { theme: { muted: identity, warn: identity } },
+    "./command-format.js": { formatCliCommand: (value: string) => `formatted(${value})` },
+    "./plugins-list-format.js": { formatPluginLine: vi.fn(), formatPluginStatus: vi.fn() },
+  };
+  for (const [module, exports] of Object.entries(modules)) {
+    vi.doMock(module, () => {
+      importedModules.push(module);
+      return exports;
+    });
+  }
+}
+
+async function runList(options: PluginsListOptions) {
+  const { runPluginsListCommand } = await import("./plugins-list-command.js");
+  const writes: unknown[] = [];
+  await runPluginsListCommand(options, createJsonRuntime(writes));
+  return writes;
 }
 
 describe("runPluginsListCommand", () => {
@@ -116,20 +107,14 @@ describe("runPluginsListCommand", () => {
     ]);
     mockHumanListModules(importedHumanModules);
 
-    const { runPluginsListCommand } = await import("./plugins-list-command.js");
-    const writes: unknown[] = [];
-
-    await runPluginsListCommand({ json: true }, createJsonRuntime(writes));
+    const writes = await runList({ json: true });
 
     expect(importedHumanModules).toEqual([]);
     expect(writes).toEqual([
       {
         workspaceDir: "/workspace",
         workspaceScope: "selected",
-        registry: {
-          source: "config",
-          diagnostics: [],
-        },
+        registry: { source: "config", diagnostics: [] },
         plugins: [{ id: "demo", enabled: true, commands: ["demo"] }],
         diagnostics: [],
       },
@@ -139,12 +124,7 @@ describe("runPluginsListCommand", () => {
   it("explains an empty enabled-only list when plugins are installed", async () => {
     mockPluginListSnapshot([{ id: "disabled-plugin", enabled: false }]);
     mockHumanListModules();
-    const { runPluginsListCommand } = await import("./plugins-list-command.js");
-    const writes: unknown[] = [];
-
-    await runPluginsListCommand({ enabled: true }, createJsonRuntime(writes));
-
-    expect(writes).toEqual([
+    expect(await runList({ enabled: true })).toEqual([
       "No enabled plugins found. Run formatted(openclaw plugins list) to inspect installed plugins.",
     ]);
   });
@@ -154,12 +134,7 @@ describe("runPluginsListCommand", () => {
       plugins: { enabled: false },
     });
     mockHumanListModules();
-    const { runPluginsListCommand } = await import("./plugins-list-command.js");
-    const writes: unknown[] = [];
-
-    await runPluginsListCommand({ enabled: true, verbose: true }, createJsonRuntime(writes));
-
-    expect(writes).toEqual([
+    expect(await runList({ enabled: true, verbose: true })).toEqual([
       "No enabled plugins found. Plugins are globally disabled. Run formatted(openclaw plugins list) to inspect installed plugins.",
     ]);
   });
@@ -176,12 +151,7 @@ describe("runPluginsListCommand", () => {
       },
     );
     mockHumanListModules();
-    const { runPluginsListCommand } = await import("./plugins-list-command.js");
-    const writes: unknown[] = [];
-
-    await runPluginsListCommand({}, createJsonRuntime(writes));
-
-    expect(writes).toEqual([
+    expect(await runList({})).toEqual([
       `Warning: ${message}`,
       "",
       "No plugins found. Run formatted(openclaw plugins install <plugin>) to add one, or formatted(openclaw plugins list --json) to inspect raw discovery state.",

@@ -2,7 +2,7 @@ import "../test-utils/prepare-compiled-subprocesses.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GatewayPendingRequests } from "../../packages/gateway-client/src/pending-request.js";
 import { GatewayClientRequestError } from "../../packages/gateway-client/src/request-error.js";
 import { buildCapabilityConsentErrorDetails } from "../../packages/gateway-protocol/src/capability-consent-error-details.js";
@@ -18,6 +18,25 @@ vi.mock("../gateway/call.js", async (importOriginal) => ({
 }));
 const { resolvePluginLifecycleGateway, resolvePluginBatchReload } =
   await import("./plugins-lifecycle-client.js");
+
+const targets = [{ pluginId: "demo", installHash: "a".repeat(64) }];
+const runtimeReceipt = { operationId: "batch", generation: 2, pluginIds: ["demo"] };
+const applied = { runtime: { generation: 3 } };
+const reloadParams = { plugins: [{ pluginId: "demo" }], waitForDrain: true };
+const consentRequired = (pluginId: string, reviewToken: string) =>
+  Object.assign(new Error(`${pluginId} consent required`), {
+    details: buildCapabilityConsentErrorDetails({ pluginId, reviewToken }),
+  });
+const inspection = (id: string, name: string, reviewToken?: string) => ({
+  plugin: { id, name },
+  reviewToken,
+  declared: {},
+  grants: {},
+});
+async function dispatch(method: string, params: Record<string, unknown>) {
+  const gateway = await resolvePluginLifecycleGateway();
+  return gateway!(method, params);
+}
 
 async function createPluginRefusalResponse(retryAfterMs = 1_000) {
   const pending = new GatewayPendingRequests({
@@ -58,28 +77,22 @@ describe("plugin lifecycle CLI transport", () => {
     mocks.lock.mockReset().mockResolvedValue({ port: 19001 });
     mocks.call.mockReset().mockResolvedValue({ runtime: { generation: 2 } });
   });
+  afterEach(() => vi.useRealTimers());
 
   it("waits without a response deadline and cancels the request on CLI interruption", async () => {
     let observed: AbortSignal | undefined;
     const interrupted = new Error("request interrupted");
-    let started!: () => void;
-    const entered = new Promise<void>((resolve) => {
-      started = resolve;
-    });
+    const entered = Promise.withResolvers<void>();
     mocks.call.mockImplementation(({ signal, timeoutMs }) => {
       observed = signal;
-      started();
+      entered.resolve();
       expect(timeoutMs).toBeNull();
       return new Promise((_resolve, reject) => {
         signal.addEventListener("abort", () => reject(interrupted), { once: true });
       });
     });
-    const gateway = await resolvePluginLifecycleGateway();
-    const request = gateway!("plugins.reload", {
-      plugins: [{ pluginId: "demo" }],
-      waitForDrain: true,
-    }).catch((error: unknown) => error);
-    await entered;
+    const request = dispatch("plugins.reload", reloadParams).catch((error: unknown) => error);
+    await entered.promise;
     expect(observed).toBeInstanceOf(AbortSignal);
     await waitForSignalExitBarriers();
     expect(observed?.aborted).toBe(true);
@@ -90,62 +103,46 @@ describe("plugin lifecycle CLI transport", () => {
   it("keeps lifecycle admission bounded even when admitted drain may wait indefinitely", async () => {
     const busy = await createPluginRefusalResponse(600_000);
     mocks.call.mockRejectedValue(busy);
-    const gateway = await resolvePluginLifecycleGateway();
-    await expect(
-      gateway!("plugins.reload", {
-        plugins: [{ pluginId: "demo" }],
-        waitForDrain: true,
-      }),
-    ).rejects.toBe(busy);
+    await expect(dispatch("plugins.reload", reloadParams)).rejects.toBe(busy);
     expect(mocks.call).toHaveBeenCalledOnce();
     await expect(waitForSignalExitBarriers()).resolves.toBeUndefined();
   });
 
   it("finishes a plugin mutation after an explicit pre-admission refusal", async () => {
     vi.useFakeTimers();
-    try {
-      const applied = { runtime: { operationId: "after-contention", generation: 3 } };
-      mocks.call
-        .mockRejectedValueOnce(await createPluginRefusalResponse())
-        .mockResolvedValueOnce(applied);
-      const gateway = await resolvePluginLifecycleGateway();
-      const outcome = gateway!("plugins.setEnabled", { pluginId: "demo", enabled: false }).catch(
-        (error: unknown) => error,
-      );
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(await outcome).toEqual(applied);
-      expect(mocks.call).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
+    const afterContention = { runtime: { operationId: "after-contention", generation: 3 } };
+    mocks.call
+      .mockRejectedValueOnce(await createPluginRefusalResponse())
+      .mockResolvedValueOnce(afterContention);
+    const outcome = dispatch("plugins.setEnabled", { pluginId: "demo", enabled: false }).catch(
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await outcome).toEqual(afterContention);
+    expect(mocks.call).toHaveBeenCalledTimes(2);
   });
 
   it.each([
-    { method: "plugins.reload", params: { plugins: [{ pluginId: "demo" }], waitForDrain: true } },
+    { method: "plugins.reload", params: reloadParams },
     { method: "plugins.setEnabled", params: { pluginId: "demo", enabled: false } },
   ])("cancels an unaccepted $method retry before another dispatch", async ({ method, params }) => {
     vi.useFakeTimers();
-    try {
-      mocks.call
-        .mockRejectedValueOnce(await createPluginRefusalResponse())
-        .mockResolvedValueOnce({ runtime: { generation: 3 } });
-      const gateway = await resolvePluginLifecycleGateway();
-      let settled = false;
-      const outcome = gateway!(method, params)
-        .catch((error: unknown) => error)
-        .finally(() => {
-          settled = true;
-        });
-      await vi.advanceTimersByTimeAsync(0);
-      expect(settled).toBe(false);
-      await waitForSignalExitBarriers();
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(await outcome).toMatchObject({ name: "AbortError" });
-      expect(mocks.call).toHaveBeenCalledOnce();
-      expect(vi.getTimerCount()).toBe(0);
-    } finally {
-      vi.useRealTimers();
-    }
+    mocks.call
+      .mockRejectedValueOnce(await createPluginRefusalResponse())
+      .mockResolvedValueOnce(applied);
+    let settled = false;
+    const outcome = dispatch(method, params)
+      .catch((error: unknown) => error)
+      .finally(() => {
+        settled = true;
+      });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await waitForSignalExitBarriers();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(mocks.call).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("selects offline execution only when no local owner exists", async () => {
@@ -157,8 +154,7 @@ describe("plugin lifecycle CLI transport", () => {
   it.each([true, false])(
     "requires an actual batch application receipt (present=%s)",
     async (present) => {
-      const runtime = { operationId: "batch", generation: 2, pluginIds: ["demo"] };
-      const targets = [{ pluginId: "demo", installHash: "a".repeat(64) }];
+      const runtime = runtimeReceipt;
       const warnings = ["Previous plugin cleanup did not finish."];
       mocks.call.mockResolvedValue(present ? { runtime, warnings, restartRequired: true } : {});
       const reload = await resolvePluginBatchReload();
@@ -179,25 +175,19 @@ describe("plugin lifecycle CLI transport", () => {
   );
 
   it("rechecks Labs after a pending plugin batch reload response", async () => {
-    let resolveReply!: (value: {
-      runtime: { operationId: string; generation: number; pluginIds: string[] };
-    }) => void;
-    mocks.call.mockReturnValue(
-      new Promise((resolve) => {
-        resolveReply = resolve;
-      }),
-    );
+    const reply = Promise.withResolvers<{ runtime: typeof runtimeReceipt }>();
+    mocks.call.mockReturnValue(reply.promise);
     let labsEnabled = true;
     const commitGuard = vi.fn(() =>
       assertClawsLabsEnabled({ gateway: { controlUi: { experimental: { claws: labsEnabled } } } }),
     );
     const reload = await resolvePluginBatchReload();
-    const result = reload!([{ pluginId: "demo", installHash: "a".repeat(64) }], { commitGuard });
+    const result = reload!(targets, { commitGuard });
 
     expect(mocks.call).toHaveBeenCalledOnce();
     expect(commitGuard).not.toHaveBeenCalled();
     labsEnabled = false;
-    resolveReply({ runtime: { operationId: "batch", generation: 2, pluginIds: ["demo"] } });
+    reply.resolve({ runtime: runtimeReceipt });
 
     await expect(result).rejects.toBeInstanceOf(ClawsLabsDisabledError);
     expect(commitGuard).toHaveBeenCalledOnce();
@@ -225,32 +215,25 @@ describe("plugin lifecycle CLI transport", () => {
     "does not replay an uncertain plugin mutation (%s)",
     async (outcome) => {
       vi.useFakeTimers();
-      try {
-        const failure =
-          outcome === "lost-reply"
-            ? new Error("connection lost")
-            : new GatewayClientRequestError({
-                code: "UNAVAILABLE",
-                message: "plugin operation unavailable",
-                retryable: true,
-                retryAfterMs: 1_000,
-                ...(outcome === "admitted" || outcome === "unmarked-refusal"
-                  ? { details: { mutationAccepted: outcome === "admitted" } }
-                  : {}),
-              });
-        mocks.call
-          .mockRejectedValueOnce(failure)
-          .mockResolvedValueOnce({ runtime: { generation: 3 } });
-        const gateway = await resolvePluginLifecycleGateway();
-        const result = gateway!("plugins.uninstall", { pluginId: "demo" }).catch(
-          (error: unknown) => error,
-        );
-        await vi.advanceTimersByTimeAsync(1_000);
-        expect(await result).toBe(failure);
-        expect(mocks.call).toHaveBeenCalledOnce();
-      } finally {
-        vi.useRealTimers();
-      }
+      const failure =
+        outcome === "lost-reply"
+          ? new Error("connection lost")
+          : new GatewayClientRequestError({
+              code: "UNAVAILABLE",
+              message: "plugin operation unavailable",
+              retryable: true,
+              retryAfterMs: 1_000,
+              ...(outcome === "admitted" || outcome === "unmarked-refusal"
+                ? { details: { mutationAccepted: outcome === "admitted" } }
+                : {}),
+            });
+      mocks.call.mockRejectedValueOnce(failure).mockResolvedValueOnce(applied);
+      const result = dispatch("plugins.uninstall", { pluginId: "demo" }).catch(
+        (error: unknown) => error,
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await result).toBe(failure);
+      expect(mocks.call).toHaveBeenCalledOnce();
     },
   );
 
@@ -260,21 +243,9 @@ describe("plugin lifecycle CLI transport", () => {
       const oldToken = "a".repeat(64);
       const currentToken = "b".repeat(64);
       mocks.call
-        .mockRejectedValueOnce(
-          Object.assign(new Error("consent required"), {
-            details: buildCapabilityConsentErrorDetails({
-              pluginId: "demo",
-              reviewToken: oldToken,
-            }),
-          }),
-        )
-        .mockResolvedValueOnce({
-          plugin: { id: "demo", name: "Demo" },
-          reviewToken: currentToken,
-          declared: {},
-          grants: {},
-        })
-        .mockResolvedValueOnce({ runtime: { generation: 3 } });
+        .mockRejectedValueOnce(consentRequired("demo", oldToken))
+        .mockResolvedValueOnce(inspection("demo", "Demo", currentToken))
+        .mockResolvedValueOnce(applied);
       const consent = vi.fn(async (review: { reviewToken: string }) => ({
         reviewToken: review.reviewToken,
       }));
@@ -285,10 +256,7 @@ describe("plugin lifecycle CLI transport", () => {
         3,
         expect.objectContaining({
           method,
-          params: {
-            ...params,
-            acknowledgeCapabilities: { reviewToken: currentToken },
-          },
+          params: { ...params, acknowledgeCapabilities: { reviewToken: currentToken } },
         }),
       );
     },
@@ -296,15 +264,8 @@ describe("plugin lifecycle CLI transport", () => {
 
   it("refuses capability consent when inspection has no artifact review token", async () => {
     mocks.call
-      .mockRejectedValueOnce(
-        Object.assign(new Error("consent required"), {
-          details: buildCapabilityConsentErrorDetails({
-            pluginId: "demo",
-            reviewToken: "a".repeat(64),
-          }),
-        }),
-      )
-      .mockResolvedValueOnce({ plugin: { id: "demo", name: "Demo" }, declared: {}, grants: {} });
+      .mockRejectedValueOnce(consentRequired("demo", "a".repeat(64)))
+      .mockResolvedValueOnce(inspection("demo", "Demo"));
     const consent = vi.fn();
     const gateway = await resolvePluginLifecycleGateway();
     await expect(
@@ -317,32 +278,18 @@ describe("plugin lifecycle CLI transport", () => {
   it.each(["accepted", "declined", "rejected-again", "connection-lost"])(
     "reviews successive batch capabilities without repeating uncertain mutations (%s)",
     async (outcome) => {
-      const required = (pluginId: string, token: string) =>
-        Object.assign(new Error(`${pluginId} consent required`), {
-          details: buildCapabilityConsentErrorDetails({ pluginId, reviewToken: token }),
-        });
       const firstToken = "a".repeat(64);
       const secondToken = "b".repeat(64);
-      const secondFailure = required("beta", secondToken);
+      const secondFailure = consentRequired("beta", secondToken);
       const finalFailure =
         outcome === "connection-lost" ? new Error("connection lost") : secondFailure;
       mocks.call
-        .mockRejectedValueOnce(required("alpha", firstToken))
-        .mockResolvedValueOnce({
-          plugin: { id: "alpha", name: "Alpha" },
-          reviewToken: firstToken,
-          declared: {},
-          grants: {},
-        })
+        .mockRejectedValueOnce(consentRequired("alpha", firstToken))
+        .mockResolvedValueOnce(inspection("alpha", "Alpha", firstToken))
         .mockRejectedValueOnce(secondFailure)
-        .mockResolvedValueOnce({
-          plugin: { id: "beta", name: "Beta" },
-          reviewToken: secondToken,
-          declared: {},
-          grants: {},
-        });
+        .mockResolvedValueOnce(inspection("beta", "Beta", secondToken));
       if (outcome === "accepted") {
-        mocks.call.mockResolvedValueOnce({ runtime: { generation: 3 } });
+        mocks.call.mockResolvedValueOnce(applied);
       } else {
         mocks.call.mockRejectedValueOnce(finalFailure);
       }
