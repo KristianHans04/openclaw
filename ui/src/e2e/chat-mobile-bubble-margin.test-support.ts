@@ -210,10 +210,10 @@ export async function measureMargin(page: Page, testCase: MarginCase) {
   await target.waitFor();
   await page
     .locator(".chat-thread img.chat-message-image")
-    .evaluateAll((images: HTMLImageElement[]) =>
-      Promise.all(images.map((element) => element.decode())),
-    );
-  await page.evaluate(() => document.fonts.ready);
+    .evaluateAll(async (images: HTMLImageElement[]) => {
+      await Promise.all(images.map((element) => element.decode()));
+      await document.fonts.ready;
+    });
   return target.evaluate((element, side) => {
     const group = element.closest(".chat-group") ?? element.closest(".chat-thread-inner")!;
     const column = group.getBoundingClientRect();
