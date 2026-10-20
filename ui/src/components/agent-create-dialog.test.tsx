@@ -1,5 +1,7 @@
 import { flush } from "solid-js";
 import { afterEach, expect, it, vi } from "vitest";
+import type { ApplicationContext } from "../app/context.ts";
+import { createApplicationGateway } from "../test-helpers/application-context.ts";
 import { mountSolid } from "../test-helpers/solid-render.tsx";
 import { AgentCreateDialog } from "./agent-create-dialog.tsx";
 
@@ -14,10 +16,16 @@ vi.mock("../pages/agents/avatar-picker.tsx", () => ({
 
 afterEach(() => document.body.replaceChildren());
 
+function dialogContext(): ApplicationContext {
+  const { gateway } = createApplicationGateway();
+  // The picker is mocked; these interactions only read the Gateway and agent roster.
+  return { gateway, agents: { state: { agentsList: null } } } as ApplicationContext;
+}
+
 it("requires a display name and submits the selected Blobster identity", () => {
   const onCancel = vi.fn();
   const onCreate = vi.fn();
-  const view = mountSolid(AgentCreateDialog, { onCancel, onCreate });
+  const view = mountSolid(AgentCreateDialog, { context: dialogContext(), onCancel, onCreate });
   document.body.append(view.container);
 
   const name = view.container.querySelector<HTMLInputElement>('input[name="name"]')!;
@@ -39,7 +47,7 @@ it("requires a display name and submits the selected Blobster identity", () => {
 it("cancels without creating an agent", () => {
   const onCancel = vi.fn();
   const onCreate = vi.fn();
-  const view = mountSolid(AgentCreateDialog, { onCancel, onCreate });
+  const view = mountSolid(AgentCreateDialog, { context: dialogContext(), onCancel, onCreate });
   document.body.append(view.container);
 
   view.container.querySelector<HTMLButtonElement>('[data-action="cancel"]')!.click();

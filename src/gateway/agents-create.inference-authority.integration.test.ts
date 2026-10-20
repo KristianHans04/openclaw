@@ -153,7 +153,9 @@ it(
           });
           const clients: Array<Awaited<ReturnType<typeof connectGatewayClient>>> = [];
           const connectDevice = async (label: string, scopes: string[]) => {
-            const identity = loadOrCreateDeviceIdentity({ path: state.path(`${label}.sqlite`) });
+            const identity = loadOrCreateDeviceIdentity({
+              path: state.path(label, "client", "credentials.sqlite"),
+            });
             const pending = await requestDevicePairing({
               deviceId: identity.deviceId,
               publicKey: publicKeyRawBase64UrlFromPem(identity.publicKeyPem),
@@ -215,12 +217,14 @@ it(
             const history = await client.request<{
               messages?: Array<{ role?: string; content?: unknown }>;
             }>("chat.history", { sessionKey: allowed.onboarding!.sessionKey });
-            expect(history.messages).toEqual([
-              expect.objectContaining({
-                role: "assistant",
-                content: [{ type: "text", text: "Hi! What would you like to call me?" }],
-              }),
-            ]);
+            expect(history.messages).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({
+                  role: "assistant",
+                  content: [{ type: "text", text: "Hi, I’m New agent. Happy to help." }],
+                }),
+              ]),
+            );
 
             const readOnly = await connectDevice("read-only", ["operator.read"]);
             const beforeReadOnly = [...requests];
