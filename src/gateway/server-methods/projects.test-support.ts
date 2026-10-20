@@ -16,6 +16,7 @@ import {
   type SessionRowProjection,
 } from "../session-row-projection.js";
 import { createProjectsHandlers } from "./projects.js";
+import type { RespondFn } from "./types.js";
 
 export const execFileAsync = promisify(execFile);
 export const listRegistryRecords = vi.fn(async () => []);
@@ -59,13 +60,7 @@ export async function invokeProjectMethod(
   getConfig: () => OpenClawConfig = () => cfg as OpenClawConfig,
   lifetime: { signal?: AbortSignal; hasCurrentClientAuthority?: () => boolean } = {},
 ) {
-  const capture: {
-    result: {
-      ok: boolean;
-      payload?: unknown;
-      error?: { code?: string; message?: string };
-    } | null;
-  } = { result: null };
+  const respond = vi.fn<RespondFn>();
   const releaseForegroundWork = retainSessionListForegroundWork();
   let ownedProjection: SessionRowProjection | undefined;
   try {
@@ -77,9 +72,7 @@ export async function invokeProjectMethod(
       ...lifetime,
       req: {} as never,
       params,
-      respond: (ok, payload, error) => {
-        capture.result = { ok, payload, error };
-      },
+      respond,
       context: bindSessionRowProjection(
         { getRuntimeConfig: getConfig, trackExecution: trackAsyncWork },
         () => projection ?? ownedProjection,
@@ -90,7 +83,8 @@ export async function invokeProjectMethod(
       } as never,
       isWebchatConnect: () => false,
     });
-    return capture.result;
+    const response = respond.mock.lastCall;
+    return response ? { ok: response[0], payload: response[1], error: response[2] } : null;
   } finally {
     ownedProjection?.dispose();
     releaseForegroundWork();

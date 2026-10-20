@@ -1,6 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
-import { PROTOCOL_VERSION } from "../../../packages/gateway-protocol/src/version.js";
 import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { normalizeWebPushNotificationPreferences } from "../../infra/push-web-preferences.js";
@@ -10,6 +9,7 @@ import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-wo
 import * as preferences from "../../state/user-preferences.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { closeStateDatabaseForTest } from "../../test-utils/database-cleanup.js";
+import { createOperatorClient } from "../server-plugin-in-process-dispatch.test-support.js";
 import { pushHandlers } from "./push.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -32,6 +32,15 @@ it("runs web-push preference get and set without preparing SQLite on the calling
   const native = vi.spyOn(DatabaseSync.prototype, "prepare");
   const order: string[] = [];
   const respond = vi.fn(() => order.push("response"));
+  const client = createOperatorClient({ profileId, scopes: ["operator.read", "operator.write"] });
+  client.connId = "preferences-owner";
+  client.connect.device = {
+    id: "browser-device",
+    publicKey: "synthetic",
+    signature: "synthetic",
+    signedAt: 1,
+    nonce: "synthetic",
+  };
   const options: Parameters<(typeof pushHandlers)["push.web.preferences.set"]>[0] = {
     req: { type: "req", id: "preferences", method: "push.web.preferences.set" },
     params: {
@@ -39,24 +48,7 @@ it("runs web-push preference get and set without preparing SQLite on the calling
       scope: "user",
       preferences: normalizeWebPushNotificationPreferences({ detailLevel: "detailed" }),
     },
-    client: {
-      connId: "preferences-owner",
-      connect: {
-        minProtocol: PROTOCOL_VERSION,
-        maxProtocol: PROTOCOL_VERSION,
-        client: { id: "openclaw-control-ui", version: "test", platform: "web", mode: "webchat" },
-        role: "operator",
-        scopes: ["operator.read", "operator.write"],
-        device: {
-          id: "browser-device",
-          publicKey: "synthetic",
-          signature: "synthetic",
-          signedAt: 1,
-          nonce: "synthetic",
-        },
-      },
-      authenticatedUserProfile: { profileId, displayName: null, hasAvatar: false, updatedAt: 1 },
-    },
+    client,
     respond,
     isWebchatConnect: () => false,
     context: { getRuntimeConfig: () => ({}), broadcastToConnIds: vi.fn() },
@@ -97,10 +89,7 @@ it("runs web-push preference get and set without preparing SQLite on the calling
   );
   expect(respond).toHaveBeenLastCalledWith(
     true,
-    {
-      scope: "user",
-      preferences: options.params.preferences,
-    },
+    { scope: "user", preferences: options.params.preferences },
     undefined,
   );
   await pushHandlers["push.web.preferences.get"]({

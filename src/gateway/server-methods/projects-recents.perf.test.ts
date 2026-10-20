@@ -19,6 +19,7 @@ test("project recents do not enumerate unrelated sessions after projection hydra
   let projection: Awaited<ReturnType<typeof createSessionRowProjection>> | undefined;
   try {
     const profile = ensureProfileForEmail("recents@example.test");
+    const actor = { type: "human" as const, source: "profile" as const, id: profile.id };
     const now = Date.now();
     const unrelated = 4_096;
     const marker = "agent:main:unrelated-0";
@@ -35,11 +36,7 @@ test("project recents do not enumerate unrelated sessions after projection hydra
               sessionId: key,
               updatedAt: now - index,
               archivedAt: now,
-              createdActor: {
-                type: "human",
-                source: "profile",
-                id: foreign ? "other" : profile.id,
-              },
+              createdActor: foreign ? { ...actor, id: "other" } : actor,
               spawnedCwd: foreign ? "/work/foreign" : `/work/recent-${Math.max(0, own - 24)}`,
             },
             { canonicalPreviousEntry: null, previousEntry: null },
@@ -93,7 +90,7 @@ test("project recents do not enumerate unrelated sessions after projection hydra
       sessionId: changed,
       updatedAt: now + 1,
       archivedAt: now,
-      createdActor: { type: "human" as const, source: "profile" as const, id: profile.id },
+      createdActor: actor,
       spawnedCwd: "/work/moved",
     };
     // A receipt without a postimage must reenter the existing exact-key worker admission.

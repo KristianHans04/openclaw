@@ -19,9 +19,16 @@ afterEach(() => {
   tempDirs.cleanup();
 });
 
-function createSend(hasPendingAgents: boolean, idempotencyKey = "agent-only-startup") {
+function createSend(agentId: string, pending: boolean, idempotencyKey = "agent-only-startup") {
+  const refusal = createAgentDatabaseInspectionRefusal({
+    agentId,
+    paths: [],
+    pending,
+    reason: pending ? "Synthetic inspection is pending." : "Synthetic inspection failed.",
+  });
+  recordAgentDatabaseAdmissions([refusal], { source: "startup" });
   const startup = {
-    hasPendingAgents,
+    hasPendingAgents: pending,
     waitForAgentPreparation: () => {
       throw new Error("Send must not wait for startup preparation");
     },
@@ -30,6 +37,7 @@ function createSend(hasPendingAgents: boolean, idempotencyKey = "agent-only-star
   return {
     handler,
     startup,
+    refusal,
     send: () =>
       sendAuthorizationRequest(
         "send",
@@ -54,20 +62,8 @@ function createSend(hasPendingAgents: boolean, idempotencyKey = "agent-only-star
   };
 }
 
-function recordRefusal(agentId: string, pending: boolean) {
-  const refusal = createAgentDatabaseInspectionRefusal({
-    agentId,
-    paths: [],
-    pending,
-    reason: pending ? "Synthetic inspection is pending." : "Synthetic inspection failed.",
-  });
-  recordAgentDatabaseAdmissions([refusal], { source: "startup" });
-  return refusal;
-}
-
 it("dispatches an admitted agent-only send while another agent is preparing", async () => {
-  recordRefusal("main", true);
-  const { handler, send } = createSend(true, "healthy-agent-send");
+  const { handler, send } = createSend("main", true, "healthy-agent-send");
   const respond = await send();
   expect(respond).toHaveBeenCalledWith(true, { sent: true });
   expect(handler).toHaveBeenCalledTimes(1);
@@ -76,8 +72,7 @@ it("dispatches an admitted agent-only send while another agent is preparing", as
 it.each([true, false])(
   "refuses an agent-only send before dispatch while inspection is pending=%s",
   async (pending) => {
-    const refusal = recordRefusal("work", pending);
-    const { handler, send, startup } = createSend(pending);
+    const { handler, send, startup, refusal } = createSend("work", pending);
 
     const respond = await send();
     expect(handler).not.toHaveBeenCalled();

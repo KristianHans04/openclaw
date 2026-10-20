@@ -1,5 +1,6 @@
 import path from "node:path";
 import { expect, test, vi } from "vitest";
+import type { ProjectRecent } from "../../../packages/gateway-protocol/src/index.js";
 import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import {
   replaceSessionEntry,
@@ -35,6 +36,13 @@ const folderRecent = (name: string) => ({
   folder: `/work/${name}`,
   displayName: name,
 });
+function expectRecents(
+  result: Awaited<ReturnType<typeof invokeProjectMethod>>,
+  recents: unknown[],
+) {
+  expect(result?.ok).toBe(true);
+  expect(result?.payload).toHaveProperty("recents", recents);
+}
 
 test("folder recents deduplicate normalized nodes without merging different runners", async () => {
   const candidates = [" node-a ", "node-a", "node-b", " ", undefined].map((execNode, index) => ({
@@ -48,11 +56,7 @@ test("folder recents deduplicate normalized nodes without merging different runn
     { kind: "folder", folder: "/work/app", displayName: "app", execNode: "node-b" },
     { kind: "folder", folder: "/work/app", displayName: "app" },
   ]);
-  expect([...usedSessions]).toEqual([
-    "agent:main:folder-0",
-    "agent:main:folder-2",
-    "agent:main:folder-3",
-  ]);
+  expect([...usedSessions]).toEqual([0, 2, 3].map((index) => `agent:main:folder-${index}`));
 });
 
 test("projects.list reuses durable metadata until a committed session change", async () => {
@@ -80,19 +84,13 @@ test("projects.list reuses durable metadata until a committed session change", a
         registeredProjectsHandlers,
         projection,
       );
-    expect(await list()).toMatchObject({
-      ok: true,
-      payload: { recents: [{ kind: "folder", folder: "/work/before", displayName: "before" }] },
-    });
+    expectRecents(await list(), [folderRecent("before")]);
     const snapshot = loadProjectSessionStore(projection, []);
     expect(Object.isFrozen(snapshot.store)).toBe(true);
     await list();
     expect(loadProjectSessionStore(projection, [])).toBe(snapshot);
     replaceSessionEntrySync(target, { ...entry, updatedAt: 200, spawnedCwd: "/work/after" });
-    expect(await list()).toMatchObject({
-      ok: true,
-      payload: { recents: [{ kind: "folder", folder: "/work/after", displayName: "after" }] },
-    });
+    expectRecents(await list(), [folderRecent("after")]);
     expect(snapshot.store[target.sessionKey]?.spawnedCwd).toBe("/work/before");
     expect(loadProjectSessionStore(projection, []).store[target.sessionKey]?.spawnedCwd).toBe(
       "/work/after",
@@ -129,37 +127,25 @@ test("projects.list returns only the caller's deterministic resolved recents", a
       url: "https://github.com/octocat/hello-world.git",
       assertCurrent: () => {},
     });
-    const entries: Array<{
-      key: string;
-      updatedAt: number;
-      projectId?: string;
-      spawnedCwd?: string;
-      repositoryWorkspaceId?: string;
-      archivedAt?: number;
-    }> = [
-      { key: "agent:main:a", updatedAt: 500, projectId: project.id },
-      { key: "agent:main:b", updatedAt: 500, projectId: project.id },
-      { key: "global", updatedAt: 450, repositoryWorkspaceId: repository.workspaceId },
-      {
-        key: "agent:main:wrong-owner",
-        updatedAt: 449,
-        repositoryWorkspaceId: repository.workspaceId,
-      },
-      {
-        key: "agent:main:c",
-        updatedAt: 400,
-        projectId: "stale",
-        spawnedCwd: "/work/scratch",
-        archivedAt: 1,
-      },
-      ...Array.from({ length: 8 }, (_, index) => ({
-        key: `agent:main:folder-${index}`,
+    for (const key of ["agent:main:a", "agent:main:b"]) {
+      seed(key, { updatedAt: 500, projectId: project.id });
+    }
+    seed("global", { updatedAt: 450, repositoryWorkspaceId: repository.workspaceId });
+    seed("agent:main:wrong-owner", {
+      updatedAt: 449,
+      repositoryWorkspaceId: repository.workspaceId,
+    });
+    seed("agent:main:c", {
+      updatedAt: 400,
+      projectId: "stale",
+      spawnedCwd: "/work/scratch",
+      archivedAt: 1,
+    });
+    for (let index = 0; index < 8; index++) {
+      seed(`agent:main:folder-${index}`, {
         updatedAt: 300 - index,
         spawnedCwd: `/work/folder-${index}`,
-      })),
-    ];
-    for (const { key, ...entry } of entries) {
-      seed(key, entry);
+      });
     }
     seed("agent:main:other", {
       sessionId: "session-other",
@@ -195,10 +181,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
     linkEmail("source@example.test", targetProfile.id);
     releaseCatalog = (await prepareUserProfileCatalog()).release;
     const readResult = await list(["operator.read"]);
-    if (!readResult?.payload) {
-      throw new Error("projects.list did not return recents");
-    }
-    expect((readResult.payload as { recents?: unknown[] }).recents).toEqual([
+    expectRecents(readResult, [
       { kind: "project", projectId: project.id, displayName: "Registered" },
     ]);
     const writeResult = await list();
@@ -209,9 +192,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
       folderRecent("incognito"),
       ...Array.from({ length: 4 }, (_, index) => folderRecent(`folder-${index}`)),
     ];
-    expect((writeResult?.payload as { recents?: unknown[] } | undefined)?.recents).toEqual(
-      expectedRecents,
-    );
+    expectRecents(writeResult, expectedRecents);
     projection = await createSessionRowProjection({ cfg, modelCatalog: [] });
     do {
       await projection.ensureMaterialized();
@@ -241,8 +222,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
         updatedAt: 2_000,
         spawnedCwd: "/work/updated",
       });
-      const updated = await list();
-      expect(updated?.payload).toMatchObject({
+      expect((await list())?.payload).toMatchObject({
         recents: [folderRecent("updated"), ...expectedRecents.slice(0, 7)],
       });
       expect(workerReads).toHaveBeenCalled();
@@ -267,10 +247,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
       folderRecent("updated"),
       ...expectedRecents.slice(0, 5),
     ];
-    const workerGolden = await list(["operator.write"], { includeObserved: true }, false);
-    expect((workerGolden?.payload as { recents?: unknown[] } | undefined)?.recents).toEqual(
-      tiedRecents,
-    );
+    expectRecents(await list(["operator.write"], { includeObserved: true }, false), tiedRecents);
     const tieEntry = {
       sessionId: "tie-0",
       updatedAt: 3_000,
@@ -280,10 +257,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
       ...tieEntry,
       label: "Updated without changing recency",
     });
-    const afterPublication = await list();
-    expect((afterPublication?.payload as { recents?: unknown[] } | undefined)?.recents).toEqual(
-      tiedRecents,
-    );
+    expectRecents(await list(), tiedRecents);
     const findRepositories = repositoryWorkspaces.findSessionRepositoryWorkspaces;
     const repositoryRead = vi
       .spyOn(repositoryWorkspaces, "findSessionRepositoryWorkspaces")
@@ -327,8 +301,7 @@ test("projects.list returns only the caller's deterministic resolved recents", a
       external.close();
     }
     projection = await createSessionRowProjection({ cfg, modelCatalog: [] });
-    const afterAliasChange = await list();
-    expect(afterAliasChange?.payload).toMatchObject({ recents: [] });
+    expect((await list())?.payload).toMatchObject({ recents: [] });
   } finally {
     projection?.dispose();
     releaseCatalog?.();
@@ -368,68 +341,50 @@ test("projects.list preserves path ranking, folder names, locale ties, and the p
         )
         .run(id, index === 0 ? "First tie" : "Second tie", "/work/ties");
     }
-    const projectRecent = (projectId: string, displayName: string) => ({
+    const projectRecent = (projectId: string, displayName: string): ProjectRecent => ({
       kind: "project",
       projectId,
       displayName,
     });
-    const rankedProject = (
+    type RankingCase = [
       agent: string,
       folder: string,
-      projectId: string,
-      displayName: string,
-      extra: { sessionKey?: string; projectId?: string } = {},
-    ) => ({ agent, folder, expected: [projectRecent(projectId, displayName)], ...extra });
-    const cases = [
-      rankedProject("main", repo, "workspace:main", "registered"),
-      rankedProject("work", repo, "workspace:work", "registered"),
-      rankedProject("other", repo, registered.id, "Registered"),
-      rankedProject("main", repo, registered.id, "Registered", { sessionKey: "global" }),
-      rankedProject("main", otherWorkspace, "workspace:other", "other"),
-      rankedProject("main", localeWorkspaceDir, localeWorkspace, "locale"),
-      rankedProject("main", "/work/ties", tieIds[0], "First tie"),
-      rankedProject("main", repo, registered.id, "Registered", { projectId: registered.id }),
-      {
-        agent: "main",
-        folder: `${repo}/`,
-        expected: [{ kind: "folder", folder: `${repo}/`, displayName: "registered" }],
-      },
-      {
-        agent: "main",
-        folder: repo,
-        projectId: registered.id,
-        repositoryWorkspaceId: "missing-workspace",
-        expected: [],
-      },
+      expected: ProjectRecent[],
+      association?: { sessionKey?: string; projectId?: string; repositoryWorkspaceId?: string },
+    ];
+    const cases: RankingCase[] = [
+      ["main", repo, [projectRecent("workspace:main", "registered")]],
+      ["work", repo, [projectRecent("workspace:work", "registered")]],
+      ["other", repo, [projectRecent(registered.id, "Registered")]],
+      ["main", repo, [projectRecent(registered.id, "Registered")], { sessionKey: "global" }],
+      ["main", otherWorkspace, [projectRecent("workspace:other", "other")]],
+      ["main", localeWorkspaceDir, [projectRecent(localeWorkspace, "locale")]],
+      ["main", "/work/ties", [projectRecent(tieIds[0], "First tie")]],
+      ["main", repo, [projectRecent(registered.id, "Registered")], { projectId: registered.id }],
+      ["main", `${repo}/`, [{ kind: "folder", folder: `${repo}/`, displayName: "registered" }]],
+      ["main", repo, [], { projectId: registered.id, repositoryWorkspaceId: "missing-workspace" }],
       ...(
         [
           ["C:\\Users\\dev\\projects\\windows-project\\", "windows-project"],
           ["C:\\Users/dev\\projects/mixed-project/", "mixed-project"],
         ] as const
-      ).map(([folder, displayName]) => ({
-        agent: "main",
+      ).map(([folder, displayName]): RankingCase => [
+        "main",
         folder,
-        expected: [{ kind: "folder", folder, displayName }],
-      })),
+        [{ kind: "folder", folder, displayName }],
+      ]),
     ];
-    for (const [index, entry] of cases.entries()) {
+    for (const [index, [agent, folder, expected, association]] of cases.entries()) {
       const profile = ensureProfileForEmail(`ranking-${index}@example.test`);
+      const { sessionKey = `agent:${agent}:ranking-${index}`, ...entry } = association ?? {};
       replaceSessionEntrySync(
-        {
-          agentId: entry.agent,
-          sessionKey:
-            ("sessionKey" in entry ? entry.sessionKey : undefined) ??
-            `agent:${entry.agent}:ranking-${index}`,
-        },
+        { agentId: agent, sessionKey },
         {
           sessionId: `ranking-${index}`,
           updatedAt: 100,
           createdActor: { type: "human", source: "profile", id: profile.id },
-          spawnedCwd: entry.folder,
-          ...("projectId" in entry ? { projectId: entry.projectId } : {}),
-          ...("repositoryWorkspaceId" in entry
-            ? { repositoryWorkspaceId: entry.repositoryWorkspaceId }
-            : {}),
+          spawnedCwd: folder,
+          ...entry,
         },
       );
       const result = await invokeProjectMethod(
@@ -439,10 +394,7 @@ test("projects.list preserves path ranking, folder names, locale ties, and the p
         ["operator.write"],
         profile.id,
       );
-      expect(result?.ok).toBe(true);
-      expect((result?.payload as { recents?: unknown[] } | undefined)?.recents).toEqual(
-        entry.expected,
-      );
+      expectRecents(result, expected);
     }
 
     const limited = ensureProfileForEmail("limited-recents@example.test");
