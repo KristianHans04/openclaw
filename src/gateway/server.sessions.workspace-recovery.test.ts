@@ -1,10 +1,8 @@
 import path from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 import type { DB as StateDatabase } from "../state/openclaw-state-db.generated.js";
 import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
-import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
-import { disposeSessionReadContexts } from "./server-methods/sessions-read-cache.test-support.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
 import { loadSessionEntryAsync } from "./session-entry-load.test-support.js";
 import { writeSessionStore } from "./test-helpers.js";
@@ -25,20 +23,19 @@ import type { WorkerPlacementDispatchContract } from "./worker-environments/serv
 
 const { createSessionStoreDir } = setupGatewaySessionsHandlerTestHarness();
 
-afterEach(async () => {
-  await disposeSessionReadContexts();
-  vi.restoreAllMocks();
-  await closeStateDatabaseForTest();
-});
+afterEach(() => vi.restoreAllMocks());
 
-type RecoveryScenario =
-  | "offline runner"
-  | "accepted result on offline runner"
-  | "available runner"
-  | "unknown runner"
-  | "stale pending generation"
-  | "stale pending environment"
-  | "stale pending epoch";
+const cases = [
+  ["sessions.delete", "offline runner"],
+  ["sessions.patch", "offline runner"],
+  ["sessions.patch", "accepted result on offline runner"],
+  ["sessions.delete", "available runner"],
+  ["sessions.delete", "unknown runner"],
+  ["sessions.delete", "stale generation"],
+  ["sessions.delete", "stale environment"],
+  ["sessions.delete", "stale epoch"],
+] as const;
+type RecoveryScenario = (typeof cases)[number][1];
 
 async function seedPendingWorkspace(scenario: RecoveryScenario) {
   const { dir } = await createSessionStoreDir();
@@ -56,17 +53,14 @@ async function seedPendingWorkspace(scenario: RecoveryScenario) {
   };
   writePlacementEnvironmentFixture(database, environment);
   await seedActivePlacement(placements, environment);
+  const { environmentId, ownerEpoch } = environment;
   const claim = await placements.claimTurn({
     sessionId,
     sessionKey,
     agentId,
     claimId: "pending-claim",
     runId: "pending-run",
-    owner: {
-      kind: "worker",
-      environmentId: environment.environmentId,
-      ownerEpoch: environment.ownerEpoch,
-    },
+    owner: { kind: "worker", environmentId, ownerEpoch },
   });
   await placements.markWorkspaceResultPending(claim);
   if (scenario === "accepted result on offline runner") {
@@ -74,16 +68,15 @@ async function seedPendingWorkspace(scenario: RecoveryScenario) {
   }
   await placements.handoffWorkspaceResultRecovery(claim);
   const staleFields = {
-    "stale pending generation": { placement_generation: claim.placementGeneration - 1 },
-    "stale pending environment": { environment_id: "previous-environment" },
-    "stale pending epoch": { owner_epoch: environment.ownerEpoch - 1 },
+    "stale generation": { placement_generation: claim.placementGeneration - 1 },
+    "stale environment": { environment_id: "previous-environment" },
+    "stale epoch": { owner_epoch: ownerEpoch - 1 },
   };
   if (
-    scenario === "stale pending generation" ||
-    scenario === "stale pending environment" ||
-    scenario === "stale pending epoch"
+    scenario === "stale generation" ||
+    scenario === "stale environment" ||
+    scenario === "stale epoch"
   ) {
-    // Retained rows from another owner must never offer destructive recovery.
     executeSqliteQuerySync(
       database.db,
       getNodeSqliteKysely<Pick<StateDatabase, "worker_workspace_pending_results">>(database.db)
@@ -107,88 +100,48 @@ async function seedPendingWorkspace(scenario: RecoveryScenario) {
       dispatch: vi.fn<WorkerPlacementDispatchContract["dispatch"]>(),
       reclaim,
     },
-  } satisfies Pick<
-    GatewayRequestContext,
-    | "workerSessionPlacementService"
-    | "workerPlacementRunnerAvailabilityReader"
-    | "workerPlacementDispatchService"
-  >;
+  } satisfies Partial<GatewayRequestContext>;
   const readState = async () => ({
     entry: (await loadSessionEntryAsync(sessionKey)).entry,
     placement: placements.get(sessionId),
     pending: await placements.listPendingWorkspaceResultsAsync(),
   });
   const before = await readState();
-  expect(before.entry?.sessionId).toBe(sessionId);
-  expect(before.pending).toHaveLength(1);
+  expect(before).toMatchObject({ entry: { sessionId }, pending: [expect.anything()] });
   return {
     context,
-    source: {
-      generation: claim.placementGeneration,
-      environmentId: environment.environmentId,
-      ownerEpoch: environment.ownerEpoch,
-    },
+    source: { generation: claim.placementGeneration, environmentId, ownerEpoch },
     reclaim,
     waitForTurnClaimRelease,
-    async expectPreserved() {
-      expect(await readState()).toEqual(before);
-    },
+    expectPreserved: async () => expect(await readState()).toEqual(before),
   };
 }
 
-describe.each([
-  { action: "Delete", method: "sessions.delete", patch: {} },
-  { action: "Archive", method: "sessions.patch", patch: { archived: true } },
-] as const)("$action pending workspace results", ({ method, patch }) => {
-  const attempt = async (scenario: RecoveryScenario) => {
-    const fixture = await seedPendingWorkspace(scenario);
-    const result = await directSessionReq(
-      method,
-      { key: REQUEST.sessionKey, expectedSessionId: REQUEST.sessionId, ...patch },
-      { context: fixture.context },
-    );
-    return { fixture, result };
-  };
-  test("offers recovery for an offline device without discarding its result", async () => {
-    const { fixture, result } = await attempt("offline runner");
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        code: "UNAVAILABLE",
-        retryable: false,
-        details: {
-          code: "SESSION_WORKSPACE_RECOVERY_REQUIRED",
-          cause: "device_offline",
-          recoveryAction: "continue_on_gateway",
-          sessionId: REQUEST.sessionId,
-          source: fixture.source,
-        },
-      },
+test.each(cases)("%s preserves pending results: %s", async (method, scenario) => {
+  const fixture = await seedPendingWorkspace(scenario);
+  const result = await directSessionReq(
+    method,
+    {
+      key: REQUEST.sessionKey,
+      expectedSessionId: REQUEST.sessionId,
+      ...(method === "sessions.patch" ? { archived: true } : {}),
+    },
+    { context: fixture.context },
+  );
+  const recovery = scenario === "offline runner";
+  expect(result).toMatchObject({ ok: false, error: { code: "UNAVAILABLE", retryable: !recovery } });
+  if (recovery) {
+    expect(result.error?.details).toMatchObject({
+      code: "SESSION_WORKSPACE_RECOVERY_REQUIRED",
+      cause: "device_offline",
+      recoveryAction: "continue_on_gateway",
+      sessionId: REQUEST.sessionId,
+      source: fixture.source,
     });
-    expect(fixture.waitForTurnClaimRelease).not.toHaveBeenCalled();
-    expect(fixture.reclaim).not.toHaveBeenCalled();
-    await fixture.expectPreserved();
-  });
-
-  // Both RPCs use the same drain owner; cover each ordinary-drain branch once.
-  const scenarios: RecoveryScenario[] =
-    method === "sessions.patch"
-      ? ["accepted result on offline runner"]
-      : [
-          "available runner",
-          "unknown runner",
-          "stale pending generation",
-          "stale pending environment",
-          "stale pending epoch",
-        ];
-  test.each(scenarios)("keeps the ordinary drain for %s", async (scenario) => {
-    const { fixture, result } = await attempt(scenario);
-
-    expect(result).toMatchObject({ ok: false, error: { code: "UNAVAILABLE", retryable: true } });
+  } else {
     expect(result.error?.details).toBeUndefined();
-    expect(fixture.waitForTurnClaimRelease).toHaveBeenCalledOnce();
-    expect(fixture.reclaim).not.toHaveBeenCalled();
-    await fixture.expectPreserved();
-  });
+  }
+  expect(fixture.waitForTurnClaimRelease).toHaveBeenCalledTimes(recovery ? 0 : 1);
+  expect(fixture.reclaim).not.toHaveBeenCalled();
+  await fixture.expectPreserved();
 });

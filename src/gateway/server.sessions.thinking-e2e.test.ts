@@ -22,6 +22,13 @@ type ThinkingSession = {
 type SessionsListResult = {
   sessions?: ThinkingSession[];
 };
+const reasoningModel = (provider: string, id: string, efforts: string[]) => ({
+  provider,
+  id,
+  name: id,
+  reasoning: true,
+  compat: { supportedReasoningEfforts: efforts },
+});
 
 async function listMainSessionWithThinking(
   primaryModel: string,
@@ -51,15 +58,7 @@ async function listMainSession(options: Parameters<typeof directSessionReq>[2]) 
 
 test("active Codex sessions patch and list catalog-advertised Ultra", async () => {
   const loadSolCatalog = async () => [
-    {
-      provider: "openai",
-      id: "gpt-5.6-sol",
-      name: "GPT-5.6-Sol",
-      reasoning: true,
-      compat: {
-        supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
-      },
-    },
+    reasoningModel("openai", "gpt-5.6-sol", ["low", "medium", "high", "xhigh", "max", "ultra"]),
   ];
   const session = await listMainSessionWithThinking(
     "openai/gpt-5.6-sol",
@@ -112,15 +111,7 @@ test("generic models retain stored Ultra as a native harness mode", async () => 
       thinkingLevel: "ultra",
     },
     async () => ({
-      entries: [
-        {
-          provider: "test-generic",
-          id: "reasoner",
-          name: "Generic Reasoner",
-          reasoning: true,
-          compat: { supportedReasoningEfforts: ["max"] },
-        },
-      ],
+      entries: [reasoningModel("test-generic", "reasoner", ["max"])],
     }),
   );
 

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { expect, it } from "vitest";
 import {
+  closeHttpServer,
   listenLoopback,
   readRequestText,
 } from "../../test/helpers/gateway-integration-fixtures.js";
@@ -27,6 +28,9 @@ import { buildMockOpenAiResponsesProvider } from "./test-openai-responses-model.
 
 const replyText = "Daily rollover reply is ready.";
 const sessionKey = "agent:main:dashboard:rollover-proof";
+type Completion = { status: string; error?: string; terminalReply?: { text?: string } };
+type Client = Awaited<ReturnType<typeof startGatewayWithClient>>["client"];
+const nativeClient = { clientName: "openclaw-macos", mode: "ui" } as const;
 
 it.each([false, true])(
   "answers chat.send after a dashboard daily rollover (native reconnect: %s)",
@@ -39,7 +43,18 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
   const home = await setupGatewayTempHome({ prefix: "openclaw-dashboard-title-rollover-" });
   const heartbeatsEnabled = areHeartbeatsEnabled();
   const provider = createServer((request, response) => {
-    void readAndComplete(request, response).catch((error: unknown) => {
+    void (async () => {
+      if (request.method !== "POST" || !request.url?.endsWith("/responses")) {
+        response.writeHead(404).end();
+        return;
+      }
+      JSON.parse(await readRequestText(request));
+      writeOpenAiResponsesText(response, {
+        text: replyText,
+        messageId: `msg-${randomUUID()}`,
+        responseId: `resp-${randomUUID()}`,
+      });
+    })().catch((error: unknown) => {
       response.destroy(error instanceof Error ? error : undefined);
     });
   });
@@ -85,16 +100,15 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
       cfg,
       configPath: await createGatewayConfigPath(home.tempHome),
       ...connection,
-      ...(nativeReconnect ? { clientName: "openclaw-macos" as const, mode: "ui" as const } : {}),
+      ...(nativeReconnect ? nativeClient : {}),
     });
+    const url = `ws://127.0.0.1:${gateway.port}`;
+    const connect = (
+      client: Pick<Parameters<typeof connectGatewayClient>[0], "clientName" | "mode" | "origin">,
+    ) => connectGatewayClient({ url, ...connection, ...client });
     if (nativeReconnect) {
       await disconnectGatewayClient(gateway.client);
-      gateway.client = await connectGatewayClient({
-        url: `ws://127.0.0.1:${gateway.port}`,
-        ...connection,
-        clientName: "openclaw-macos",
-        mode: "ui",
-      });
+      gateway.client = await connect(nativeClient);
     }
     const scope = {
       agentId: "main",
@@ -119,11 +133,9 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
       sessionKey,
       storePath: scope.storePath,
     });
-    const staleReason = freshness.state === "stale" ? freshness.freshness.staleReason : undefined;
+    expect(freshness).toMatchObject({ state: "stale", freshness: { staleReason: "daily" } });
     if (nativeReconnect) {
-      expect(freshness.state).toBe("stale");
-      expect(staleReason).toBe("daily");
-      const resumed = await sendAndWait(gateway, "Resume the matching displayed session.", {
+      const resumed = await sendAndWait(gateway.client, "Resume the matching displayed session.", {
         sessionId: seededSessionId,
         __controlUiReconnectResume: true,
       });
@@ -135,9 +147,7 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
         lifecycleRevision: "seed-revision",
         sessionStartedAt: staleAt,
       });
-      const publicClient = await connectGatewayClient({
-        url: `ws://127.0.0.1:${gateway.port}`,
-        ...connection,
+      const publicClient = await connect({
         clientName: "webchat-ui",
         origin: "http://localhost",
         mode: "webchat",
@@ -157,30 +167,24 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
         await disconnectGatewayClient(publicClient);
       }
     }
-    const result = await sendAndWait(gateway, "Continue after the daily reset.", {
+    const result = await sendAndWait(gateway.client, "Continue after the daily reset.", {
       sessionId: seededSessionId,
     });
     const rolled = loadSessionEntry(scope);
-    const drainTimeout = (result.error ?? result.terminalReply?.text ?? "").includes(
-      "timed out draining work",
-    );
-    expect(freshness.state).toBe("stale");
-    expect(staleReason).toBe("daily");
     expect(result.status, result.error).toBe("ok");
     expect(result.terminalReply?.text).toBe(replyText);
     expect(rolled?.sessionId).toBe(seededSessionId);
     expect(rolled?.sessionStartedAt).toBeGreaterThan(staleAt + 24 * 60 * 60 * 1000);
     expect(rolled?.lifecycleRevision).not.toBe("seed-revision");
-    expect(drainTimeout).toBe(false);
+    expect(result.error ?? result.terminalReply?.text ?? "").not.toContain(
+      "timed out draining work",
+    );
   } finally {
     if (gateway) {
       await disconnectGatewayClient(gateway.client);
       await gateway.server.close();
     }
-    provider.closeAllConnections();
-    await new Promise<void>((resolve) => {
-      provider.close(() => resolve());
-    });
+    await closeHttpServer(provider);
     setHeartbeatsEnabled(heartbeatsEnabled);
     home.envSnapshot.restore();
     await removeGatewayTempHome(home.tempHome);
@@ -188,37 +192,21 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
   }
 }
 
-async function readAndComplete(
-  request: import("node:http").IncomingMessage,
-  response: ServerResponse,
-): Promise<void> {
-  if (request.method !== "POST" || !request.url?.endsWith("/responses")) {
-    response.writeHead(404).end();
-    return;
-  }
-  JSON.parse(await readRequestText(request));
-  writeOpenAiResponsesText(response, {
-    text: replyText,
-    messageId: `msg-${randomUUID()}`,
-    responseId: `resp-${randomUUID()}`,
-  });
-}
-
 async function sendAndWait(
-  gateway: Awaited<ReturnType<typeof startGatewayWithClient>>,
+  client: Client,
   message: string,
   reconnect: { sessionId?: string; __controlUiReconnectResume?: boolean } = {},
-): Promise<{ status: string; error?: string; terminalReply?: { text?: string } }> {
-  const started = await gateway.client.request<{ runId: string }>("chat.send", {
+): Promise<Completion> {
+  const { runId } = await client.request<{ runId: string }>("chat.send", {
     sessionKey,
     message,
     ...reconnect,
     deliver: false,
     idempotencyKey: randomUUID(),
   });
-  return await gateway.client.request<{
-    status: string;
-    error?: string;
-    terminalReply?: { text?: string };
-  }>("agent.wait", { runId: started.runId, timeoutMs: 30_000 }, { timeoutMs: 35_000 });
+  return await client.request<Completion>(
+    "agent.wait",
+    { runId, timeoutMs: 30_000 },
+    { timeoutMs: 35_000 },
+  );
 }
