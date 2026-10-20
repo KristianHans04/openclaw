@@ -18,7 +18,10 @@ import * as profileCheck from "../system-agent/setup-inference-profile.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { reserveTestPortListener } from "../test-utils/port-claims.js";
 import { resetGatewayTestState } from "./gateway.test-support.js";
-import type { GatewayRequestOptions } from "./server-methods/types.js";
+import type {
+  GatewayRequestHandlerOptions,
+  GatewayRequestOptions,
+} from "./server-methods/types.js";
 import {
   connectGatewayClient,
   disconnectGatewayClient,
@@ -26,7 +29,12 @@ import {
 } from "./test-helpers.e2e.js";
 import { buildMockOpenAiResponsesProvider } from "./test-openai-responses-model.js";
 
-const observation = vi.hoisted(() => ({ settled: (_options: GatewayRequestOptions) => {} }));
+const observation = vi.hoisted(() => ({
+  settled: (_options: GatewayRequestOptions) => {},
+  beforeDetachedChat: async (_options: GatewayRequestHandlerOptions) => {},
+  detachedChatSettled: (_options: GatewayRequestHandlerOptions) => {},
+  detachedChatResponse: (_options: GatewayRequestHandlerOptions, _ok: boolean) => {},
+}));
 
 // A revoked socket can lose its reply; retain original exports and join the real handler.
 vi.mock(
@@ -50,8 +58,41 @@ vi.mock(
   },
 );
 
+// Pause only the detached onboarding entry point; the real chat owner still
+// performs admission and every provider-facing effect after the gate releases.
+vi.mock("./server-methods/chat-send-handler.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./server-methods/chat-send-handler.js")>();
+  return {
+    ...actual,
+    handleTrustedInternalChatSend: async (
+      ...args: Parameters<typeof actual.handleTrustedInternalChatSend>
+    ) => {
+      const [options, onAdmissionOwned, inputOptions] = args;
+      await observation.beforeDetachedChat(options);
+      try {
+        return await actual.handleTrustedInternalChatSend(
+          {
+            ...options,
+            respond: (...response) => {
+              observation.detachedChatResponse(options, response[0]);
+              options.respond(...response);
+            },
+          },
+          onAdmissionOwned,
+          inputOptions,
+        );
+      } finally {
+        observation.detachedChatSettled(options);
+      }
+    },
+  };
+});
+
 afterEach(() => {
   observation.settled = () => {};
+  observation.beforeDetachedChat = async () => {};
+  observation.detachedChatSettled = () => {};
+  observation.detachedChatResponse = () => {};
   vi.restoreAllMocks();
   resetGatewayTestState();
 });
@@ -202,6 +243,12 @@ it(
           };
           try {
             await server.startupSettled;
+            const allowedIntroFinished = createDeferredCore();
+            observation.detachedChatSettled = (options) => {
+              if ((options.params as { agentId?: string }).agentId === "bot-allowed") {
+                allowedIntroFinished.resolve();
+              }
+            };
             const beforeAllowed = requests.length;
             const allowed = await client.request<AgentsCreateResult>(
               "agents.create",
@@ -225,6 +272,11 @@ it(
                 }),
               ]),
             );
+            await withinTest(allowedIntroFinished.promise, signal);
+            await vi.waitFor(() => expect(requests.length).toBeGreaterThan(beforeAllowed + 1), {
+              timeout: 10_000,
+            });
+            observation.detachedChatSettled = () => {};
 
             const readOnly = await connectDevice("read-only", ["operator.read"]);
             const beforeReadOnly = [...requests];
@@ -233,6 +285,55 @@ it(
             ).rejects.toThrow("missing scope: operator.admin");
             expect(requests).toEqual(beforeReadOnly);
             await expectNotCreated("bot-read-only");
+
+            const detachedOwner = await connectDevice("detached-owner", ["operator.admin"]);
+            const detachedReached = createDeferredCore();
+            const detachedRelease = createDeferredCore();
+            const detachedFinished = createDeferredCore();
+            const detachedResponses: boolean[] = [];
+            observation.beforeDetachedChat = async (options) => {
+              if ((options.params as { agentId?: string }).agentId === "bot-detached-revoked") {
+                detachedReached.resolve();
+                await detachedRelease.promise;
+              }
+            };
+            observation.detachedChatSettled = (options) => {
+              if ((options.params as { agentId?: string }).agentId === "bot-detached-revoked") {
+                detachedFinished.resolve();
+              }
+            };
+            observation.detachedChatResponse = (options, ok) => {
+              if ((options.params as { agentId?: string }).agentId === "bot-detached-revoked") {
+                detachedResponses.push(ok);
+              }
+            };
+            const beforeDetached = requests.length;
+            try {
+              const created = await detachedOwner.connected.request<AgentsCreateResult>(
+                "agents.create",
+                createParams("bot-detached-revoked"),
+              );
+              expect(created.onboarding?.status).toBe("completed");
+              await withinTest(detachedReached.promise, signal);
+              expect(requests.slice(beforeDetached)).toEqual([
+                { method: "POST", url: "/v1/responses" },
+              ]);
+              await client.request("device.token.revoke", {
+                deviceId: detachedOwner.identity.deviceId,
+                role: "operator",
+              });
+              detachedRelease.resolve();
+              await withinTest(detachedFinished.promise, signal);
+              expect(detachedResponses).toContain(false);
+              expect(requests.slice(beforeDetached)).toEqual([
+                { method: "POST", url: "/v1/responses" },
+              ]);
+            } finally {
+              detachedRelease.resolve();
+              observation.beforeDetachedChat = async () => {};
+              observation.detachedChatSettled = () => {};
+              observation.detachedChatResponse = () => {};
+            }
 
             const owner = await connectDevice("revoked-owner", ["operator.admin"]);
             const reached = createDeferredCore();
