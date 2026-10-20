@@ -389,7 +389,7 @@ describe("doctor session transcript repair", () => {
     showDoctorHealthSummary(ctx);
     const output = runtime.log.mock.calls.map(([line]) => String(line)).join("\n");
     for (const warning of warnings.slice(0, 5)) {
-      expect(output).toContain(warning);
+      expect(output).not.toContain(warning);
     }
     expect(issues).toEqual(originalIssues);
     expect(ctx.updateWarnings).toContain(
@@ -397,15 +397,9 @@ describe("doctor session transcript repair", () => {
     );
     expect(output).toContain("Active session transcript is missing.");
     expect(ctx.updateWarnings).toHaveLength(7);
-    expect(output).toContain(`${count} historical recovery notice(s)`);
-    expect(output).toContain(`${count - 5} omitted`);
-    expect(output).toContain("Recovery evidence remains retained");
-    expect(output).toContain("No action needed if expected conversations are visible");
-    expect(output).toContain(
-      "openclaw doctor --session-sqlite dry-run --session-sqlite-all-agents --json",
-    );
-    expect(output).not.toContain("history-5:");
-    expect(output.indexOf("Fix now:")).toBeLessThan(output.indexOf("Historical recovery notices:"));
+    expect(output).not.toContain("Historical recovery notices:");
+    expect(output).not.toContain(`${count} historical recovery notice(s)`);
+    expect(ctx.healthFindings).toEqual([]);
     expect(output.split("\n").length).toBeLessThan(20);
   });
 

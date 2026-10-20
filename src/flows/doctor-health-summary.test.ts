@@ -9,7 +9,12 @@ import {
   showDoctorHealthSummary,
 } from "./doctor-health-contribution.js";
 
+const { debug } = vi.hoisted(() => ({ debug: vi.fn() }));
+// mock-isolation: inspect diagnostic retention without writing the user's log files.
+vi.mock("../logging/subsystem.js", () => ({ createSubsystemLogger: () => ({ debug }) }));
+
 function context(shouldRepair = false): DoctorHealthFlowContext {
+  debug.mockClear();
   const runtime = { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
   return {
     runtime,
@@ -100,11 +105,11 @@ describe("Doctor current-state summary", () => {
     ).toEqual([rawWarning, "example/deferred: Deferred capture advisory"]);
   });
 
-  it("prioritizes current failures and explains history without diagnostic severity labels", () => {
+  it("shows actionable current problems and logs complete background findings", () => {
     const ctx = context();
     const sharedFindings: NonNullable<DoctorHealthFlowContext["healthFindings"]> = [];
     ctx.healthFindings = sharedFindings;
-    renderStructuredHealthFindings(ctx, [
+    const findings = [
       {
         checkId: "example/archive",
         severity: "warning",
@@ -120,26 +125,61 @@ describe("Doctor current-state summary", () => {
         fixHint: "Enable completion if wanted.",
       },
       {
+        checkId: "example/healthy",
+        severity: "info",
+        category: "fix-now",
+        message: "Gateway is healthy.",
+      },
+      {
         checkId: "example/current",
         severity: "error",
+        category: "historical",
         message: "Gateway cannot start.",
         path: "gateway.mode",
         fixHint: "Configure Gateway mode.",
       },
-    ]);
+      {
+        checkId: "example/actionable",
+        severity: "warning",
+        message: "Credentials expired.",
+        fixHint: "Sign in again.",
+      },
+      {
+        checkId: "example/maintainer",
+        severity: "error",
+        category: "recommended",
+        message: "Required plugin failed.",
+        fixHint: "Report this failure to the plugin maintainer.",
+      },
+    ] as const;
+    renderStructuredHealthFindings(ctx, findings);
     showDoctorHealthSummary(ctx);
     const output = vi.mocked(ctx.runtime.log).mock.calls.flat().join("\n");
-    expect(output.indexOf("Fix now:")).toBeLessThan(output.indexOf("Recommended improvements:"));
-    expect(output.indexOf("Recommended improvements:")).toBeLessThan(
-      output.indexOf("Historical recovery notices:"),
-    );
-    expect(ctx.runtime.error).toHaveBeenCalledWith("- Gateway cannot start.");
+    expect(output).toContain("Fix now:");
+    expect(output).toContain("Credentials expired.");
+    expect(output).toContain("Next step: Sign in again.");
     expect(output).toContain("Location: gateway.mode");
-    expect(output).toContain("Next step: No action needed if conversations are visible.");
+    expect(ctx.runtime.error).toHaveBeenCalledWith("- Gateway cannot start.");
+    expect(ctx.runtime.error).toHaveBeenCalledWith("- Required plugin failed.");
+    for (const message of [
+      "Original archive retained.",
+      "Optional setup improves completion.",
+      "Gateway is healthy.",
+      "Historical recovery notices:",
+      "Recommended improvements:",
+    ]) {
+      expect(output).not.toContain(message);
+    }
+    for (const finding of findings) {
+      expect(debug).toHaveBeenCalledWith("Doctor finding", {
+        ...finding,
+        consoleMessage: JSON.stringify(finding),
+      });
+    }
     expect(output).not.toContain("[warning]");
-    expect(output).not.toContain("example/archive");
     showDoctorHealthSummary(ctx);
-    expect(ctx.runtime.error).toHaveBeenCalledOnce();
+    expect(ctx.runtime.error).toHaveBeenCalledTimes(2);
+    expect(debug).toHaveBeenCalledTimes(findings.length);
     expect(ctx.healthFindings).toBe(sharedFindings);
     expect(sharedFindings).toEqual([]);
   });

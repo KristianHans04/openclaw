@@ -159,7 +159,7 @@ it("preserves original config bytes before Doctor relocates and repairs legacy s
       await runDoctorHealthFlow(runtime, { repair: true, nonInteractive: true });
       expect(repair).toHaveBeenCalledOnce();
       expect(fs.existsSync(expiredCapture)).toBe(false);
-      expect(runtime.log).toHaveBeenCalledWith(
+      expect(runtime.log).not.toHaveBeenCalledWith(
         `Retired superseded or expired standalone Doctor capture: ${expiredCapture}. Take a verified backup before an upgrade when you need a long-term recovery copy.`,
       );
       expect(fs.existsSync(legacyRoot)).toBe(false);
@@ -345,7 +345,7 @@ it("reuses the admitted original capture and refuses changed evidence before Doc
               `Original update recovery copy retained. For manual recovery: ${baseline.ref.manifestPath}.`,
           ),
           runtime.log.mock.calls.flat().join("\n"),
-        ).toHaveLength(2);
+        ).toHaveLength(0);
 
         const foreign = spawn(process.execPath, ["-e", "process.stdin.resume()"], {
           stdio: ["pipe", "ignore", "ignore"],

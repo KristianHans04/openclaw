@@ -307,15 +307,25 @@ openclaw channels status --probe
 
 ## Understanding findings
 
-Doctor's structured results list unresolved findings after repairs, in this order:
+Normal Doctor output shows unresolved current problems under **Fix now**, with a
+concrete next step and documentation. Blocking errors always appear, including
+failures that require a plugin maintainer's help. Repaired findings disappear
+from the final summary.
 
-- **Fix now:** current failures and checks that need attention. Follow the next step under the finding, then rerun Doctor to verify the result.
-- **Recommended improvements:** optional setup or tuning. Read the finding's benefit before deciding whether to apply it.
-- **Historical recovery notices:** retained evidence from an earlier migration or installation replacement. These do not establish a current failure. Verify expected conversations and current Gateway health before attempting recovery. Keep recovery archives.
+Optional improvements, informational results, and historical recovery notices
+stay out of the default summary. Saving, retaining, or retiring a recovery copy
+is bookkeeping, not a new problem. Recovery captures and updater warning receipts
+remain unchanged; hiding a notice does not delete its evidence or acknowledge it.
 
-A recovery copy saved before repair is protective bookkeeping. **No action is needed** merely because Doctor saved or retained it. Its manifest location is available for manual recovery. Saving a copy does not mean every plugin's private data is covered; follow any specific coverage notice separately.
+To see full structured findings and recovery-copy locations during a diagnostic
+run, use `openclaw --log-level debug doctor`. This uses existing debug logging;
+see [Logging](/logging) for file locations and level configuration. For read-only
+structured checks, use `openclaw doctor --lint --all --json --severity-min info`.
+That report covers registered checks; it does not run repair-time migrations.
 
-Successful repairs appear as changes, and resolved structured findings are removed from the final summary. Interactive prompts and repair progress still appear while Doctor runs. Checks that have not yet adopted structured findings retain their individual diagnostic panels.
+Successful repairs still appear as changes. Interactive prompts and repair
+progress remain visible. Checks that have not yet adopted structured findings
+retain their individual diagnostic panels.
 
 ### Auth and browser findings
 

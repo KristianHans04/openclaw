@@ -1,4 +1,5 @@
 import { normalizeUpdatePostInstallDoctorWarnings } from "../infra/update-doctor-result.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import type {
   DoctorContributionHealthCheck,
   DoctorHealthCheckContext,
@@ -161,35 +162,33 @@ export function showDoctorHealthSummary(
   ctx: Pick<DoctorHealthFlowContext, "runtime" | "healthFindings">,
 ): void {
   const findings = ctx.healthFindings?.splice(0) ?? [];
-  const groups = [
-    ["fix-now", "Fix now"],
-    ["recommended", "Recommended improvements"],
-    ["historical", "Historical recovery notices"],
-  ] as const;
-  for (const [category, title] of groups) {
-    const selected = findings.filter(
-      (finding) =>
-        (finding.category ?? (finding.severity === "info" ? "recommended" : "fix-now")) ===
-        category,
+  const log = createSubsystemLogger("doctor");
+  for (const finding of findings) {
+    // Debug console lines do not automatically print structured metadata.
+    log.debug("Doctor finding", { ...finding, consoleMessage: JSON.stringify(finding) });
+  }
+  const selected = findings.filter(
+    (finding) =>
+      finding.severity === "error" ||
+      (finding.severity === "warning" && (finding.category ?? "fix-now") === "fix-now"),
+  );
+  if (selected.length === 0) {
+    return;
+  }
+  ctx.runtime.log("Fix now:");
+  for (const finding of selected) {
+    const write = finding.severity === "error" ? ctx.runtime.error : ctx.runtime.log;
+    write(`- ${finding.message}`);
+    if (finding.path !== undefined) {
+      const line = finding.line !== undefined ? `:${finding.line}` : "";
+      ctx.runtime.log(`  Location: ${finding.path}${line}`);
+    }
+    if (finding.fixHint !== undefined) {
+      ctx.runtime.log(`  Next step: ${finding.fixHint}`);
+    }
+    ctx.runtime.log(
+      `  Docs: ${finding.docsUrl ?? "https://docs.openclaw.ai/cli/doctor/running#understanding-findings"}`,
     );
-    if (selected.length === 0) {
-      continue;
-    }
-    ctx.runtime.log(`${title}:`);
-    for (const finding of selected) {
-      const write = finding.severity === "error" ? ctx.runtime.error : ctx.runtime.log;
-      write(`- ${finding.message}`);
-      if (finding.path !== undefined) {
-        const line = finding.line !== undefined ? `:${finding.line}` : "";
-        ctx.runtime.log(`  Location: ${finding.path}${line}`);
-      }
-      if (finding.fixHint !== undefined) {
-        ctx.runtime.log(`  Next step: ${finding.fixHint}`);
-      }
-      ctx.runtime.log(
-        `  Docs: ${finding.docsUrl ?? "https://docs.openclaw.ai/cli/doctor/running#understanding-findings"}`,
-      );
-    }
   }
 }
 

@@ -2864,8 +2864,8 @@ describe("doctor health contributions", () => {
       ]);
       expect(ctx.healthOk).toBe(severity === "info");
       showDoctorHealthSummary(ctx);
-      expect(ctx.runtime.log).toHaveBeenCalledWith(
-        severity === "info" ? "Recommended improvements:" : "Fix now:",
+      expect(vi.mocked(ctx.runtime.log).mock.calls.flat()).toEqual(
+        severity === "info" ? [] : expect.arrayContaining(["Fix now:"]),
       );
       expect(ctx.runtime.exit).not.toHaveBeenCalled();
     },

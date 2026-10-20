@@ -214,13 +214,8 @@ describe("interactive Doctor auth migration", () => {
       stdout.mockRestore();
       if (outcome === "failed") {
         expect(output).not.toContain("Doctor warnings");
-        expect(summary).toContain("Historical recovery notices");
-        expect(
-          summary.match(/Could not finalize an interrupted auth profile archive/g),
-        ).toHaveLength(1);
-        expect(summary).toContain("invalid pending auth profile migration receipt");
-        expect(summary).toContain("Next step: Keep the retained sources and archives");
-        expect(summary).toContain("/cli/doctor/running#auth-migration-recovery");
+        expect(summary).not.toContain("Historical recovery notices");
+        expect(summary).not.toContain("Could not finalize an interrupted auth profile archive");
         expect(ctx.updateWarnings).toEqual([
           expect.stringContaining("Could not finalize an interrupted auth profile archive"),
         ]);

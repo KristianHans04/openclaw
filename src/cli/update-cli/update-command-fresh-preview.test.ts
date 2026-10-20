@@ -834,7 +834,7 @@ it("Doctor sees an already-current update's completed history after original-sta
     await expect(readHistory.mock.results[activeRead]!.value).resolves.toEqual([]);
     const completedRead = readHistory.mock.calls.findIndex(([input]) => input?.active !== true);
     await expect(readHistory.mock.results[completedRead]!.value).resolves.toContainEqual(finished);
-    expect(runtime.log).toHaveBeenCalledWith(
+    expect(runtime.log).not.toHaveBeenCalledWith(
       expect.stringContaining(
         "Recovery copy saved before repair. No action needed. For manual recovery:",
       ),

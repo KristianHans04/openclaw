@@ -12,6 +12,7 @@ import {
   type UpdateDoctorWriteAuthority,
 } from "../infra/update-doctor-result.js";
 import { readUpdateRunDriver } from "../infra/update-run-driver.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { hasCommandProcessCleanupError } from "../process/exec-result.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { resolveDoctorUpdateAdmission } from "./doctor-maintenance-admission.js";
@@ -53,6 +54,7 @@ export async function preserveDoctorOriginalState(params: {
   writeAuthority?: UpdateDoctorWriteAuthority;
   fullIntegrityCheck?: boolean;
 }): Promise<{ findings: readonly HealthFinding[]; warnings: readonly string[] }> {
+  const log = createSubsystemLogger("doctor");
   const findings: HealthFinding[] = [];
   const warnings: string[] = [];
   const docsUrl =
@@ -67,7 +69,7 @@ export async function preserveDoctorOriginalState(params: {
   };
   assertCallerCurrent();
   if (updateInProgress && !runId) {
-    params.runtime.log(
+    log.debug(
       "Original update recovery copy is unavailable. Doctor will continue without creating another copy or replacing retained originals.",
     );
     return { findings, warnings };
@@ -95,7 +97,7 @@ export async function preserveDoctorOriginalState(params: {
         assertCurrent,
       });
       assertCurrent();
-      params.runtime.log(
+      log.debug(
         retained
           ? `Original update recovery copy retained. For manual recovery: ${retained.ref.manifestPath}.`
           : "Original update recovery copy is unavailable. Doctor will continue without creating another copy or replacing retained originals.",
@@ -116,7 +118,7 @@ export async function preserveDoctorOriginalState(params: {
           assertCurrent,
         });
         for (const directory of retirement.retired) {
-          params.runtime.log(
+          log.debug(
             `Retired superseded or expired standalone Doctor capture: ${directory}. Take a verified backup before an upgrade when you need a long-term recovery copy.`,
           );
         }
@@ -133,9 +135,7 @@ export async function preserveDoctorOriginalState(params: {
           });
         }
       } catch (error) {
-        params.runtime.log(
-          `Standalone Doctor capture retirement unavailable: ${formatErrorMessage(error)}`,
-        );
+        log.debug(`Standalone Doctor capture retirement unavailable: ${formatErrorMessage(error)}`);
       }
     };
     const activationMarker = params.env[IMAGE_ACTIVATION_MARKER_ENV]?.trim() || undefined;
@@ -144,7 +144,7 @@ export async function preserveDoctorOriginalState(params: {
       : undefined;
     if (activationCapture) {
       assertCurrent();
-      params.runtime.log(
+      log.debug(
         `This container already retained a pre-repair capture (${activationCapture}); Doctor skipped a repeated full capture. Repair-specific backups still apply.`,
       );
       await retireExpiredCaptures(activationCapture);
@@ -188,7 +188,7 @@ export async function preserveDoctorOriginalState(params: {
         docsUrl,
       })),
     );
-    params.runtime.log(
+    log.debug(
       `Recovery copy saved before repair. No action needed. For manual recovery: ${captured.ref.manifestPath}.`,
     );
     if (activationMarker) {
@@ -197,7 +197,7 @@ export async function preserveDoctorOriginalState(params: {
         await fs.writeFile(activationMarker, standaloneRunId, { flag: "wx", mode: 0o600 });
       } catch (error) {
         params.runtime.log(
-          `Container activation marker unavailable: ${formatErrorMessage(error)}. The next container start takes another full capture.`,
+          `Container activation marker unavailable: ${formatErrorMessage(error)}. The next container start takes another full capture. Check write permissions for the container activation marker before restarting.`,
         );
       }
     }

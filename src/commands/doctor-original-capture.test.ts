@@ -115,11 +115,7 @@ it("keeps one sealed container capture, skips repeats, and still retires old cap
     log.mockClear();
     await preserve(process.cwd());
     expect(capture).toHaveBeenCalledOnce();
-    expect(log.mock.calls).toEqual([
-      [
-        `This container already retained a pre-repair capture (${runId}); Doctor skipped a repeated full capture. Repair-specific backups still apply.`,
-      ],
-    ]);
+    expect(log).not.toHaveBeenCalled();
     // Repeat starts keep the container's capture while older ones still age out.
     expect(retire).toHaveBeenCalledTimes(2);
     expect(retire).toHaveBeenLastCalledWith(expect.objectContaining({ keepRunId: runId }));
