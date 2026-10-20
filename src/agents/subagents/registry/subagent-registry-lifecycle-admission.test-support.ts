@@ -7,12 +7,9 @@ import {
 import {
   createRunEntry,
   readLifecycleRun,
-  type LifecycleControllerFixtureOptions,
+  type LifecycleTestDrivers,
 } from "./subagent-registry-lifecycle-controller.test-support.js";
-import type {
-  SubagentLifecycleController,
-  SubagentLifecycleOptions,
-} from "./subagent-registry-lifecycle.js";
+import type { SubagentLifecycleOptions } from "./subagent-registry-lifecycle.js";
 import { observeRootWork } from "./subagent-registry.browser-cleanup.test-support.js";
 import type { RequesterSettleWakeState } from "./subagent-registry.types.js";
 
@@ -20,15 +17,20 @@ type RequesterSettleWakeParams = Parameters<
   SubagentLifecycleOptions["maybeWakeRequesterAfterAllChildrenSettled"]
 >[0];
 
+const inspectionError = (reason: string, pending = false) =>
+  new AgentDatabaseAdmissionError(
+    createAgentDatabaseInspectionRefusal({
+      agentId: "main",
+      paths: ["/synthetic/main.sqlite"],
+      reason,
+      pending,
+    }),
+  );
+
 export function registerRequesterDatabaseAdmissionTests({
   createLifecycleController,
   waitForLifecycleState,
-}: {
-  createLifecycleController: (
-    options: LifecycleControllerFixtureOptions,
-  ) => SubagentLifecycleController;
-  waitForLifecycleState: (assertion: () => void) => Promise<void>;
-}) {
+}: Pick<LifecycleTestDrivers, "createLifecycleController" | "waitForLifecycleState">) {
   it.each(["ready", "cancelled"])(
     "retains a requester wake through pending database inspection until %s",
     async (outcome) => {
@@ -41,14 +43,7 @@ export function registerRequesterDatabaseAdmissionTests({
         rearmGeneration: 1,
       };
       const entry = createRunEntry({ endedAt: 4_000, requesterSettleWake: wake });
-      const pending = new AgentDatabaseAdmissionError(
-        createAgentDatabaseInspectionRefusal({
-          agentId: "main",
-          paths: ["/synthetic/main.sqlite"],
-          pending: true,
-          reason: "Startup inspection is still running",
-        }),
-      );
+      const pending = inspectionError("Startup inspection is still running", true);
       let ready = false;
       const settleWake = vi.fn(async (params: RequesterSettleWakeParams) => {
         if (!ready) {
@@ -94,13 +89,7 @@ export function registerRequesterDatabaseAdmissionTests({
       const warn = vi.fn();
       const settleWake = vi.fn(async () => {
         throw kind === "inspection-failed"
-          ? new AgentDatabaseAdmissionError(
-              createAgentDatabaseInspectionRefusal({
-                agentId: "main",
-                paths: ["/synthetic/main.sqlite"],
-                reason: "Integrity check failed",
-              }),
-            )
+          ? inspectionError("Integrity check failed")
           : new Error("wake exploded");
       });
       const controller = createLifecycleController({

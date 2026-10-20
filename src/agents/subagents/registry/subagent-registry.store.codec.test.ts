@@ -1,21 +1,17 @@
 import { expect, it } from "vitest";
+import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
 import { normalizeSubagentRunState } from "./subagent-delivery-state.js";
 import { bindSubagentRunRecord, rowToSubagentRunRecord } from "./subagent-registry.store.codec.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 function createRun(): SubagentRunRecord {
-  return {
+  return createSubagentRunRecord({
     runId: "captured",
-    childSessionKey: "agent:main:subagent:captured",
-    requesterSessionKey: "agent:main:main",
-    requesterDisplayKey: "main",
-    task: "preserve captured payload",
-    cleanup: "keep",
     createdAt: 1,
     execution: { status: "terminal", endedAt: 2 },
     completion: { required: true },
     delivery: { status: "pending" },
-  };
+  });
 }
 
 it("persists the child owner and identity independently of a redirected transcript", () => {

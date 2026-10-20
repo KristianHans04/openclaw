@@ -11,13 +11,11 @@ import {
   upsertSessionEntryCore,
 } from "../../../config/sessions/session-accessor.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
+import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
 import { persistSubagentSessionTiming } from "./subagent-registry-helpers.js";
-import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 describe("subagent session failures", () => {
-  afterEach(() => {
-    clearRuntimeConfigSnapshot();
-  });
+  afterEach(clearRuntimeConfigSnapshot);
 
   it.each([
     { outcomeStatus: "error", interrupted: false },
@@ -39,13 +37,9 @@ describe("subagent session failures", () => {
           updatedAt: Date.now(),
         });
         const reason = `Repository base ref is missing. ${"details ".repeat(80)}`.trim();
-        const record: SubagentRunRecord = {
+        const record = createSubagentRunRecord({
           runId: "run-setup-failure",
           childSessionKey: target.sessionKey,
-          requesterSessionKey: "agent:main:main",
-          requesterDisplayKey: "main",
-          task: "prepare child worktree",
-          cleanup: "keep",
           createdAt: 1_000,
           execution: {
             status: "terminal",
@@ -57,16 +51,17 @@ describe("subagent session failures", () => {
               error: `[tool calls omitted]\n<final>${reason}</final>`,
             },
           },
-        };
+        });
         await persistSubagentSessionTiming(record);
-        expect(loadSessionEntry(target)).toMatchObject({
+        const session = loadSessionEntry(target);
+        expect(session).toMatchObject({
           status: interrupted ? "interrupted" : outcomeStatus === "error" ? "failed" : "timeout",
           lastRunError: interrupted
             ? "Run interrupted by a Gateway restart."
             : expect.stringContaining("Repository base ref is missing."),
           ...(interrupted ? { abortedLastRun: true } : {}),
         });
-        const lastRunError = loadSessionEntry(target)?.lastRunError;
+        const lastRunError = session?.lastRunError;
         expect(lastRunError?.length).toBeLessThanOrEqual(160);
         await persistSubagentSessionTiming(record);
         expect(

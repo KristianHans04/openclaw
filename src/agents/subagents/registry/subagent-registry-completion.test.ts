@@ -1,12 +1,9 @@
-/**
- * Regression coverage for subagent completion bookkeeping.
- * Verifies outcome comparison and exactly-once lifecycle hook emission.
- */
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import { SqliteWorkerError } from "../../../infra/sqlite-worker-contract.js";
+import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
 import { SUBAGENT_ENDED_REASON_COMPLETE } from "./subagent-lifecycle-events.js";
-import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import { emitSubagentEndedHookOnce } from "./subagent-registry-completion.js";
 import { getSubagentRunRuntimeKey } from "./subagent-run-generation.js";
 
 const lifecycleMocks = vi.hoisted(() => ({
@@ -17,26 +14,12 @@ const lifecycleMocks = vi.hoisted(() => ({
 vi.mock("../../../plugins/hook-runner-global.js", () => ({
   getGlobalHookRunner: lifecycleMocks.getGlobalHookRunner,
 }));
-function createRunEntry(): SubagentRunRecord {
-  return {
-    runId: "run-1",
-    childSessionKey: "agent:main:subagent:child-1",
-    requesterSessionKey: "agent:main:main",
-    requesterDisplayKey: "main",
-    task: "task",
-    cleanup: "keep",
-    createdAt: Date.now(),
-    execution: { status: "running" },
-  };
-}
 
 describe("emitSubagentEndedHookOnce", () => {
-  let mod: typeof import("./subagent-registry-completion.js");
-
   const createEmitParams = (
-    overrides?: Partial<Parameters<typeof mod.emitSubagentEndedHookOnce>[0]>,
+    overrides?: Partial<Parameters<typeof emitSubagentEndedHookOnce>[0]>,
   ) => {
-    const entry = overrides?.entry ?? createRunEntry();
+    const entry = overrides?.entry ?? createSubagentRunRecord({ runId: "run-1" });
     return {
       entry,
       reason: SUBAGENT_ENDED_REASON_COMPLETE,
@@ -50,41 +33,22 @@ describe("emitSubagentEndedHookOnce", () => {
     };
   };
 
-  beforeAll(async () => {
-    mod = await import("./subagent-registry-completion.js");
-  });
-
   beforeEach(() => {
     lifecycleMocks.getGlobalHookRunner.mockClear();
     lifecycleMocks.runSubagentEnded.mockClear();
   });
 
-  it("leaves completion unmarked when no subagent_ended hook ran", async () => {
-    lifecycleMocks.getGlobalHookRunner.mockReturnValue({
-      hasHooks: () => false,
-      runSubagentEnded: lifecycleMocks.runSubagentEnded,
-    });
-
-    const params = createEmitParams();
-    const emitted = await mod.emitSubagentEndedHookOnce(params);
-
-    expect(emitted).toBe(false);
-    expect(lifecycleMocks.runSubagentEnded).not.toHaveBeenCalled();
-    expect(params.entry.endedHookEmittedAt).toBeUndefined();
-    expect(params.recordEmitted).not.toHaveBeenCalled();
-  });
-
-  it("returns false when the global hook runner is not initialized yet", async () => {
-    lifecycleMocks.getGlobalHookRunner.mockReturnValue(null);
-
-    const params = createEmitParams();
-    const emitted = await mod.emitSubagentEndedHookOnce(params);
-
-    expect(emitted).toBe(false);
-    expect(lifecycleMocks.runSubagentEnded).not.toHaveBeenCalled();
-    expect(params.recordEmitted).not.toHaveBeenCalled();
-    expect(params.entry.endedHookEmittedAt).toBeUndefined();
-  });
+  it.each([null, { hasHooks: () => false, runSubagentEnded: lifecycleMocks.runSubagentEnded }])(
+    "leaves completion unmarked with an unavailable hook runner: %j",
+    async (runner) => {
+      lifecycleMocks.getGlobalHookRunner.mockReturnValue(runner);
+      const params = createEmitParams();
+      expect(await emitSubagentEndedHookOnce(params)).toBe(false);
+      expect(lifecycleMocks.runSubagentEnded).not.toHaveBeenCalled();
+      expect(params.recordEmitted).not.toHaveBeenCalled();
+      expect(params.entry.endedHookEmittedAt).toBeUndefined();
+    },
+  );
 
   it.each(["committed", "refused", "unknown"] as const)(
     "joins the ended-hook stamp and retains the emitted fact when %s",
@@ -106,14 +70,14 @@ describe("emitSubagentEndedHookOnce", () => {
           return write.promise;
         }),
       });
-      const pending = mod.emitSubagentEndedHookOnce(params).then(
+      const pending = emitSubagentEndedHookOnce(params).then(
         (result) => ({ result }),
         (error: unknown) => ({ error }),
       );
       await entered.promise;
       expect(params.inFlightOwners.has(getSubagentRunRuntimeKey(params.entry))).toBe(true);
       expect(params.entry.endedHookEmittedAt).toEqual(expect.any(Number));
-      await expect(mod.emitSubagentEndedHookOnce(params)).resolves.toBe(false);
+      await expect(emitSubagentEndedHookOnce(params)).resolves.toBe(false);
       if (outcome === "committed") {
         write.resolve();
       } else {
@@ -124,7 +88,7 @@ describe("emitSubagentEndedHookOnce", () => {
       );
       expect(params.inFlightOwners.has(getSubagentRunRuntimeKey(params.entry))).toBe(false);
       expect(params.entry.endedHookEmittedAt).toEqual(expect.any(Number));
-      await expect(mod.emitSubagentEndedHookOnce(params)).resolves.toBe(false);
+      await expect(emitSubagentEndedHookOnce(params)).resolves.toBe(false);
       expect(lifecycleMocks.runSubagentEnded).toHaveBeenCalledOnce();
       expect(params.recordEmitted).toHaveBeenCalledOnce();
     },
