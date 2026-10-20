@@ -285,15 +285,16 @@ name the child session that failed, even when its parent has finished or continu
 working. Select the warning to open the child session and acknowledge its failure;
 a subagent chat opens without adding a sidebar row.
 
-Choose **Create new agent** in the agent selector to open a new bot's chat
-immediately. A selected **New agent** row appears first in the agent list, and
-the chat previews “Hi! What would you like to call me?” while OpenClaw checks
-that inference is usable. If the check fails, OpenClaw explains the problem and
-does not create an agent. After verification, it saves the agent and greeting,
-and enables the composer. The bot handles its name and identity when you reply.
-Every message stays in that conversation; leaving and returning resumes the same
-chat. Its stable internal ID can appear in the URL, but never as its display name
-or subtitle. The latest created agent stays first after a reload.
+Choose **Create new agent** in the agent selector to open a name-and-avatar
+dialog. Enter a name and choose or generate a Blobster avatar. On submission,
+the agent appears first in the list and its own chat opens immediately while
+OpenClaw checks that inference is usable. If the check fails, OpenClaw explains
+the problem and does not create an agent. After verification, it saves the agent
+and a greeting that uses its name, then asks you to choose one role. The agent
+follows up by asking for more detail about your goal before helping. Every
+message stays in that conversation; leaving and returning resumes the same
+chat. Its stable internal ID can appear in the URL, but never as its display
+name or subtitle. The latest created agent stays first after a reload.
 
 The selector starts with **Create new agent**, using a plus-circle icon, followed
 by **Show all** when multiple agents are available. Compact avatar-and-name rows
