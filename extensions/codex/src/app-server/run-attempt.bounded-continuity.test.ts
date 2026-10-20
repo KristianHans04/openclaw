@@ -69,10 +69,11 @@ describe("Codex bounded assistant continuity", () => {
       appendToolPair(manager, index);
     }
     const explanation = "Migrate the blue database first, verify the checksum, then switch reads.";
-    manager.appendMessage({
+    const mirroredAnswer = {
       ...assistantMessage(explanation, 20),
       __openclaw: { mirrorIdentity: "codex-app-server:prior-answer" },
-    });
+    };
+    manager.appendMessage(mirroredAnswer);
     const history = await readMirroredSessionHistoryMessages({ ...params, agentId: "main" });
     expect(history).toMatchObject([
       ...Array.from({ length: 4 }, (_, index) => [

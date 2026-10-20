@@ -16,7 +16,7 @@ export function registerRequiredRootThreadPolicyTests({
     input: Pick<LifecycleInput, "client"> & Partial<LifecycleInput>,
   ) => ReturnType<typeof startOrResumeThreadImpl>;
 }) {
-  const createRootedParams = () => {
+  const createRootedParams = (): LifecycleInput["params"] => {
     const { sessionFile, workspaceDir } = createPaths();
     return { ...createParams(sessionFile, workspaceDir), requireWorkspaceOnly: true };
   };

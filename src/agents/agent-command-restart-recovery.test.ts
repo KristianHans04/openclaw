@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { expect, it } from "vitest";
 import {
   getRestartRecoveryTerminalDeliveryEvidence as readEvidence,
@@ -77,7 +78,12 @@ type PayloadOutcome = NonNullable<
 function project(result: TerminalDeliveryInput) {
   const persisted = JSON.stringify([{ runId: "original", ...capture(result) }]);
   const restartRecoveryTerminalDeliveryEvidence = JSON.parse(persisted);
-  return readEvidence({ ...session, restartRecoveryTerminalDeliveryEvidence }, "original");
+  const evidence = readEvidence(
+    { ...session, restartRecoveryTerminalDeliveryEvidence },
+    "original",
+  );
+  assert(evidence, "Expected persisted restart-recovery evidence");
+  return evidence;
 }
 
 const classify = createDirectAnnounceResponseClassifier({
