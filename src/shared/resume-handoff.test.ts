@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { decodeResumeHandoff, encodeResumeHandoff } from "./resume-handoff.js";
 
 const gatewayUrl = "wss://gateway.example/openclaw";
+const handoff = { version: 1, sessionKey: "agent:main:alpha", gatewayUrl };
+const error = "Invalid --handoff payload. Copy a fresh command from the Control UI.";
 
 function encodeBytes(bytes: Uint8Array): string {
   let binary = "";
@@ -45,58 +47,20 @@ describe("resume handoff contract", () => {
     ["padding", "Zg=="],
     ["noncanonical encoding", "Zh"],
     ["null", encodeJson(null)],
-    [
-      "extra field",
-      encodeJson({ version: 1, sessionKey: "agent:main:alpha", gatewayUrl, token: "nope" }),
-    ],
-    ["wrong URL type", encodeJson({ version: 1, sessionKey: "agent:main:alpha", gatewayUrl: 42 })],
-    ["key C0 control", encodeJson({ version: 1, sessionKey: "agent:main:bad\nkey", gatewayUrl })],
-    [
-      "URL C0 control",
-      encodeJson({ version: 1, sessionKey: "agent:main:alpha", gatewayUrl: `${gatewayUrl}\u0000` }),
-    ],
-    [
-      "non-WebSocket URL",
-      encodeJson({
-        version: 1,
-        sessionKey: "agent:main:alpha",
-        gatewayUrl: "https://gateway.example",
-      }),
-    ],
-    [
-      "URL userinfo",
-      encodeJson({
-        version: 1,
-        sessionKey: "agent:main:alpha",
-        gatewayUrl: "wss://user@gateway.example/ws",
-      }),
-    ],
-    [
-      "URL query",
-      encodeJson({
-        version: 1,
-        sessionKey: "agent:main:alpha",
-        gatewayUrl: "wss://gateway.example/ws?x=1",
-      }),
-    ],
-    [
-      "URL fragment",
-      encodeJson({
-        version: 1,
-        sessionKey: "agent:main:alpha",
-        gatewayUrl: "wss://gateway.example/ws#x",
-      }),
-    ],
-    ["invalid qualified key", encodeJson({ version: 1, sessionKey: "main", gatewayUrl })],
+    ["extra field", encodeJson({ ...handoff, token: "nope" })],
+    ["wrong URL type", encodeJson({ ...handoff, gatewayUrl: 42 })],
+    ["key C0 control", encodeJson({ ...handoff, sessionKey: "agent:main:bad\nkey" })],
+    ["URL C0 control", encodeJson({ ...handoff, gatewayUrl: `${gatewayUrl}\u0000` })],
+    ["non-WebSocket URL", encodeJson({ ...handoff, gatewayUrl: "https://gateway.example" })],
+    ["URL userinfo", encodeJson({ ...handoff, gatewayUrl: "wss://user@gateway.example/ws" })],
+    ["URL query", encodeJson({ ...handoff, gatewayUrl: "wss://gateway.example/ws?x=1" })],
+    ["URL fragment", encodeJson({ ...handoff, gatewayUrl: "wss://gateway.example/ws#x" })],
+    ["invalid qualified key", encodeJson({ ...handoff, sessionKey: "main" })],
   ])("rejects %s", (_name, encoded) => {
-    expect(() => decodeResumeHandoff(encoded)).toThrow(
-      "Invalid --handoff payload. Copy a fresh command from the Control UI.",
-    );
+    expect(() => decodeResumeHandoff(encoded)).toThrow(error);
   });
 
   it("refuses to encode an empty Gateway URL", () => {
-    expect(() => encodeResumeHandoff({ sessionKey: "agent:main:alpha", gatewayUrl: "" })).toThrow(
-      "Invalid --handoff payload. Copy a fresh command from the Control UI.",
-    );
+    expect(() => encodeResumeHandoff({ ...handoff, gatewayUrl: "" })).toThrow(error);
   });
 });

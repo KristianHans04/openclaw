@@ -1,4 +1,3 @@
-// Requirement tests cover merging and formatting runtime requirements.
 import { describe, expect, it } from "vitest";
 import { evaluateRequirementsFromMetadataWithRemote } from "./requirements.js";
 
@@ -20,48 +19,33 @@ describe("requirements evaluation", () => {
     const metadata = { requires: { anyBins: ["a", "b"] } };
 
     expect(evaluate({ metadata }).missing.anyBins).toEqual(["a", "b"]);
-    expect(
-      evaluate({
-        metadata,
-        hasLocalBin: (bin) => bin === "b",
-      }).missing.anyBins,
-    ).toStrictEqual([]);
-    expect(
-      evaluate({
-        metadata,
-        remote: { hasAnyBin: (bins) => bins.includes("b") },
-      }).missing.anyBins,
-    ).toStrictEqual([]);
+    expect(evaluate({ metadata, hasLocalBin: (bin) => bin === "b" }).missing.anyBins).toStrictEqual(
+      [],
+    );
+    const remote = { hasAnyBin: (bins: string[]) => bins.includes("b") };
+    expect(evaluate({ metadata, remote }).missing.anyBins).toStrictEqual([]);
   });
 
   it("normalizes macos and accepts local or remote platforms", () => {
-    expect(evaluate({ metadata: { os: ["linux"] } }).missing.os).toStrictEqual([]);
-    expect(
-      evaluate({
-        metadata: { os: ["macos"] },
-        localPlatform: "darwin",
-      }).missing.os,
-    ).toStrictEqual([]);
-    expect(
-      evaluate({
-        metadata: { os: ["macos"] },
-        remote: { platforms: ["darwin"] },
-      }).missing.os,
-    ).toStrictEqual([]);
-    expect(evaluate({ metadata: { os: ["darwin"] } }).missing.os).toEqual(["darwin"]);
+    const missingOs = (os: string, overrides: Partial<EvaluationParams> = {}) =>
+      evaluate({ metadata: { os: [os] }, ...overrides }).missing.os;
+    expect(missingOs("linux")).toStrictEqual([]);
+    expect(missingOs("macos", { localPlatform: "darwin" })).toStrictEqual([]);
+    expect(missingOs("macos", { remote: { platforms: ["darwin"] } })).toStrictEqual([]);
+    expect(missingOs("darwin")).toEqual(["darwin"]);
   });
 
   it("reports every missing category through the public wrapper", () => {
+    const required = {
+      bins: ["node"],
+      anyBins: ["bun", "deno"],
+      env: ["OPENAI_API_KEY", "PRESENT"],
+      config: ["browser.enabled", "gateway.enabled"],
+      os: ["darwin"],
+    };
+    const { os, ...requires } = required;
     const result = evaluate({
-      metadata: {
-        requires: {
-          bins: ["node"],
-          anyBins: ["bun", "deno"],
-          env: ["OPENAI_API_KEY", "PRESENT"],
-          config: ["browser.enabled", "gateway.enabled"],
-        },
-        os: ["darwin"],
-      },
+      metadata: { requires, os },
       remote: {
         hasBin: (bin) => bin === "node",
         hasAnyBin: () => false,
@@ -71,13 +55,7 @@ describe("requirements evaluation", () => {
       isConfigSatisfied: (path) => path === "gateway.enabled",
     });
 
-    expect(result.required).toEqual({
-      bins: ["node"],
-      anyBins: ["bun", "deno"],
-      env: ["OPENAI_API_KEY", "PRESENT"],
-      config: ["browser.enabled", "gateway.enabled"],
-      os: ["darwin"],
-    });
+    expect(result.required).toEqual(required);
     expect(result.missing).toEqual({
       bins: [],
       anyBins: ["bun", "deno"],
@@ -120,13 +98,7 @@ describe("requirements evaluation", () => {
       },
     });
 
-    expect(result.missing).toEqual({
-      bins: [],
-      anyBins: [],
-      env: [],
-      config: [],
-      os: ["darwin"],
-    });
+    expect(result.missing).toEqual({ bins: [], anyBins: [], env: [], config: [], os: ["darwin"] });
     expect(result.eligible).toBe(false);
   });
 });
