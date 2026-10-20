@@ -70,15 +70,7 @@ describe("agent RPC metadata-read authority", () => {
           }
           return result;
         });
-      const save = mediaStore.saveMediaBuffer;
-      const saved: mediaStore.SavedMedia[] = [];
-      const writeObserver = vi
-        .spyOn(mediaStore, "saveMediaBuffer")
-        .mockImplementation(async (...args) => {
-          const result = await save(...args);
-          saved.push(result);
-          return result;
-        });
+      const writeObserver = vi.spyOn(mediaStore, "saveMediaBuffer");
       const params = {
         message: "Inspect this synthetic offloaded image",
         attachments: [
@@ -108,7 +100,7 @@ describe("agent RPC metadata-read authority", () => {
         const acceptedSource = rpcSourceTesting.get(f.runId);
         expect(acceptedSource).toBeDefined();
         expect(isRpcSourceExecuting(acceptedSource)).toBe(false);
-        expect(saved).toEqual([]);
+        expect(writeObserver).not.toHaveBeenCalled();
         if (mode === "stopped") {
           expect(await f.stop()).toMatchObject({ ok: true, payload: { aborted: true } });
         } else if (mode === "replaced") {
@@ -132,8 +124,11 @@ describe("agent RPC metadata-read authority", () => {
             response: { ok: true, payload: { status: "accepted" } },
           });
           const prepared = await execution.entered;
-          expect(saved).toHaveLength(1);
-          const stored = expectDefined(saved[0], "persisted offloaded image");
+          expect(writeObserver).toHaveBeenCalledOnce();
+          const stored = expectDefined(
+            await writeObserver.mock.results[0]?.value,
+            "persisted offloaded image",
+          );
           expect(await fs.readFile(stored.path)).toEqual(image);
           const recorder = expectDefined(prepared.userTurn.recorder, "admitted user-turn recorder");
           const withPendingInput = expectDefined(recorder.withPendingInput, "pending-input owner");
@@ -146,7 +141,6 @@ describe("agent RPC metadata-read authority", () => {
         } else {
           // Both observations matter: cleanup must not conceal an unauthorized write.
           expect.soft(writeObserver).not.toHaveBeenCalled();
-          expect.soft(saved).toEqual([]);
           expect.soft(await inboundMediaFiles()).toEqual(beforeMedia);
           expect
             .soft((await loadSessionEntryAsync(f.sessionKey, { agentId: "main" })).entry)

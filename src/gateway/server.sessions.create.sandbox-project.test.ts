@@ -75,15 +75,10 @@ test.each(["all", "off"] as const)(
       return { entries: catalog.entries, routeVariants: catalog.routeVariants };
     };
     await initializeSessionReadContext(context);
-    const checkoutOptions = async (projectId: string) => {
+    const request = async (method: string, params: Record<string, unknown>) => {
       const respond = vi.fn();
       await handleGatewayRequest({
-        req: {
-          type: "req",
-          id: "checkout-options",
-          method: "projects.checkoutOptions",
-          params: { projectId, agentId: "main" },
-        },
+        req: { type: "req", id: method, method, params: { agentId: "main", ...params } },
         client,
         context,
         respond,
@@ -92,6 +87,8 @@ test.each(["all", "off"] as const)(
       expect(respond).toHaveBeenCalledOnce();
       return respond.mock.calls[0];
     };
+    const checkoutOptions = (projectId: string) =>
+      request("projects.checkoutOptions", { projectId });
     if (mode === "off") {
       activeCfg = {
         ...cfg,
@@ -132,38 +129,16 @@ test.each(["all", "off"] as const)(
       { projectId: project.id, worktree: true },
       { projectId: "workspace:other", worktree: true },
     ]) {
-      const respond = vi.fn();
-      await handleGatewayRequest({
-        req: {
-          type: "req",
-          id: `${projectId}-${worktree}`,
-          method: "sessions.create",
-          params: {
-            agentId: "main",
-            projectId,
-            ...(worktree ? { worktree: true } : {}),
-          },
-        },
-        client,
-        context,
-        respond,
-        isWebchatConnect: () => false,
-      });
-      expect(respond).toHaveBeenCalledOnce();
-      const [ok, result, error] = respond.mock.calls[0]!;
-      const created = {
-        ok,
-        error,
-        payload: result as
-          | {
-              key: string;
-              worktree: { id: string; path: string; branch: string };
-            }
-          | undefined,
-      };
+      const [ok, result, error] = (await request("sessions.create", {
+        projectId,
+        ...(worktree ? { worktree: true } : {}),
+      }))!;
       if (worktree && projectId === project.id) {
-        expect(created.ok, JSON.stringify(created.error)).toBe(true);
-        const payload = expectDefined(created.payload, "managed sandbox session payload");
+        expect(ok, JSON.stringify(error)).toBe(true);
+        const payload = expectDefined(result, "managed sandbox session payload") as {
+          key: string;
+          worktree: { id: string; path: string; branch: string };
+        };
         const record = await managedWorktrees.findLiveByOwner("session", payload.key);
         expect(record).toMatchObject({
           id: payload.worktree.id,
@@ -182,7 +157,7 @@ test.each(["all", "off"] as const)(
         );
         continue;
       }
-      expect(created).toMatchObject({
+      expect({ ok, error }).toMatchObject({
         ok: false,
         error: {
           code: "INVALID_REQUEST",

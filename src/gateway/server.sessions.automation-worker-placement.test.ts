@@ -40,7 +40,10 @@ async function releasedPlacementStore(sessionId: string, placementSessionKey: st
   return placementStore;
 }
 
-async function seedIdleAutomationRunPlacement(sessionId: string, placementSessionKey: string) {
+async function seedIdleAutomationRunPlacement(
+  sessionId: string,
+  placementSessionKey = automationRunAlias(sessionId),
+) {
   await createSessionStoreDir();
   await writeSessionStore({ entries: { [AUTOMATION_BASE_KEY]: sessionStoreEntry(sessionId) } });
   const placementStore = await releasedPlacementStore(sessionId, placementSessionKey);
@@ -52,29 +55,29 @@ async function seedIdleAutomationRunPlacement(sessionId: string, placementSessio
   return placementStore;
 }
 
-function requireOk(label: string, result: Awaited<ReturnType<typeof directSessionReq>>) {
-  if (!result.ok) {
-    throw new Error(`${label} failed: ${JSON.stringify(result.error)}`);
-  }
+async function expectDeleted(
+  placementStore: Awaited<ReturnType<typeof releasedPlacementStore>>,
+  sessionId: string,
+  key = AUTOMATION_BASE_KEY,
+  context: Record<string, unknown> = {},
+) {
+  const deleted = await directSessionReq(
+    "sessions.delete",
+    { key },
+    {
+      context: { workerSessionPlacementService: placementStore, ...context },
+    },
+  );
+  expect(deleted.ok, JSON.stringify(deleted.error)).toBe(true);
+  expect(deleted.payload).toMatchObject({ deleted: true });
+  expect(placementStore.get(sessionId)).toBeUndefined();
+  expect((await loadSessionEntryAsync(key)).entry).toBeUndefined();
 }
 
 test("sessions.delete retires an automation's idle run-alias placement through its base key", async () => {
   const sessionId = "sess-automation-idle-delete";
-  const placementStore = await seedIdleAutomationRunPlacement(
-    sessionId,
-    automationRunAlias(sessionId),
-  );
-
-  const deleted = await directSessionReq(
-    "sessions.delete",
-    { key: AUTOMATION_BASE_KEY },
-    { context: { workerSessionPlacementService: placementStore } },
-  );
-
-  requireOk("sessions.delete", deleted);
-  expect(deleted.payload).toMatchObject({ deleted: true });
-  expect(placementStore.get(sessionId)).toBeUndefined();
-  expect((await loadSessionEntryAsync(AUTOMATION_BASE_KEY)).entry).toBeUndefined();
+  const placementStore = await seedIdleAutomationRunPlacement(sessionId);
+  await expectDeleted(placementStore, sessionId);
 });
 
 test("sessions.delete still accepts an automation's exact run-alias key", async () => {
@@ -90,24 +93,12 @@ test("sessions.delete still accepts an automation's exact run-alias key", async 
   });
   const placementStore = await releasedPlacementStore(sessionId, alias);
 
-  const deleted = await directSessionReq(
-    "sessions.delete",
-    { key: alias },
-    { context: { workerSessionPlacementService: placementStore } },
-  );
-
-  requireOk("sessions.delete", deleted);
-  expect(deleted.payload).toMatchObject({ deleted: true });
-  expect(placementStore.get(sessionId)).toBeUndefined();
-  expect((await loadSessionEntryAsync(alias)).entry).toBeUndefined();
+  await expectDeleted(placementStore, sessionId, alias);
 });
 
 test("sessions.patch archives an automation base session over its idle run-alias placement", async () => {
   const sessionId = "sess-automation-idle-archive";
-  const placementStore = await seedIdleAutomationRunPlacement(
-    sessionId,
-    automationRunAlias(sessionId),
-  );
+  const placementStore = await seedIdleAutomationRunPlacement(sessionId);
 
   const archived = await directSessionReq(
     "sessions.patch",
@@ -115,7 +106,7 @@ test("sessions.patch archives an automation base session over its idle run-alias
     { context: { workerSessionPlacementService: placementStore } },
   );
 
-  requireOk("sessions.patch", archived);
+  expect(archived.ok, JSON.stringify(archived.error)).toBe(true);
   expect((await loadSessionEntryAsync(AUTOMATION_BASE_KEY)).entry?.archivedAt).toEqual(
     expect.any(Number),
   );
@@ -156,24 +147,12 @@ test("sessions.delete reclaims an automation's active run-alias placement before
   // The dispatch fixture derives its environment from REQUEST.sessionId; only the key differs.
   await harness.service.dispatch({ ...REQUEST, sessionKey: automationRunAlias(REQUEST.sessionId) });
 
-  const deleted = await directSessionReq(
-    "sessions.delete",
-    { key: AUTOMATION_BASE_KEY },
-    {
-      context: {
-        workerEnvironmentService: createWorkerInferenceDrainService(
-          () => ({ drained: Promise.resolve(), hasWork: () => false, release: () => {} }),
-          harness.environments,
-        ),
-        workerPlacementDispatchService: harness.service,
-        workerSessionPlacementService: placementStore,
-      },
-    },
-  );
-
-  requireOk("sessions.delete", deleted);
-  expect(deleted.payload).toMatchObject({ deleted: true });
+  await expectDeleted(placementStore, REQUEST.sessionId, AUTOMATION_BASE_KEY, {
+    workerEnvironmentService: createWorkerInferenceDrainService(
+      () => ({ drained: Promise.resolve(), hasWork: () => false, release: () => {} }),
+      harness.environments,
+    ),
+    workerPlacementDispatchService: harness.service,
+  });
   expect(harness.environments.destroy).toHaveBeenCalledOnce();
-  expect(placementStore.get(REQUEST.sessionId)).toBeUndefined();
-  expect((await loadSessionEntryAsync(AUTOMATION_BASE_KEY)).entry).toBeUndefined();
 });

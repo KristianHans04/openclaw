@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type ServerResponse } from "node:http";
 import { expect, it } from "vitest";
+import {
+  listenLoopback,
+  readRequestText,
+} from "../../test/helpers/gateway-integration-fixtures.js";
 import { writeOpenAiResponsesText } from "../../test/helpers/openai-responses-sse.js";
 import { resolveSessionEntryResetFreshnessAsync } from "../config/sessions/entry-freshness.js";
 import { loadSessionEntry, replaceSessionEntry } from "../config/sessions/session-accessor.js";
@@ -40,21 +44,10 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
     });
   });
   let gateway: Awaited<ReturnType<typeof startGatewayWithClient>> | undefined;
-  const transcript: string[] = [];
   try {
     setHeartbeatsEnabled(false);
-    await new Promise<void>((resolve, reject) => {
-      provider.once("error", reject);
-      provider.listen(0, "127.0.0.1", resolve);
-    });
-    const address = provider.address();
-    if (!address || typeof address === "string") {
-      throw new Error("mock provider did not bind");
-    }
-    const model = buildMockOpenAiResponsesProvider(
-      `http://127.0.0.1:${address.port}/v1`,
-      "rollover-proof",
-    );
+    const providerUrl = await listenLoopback(provider);
+    const model = buildMockOpenAiResponsesProvider(`${providerUrl}/v1`, "rollover-proof");
     const cfg = {
       session: { reset: { mode: "daily", atHour: 4 } },
       agents: {
@@ -84,25 +77,24 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
         controlUi: { allowedOrigins: ["http://localhost"] },
       },
     } satisfies OpenClawConfig;
+    const connection = {
+      token: "rollover-proof",
+      scopes: ["operator.admin", "operator.read", "operator.write"],
+    };
     gateway = await startGatewayWithClient({
       cfg,
       configPath: await createGatewayConfigPath(home.tempHome),
-      token: "rollover-proof",
+      ...connection,
       ...(nativeReconnect ? { clientName: "openclaw-macos" as const, mode: "ui" as const } : {}),
-      scopes: ["operator.admin", "operator.read", "operator.write"],
     });
     if (nativeReconnect) {
       await disconnectGatewayClient(gateway.client);
       gateway.client = await connectGatewayClient({
         url: `ws://127.0.0.1:${gateway.port}`,
-        token: "rollover-proof",
+        ...connection,
         clientName: "openclaw-macos",
         mode: "ui",
-        scopes: ["operator.admin", "operator.read", "operator.write"],
       });
-      console.info(
-        "RECONNECT_PROOF authenticated=true signedDevice=true client=openclaw-macos mode=ui reconnected=true",
-      );
     }
     const scope = {
       agentId: "main",
@@ -131,35 +123,24 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
     if (nativeReconnect) {
       expect(freshness.state).toBe("stale");
       expect(staleReason).toBe("daily");
-      console.info("RECONNECT_PROOF before_send freshness=stale reason=daily sessionAgeHours=48");
-      let resumed;
-      try {
-        resumed = await sendAndWait(gateway, "Resume the matching displayed session.", {
-          sessionId: seededSessionId,
-          __controlUiReconnectResume: true,
-        });
-      } catch (error) {
-        console.info(
-          `RECONNECT_PROOF marked_send rejected=${JSON.stringify(error instanceof Error ? error.message : String(error))}`,
-        );
-        throw error;
-      }
+      const resumed = await sendAndWait(gateway, "Resume the matching displayed session.", {
+        sessionId: seededSessionId,
+        __controlUiReconnectResume: true,
+      });
       const retained = loadSessionEntry(scope);
       expect(resumed.status, resumed.error).toBe("ok");
       expect(resumed.terminalReply?.text).toBe(replyText);
-      expect(retained?.sessionId).toBe(seededSessionId);
-      expect(retained?.lifecycleRevision).toBe("seed-revision");
-      expect(retained?.sessionStartedAt).toBe(staleAt);
-      console.info(
-        "RECONNECT_PROOF marked_send status=ok replyCompleted=true matchingSessionPreserved=true lifecyclePreserved=true startedAtPreserved=true",
-      );
+      expect(retained).toMatchObject({
+        sessionId: seededSessionId,
+        lifecycleRevision: "seed-revision",
+        sessionStartedAt: staleAt,
+      });
       const publicClient = await connectGatewayClient({
         url: `ws://127.0.0.1:${gateway.port}`,
-        token: "rollover-proof",
+        ...connection,
         clientName: "webchat-ui",
         origin: "http://localhost",
         mode: "webchat",
-        scopes: ["operator.admin", "operator.read", "operator.write"],
       });
       try {
         await expect(
@@ -172,9 +153,6 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
           }),
         ).rejects.toThrow("unexpected property '__controlUiReconnectResume'");
         expect(loadSessionEntry(scope)?.lifecycleRevision).toBe("seed-revision");
-        console.info(
-          "RECONNECT_PROOF public_client client=webchat-ui mode=webchat authenticated=true markerRejected=true lifecycleUnchanged=true",
-        );
       } finally {
         await disconnectGatewayClient(publicClient);
       }
@@ -186,16 +164,6 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
     const drainTimeout = (result.error ?? result.terminalReply?.text ?? "").includes(
       "timed out draining work",
     );
-    transcript.push(
-      `chat.send sessionKey=${sessionKey}`,
-      `seeded sessionId=${seededSessionId} freshness=${freshness.state} staleReason=${staleReason ?? "none"}`,
-      "sessionStartedAt is 48h before the daily boundary atHour=4",
-      `status=${result.status} error=${JSON.stringify(result.error ?? "")} sessionId=${rolled?.sessionId ?? "missing"} reply=${JSON.stringify(result.terminalReply?.text ?? "")}`,
-      `sessionStartedAtRefreshed=${(rolled?.sessionStartedAt ?? 0) > staleAt + 24 * 60 * 60 * 1000}`,
-      `lifecycleRotated=${rolled?.lifecycleRevision !== "seed-revision"}`,
-      `drainTimeout=${drainTimeout}`,
-    );
-    console.info(transcript.join("\n"));
     expect(freshness.state).toBe("stale");
     expect(staleReason).toBe("daily");
     expect(result.status, result.error).toBe("ok");
@@ -204,11 +172,6 @@ async function verifyDashboardRollover(nativeReconnect: boolean) {
     expect(rolled?.sessionStartedAt).toBeGreaterThan(staleAt + 24 * 60 * 60 * 1000);
     expect(rolled?.lifecycleRevision).not.toBe("seed-revision");
     expect(drainTimeout).toBe(false);
-    if (nativeReconnect) {
-      console.info(
-        "RECONNECT_PROOF subsequent_send markerAbsent=true status=ok replyCompleted=true lifecycleRotated=true startedAtRefreshed=true matchingSessionIdPreserved=true",
-      );
-    }
   } finally {
     if (gateway) {
       await disconnectGatewayClient(gateway.client);
@@ -233,11 +196,7 @@ async function readAndComplete(
     response.writeHead(404).end();
     return;
   }
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  JSON.parse(await readRequestText(request));
   writeOpenAiResponsesText(response, {
     text: replyText,
     messageId: `msg-${randomUUID()}`,

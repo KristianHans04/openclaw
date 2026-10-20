@@ -41,23 +41,23 @@ afterAll(async () => {
   await harness.close();
 });
 
-function sendAgentRequest(params: {
-  ws: WebSocket;
-  id: string;
-  idempotencyKey: string;
-  message: string;
-}): void {
-  params.ws.send(
+function sendAgentRequest(
+  ws: WebSocket,
+  id: string,
+  idempotencyKey: string,
+  message: string,
+): void {
+  ws.send(
     JSON.stringify({
       type: "req",
-      id: params.id,
+      id,
       method: "agent",
       params: {
-        message: params.message,
+        message,
         sessionKey: "main",
         deliver: true,
         bestEffortDeliver: true,
-        idempotencyKey: params.idempotencyKey,
+        idempotencyKey,
       },
     }),
   );
@@ -83,36 +83,32 @@ describe("gateway agent RPC contracts", () => {
     };
     const first = await harness.openClient(clientOptions);
     const orderedResponses: AgentResponse[] = [];
+    const isResponse = (frame: AgentResponse) =>
+      frame.type === "res" && frame.id === "agent-contract";
     const recordResponse = (data: RawData) => {
       const frame = JSON.parse(rawDataToString(data)) as AgentResponse;
-      if (frame.type === "res" && frame.id === "agent-contract") {
+      if (isResponse(frame)) {
         orderedResponses.push(frame);
       }
     };
     first.ws.on("message", recordResponse);
     const acceptedPromise = onceMessage<AgentResponse>(
       first.ws,
-      (frame) =>
-        frame.type === "res" &&
-        frame.id === "agent-contract" &&
-        frame.payload?.status === "accepted",
+      (frame) => isResponse(frame) && frame.payload?.status === "accepted",
     );
     const terminalPromise = onceMessage<AgentResponse>(
       first.ws,
-      (frame) =>
-        frame.type === "res" &&
-        frame.id === "agent-contract" &&
-        frame.payload?.status !== "accepted",
+      (frame) => isResponse(frame) && frame.payload?.status !== "accepted",
     );
 
     let terminal: AgentResponse;
     try {
-      sendAgentRequest({
-        ws: first.ws,
-        id: "agent-contract",
+      sendAgentRequest(
+        first.ws,
+        "agent-contract",
         idempotencyKey,
-        message: "prove the gateway agent RPC contract",
-      });
+        "prove the gateway agent RPC contract",
+      );
 
       await acceptedPromise;
       await awaitGateBeforeSettlement(
@@ -133,19 +129,13 @@ describe("gateway agent RPC contracts", () => {
       runCompletion.resolve();
       terminal = await terminalPromise;
       expect(orderedResponses.map((frame) => frame.payload?.status)).toEqual(["accepted", "ok"]);
+      const response = { type: "res", id: "agent-contract", ok: true };
       expect(orderedResponses[0]).toMatchObject({
-        type: "res",
-        id: "agent-contract",
-        ok: true,
-        payload: {
-          runId: idempotencyKey,
-          status: "accepted",
-        },
+        ...response,
+        payload: { runId: idempotencyKey, status: "accepted" },
       });
       expect(terminal).toMatchObject({
-        type: "res",
-        id: "agent-contract",
-        ok: true,
+        ...response,
         payload: {
           runId: idempotencyKey,
           status: "ok",
@@ -170,12 +160,12 @@ describe("gateway agent RPC contracts", () => {
         second.ws,
         (frame) => frame.type === "res" && frame.id === "agent-contract-replay",
       );
-      sendAgentRequest({
-        ws: second.ws,
-        id: "agent-contract-replay",
+      sendAgentRequest(
+        second.ws,
+        "agent-contract-replay",
         idempotencyKey,
-        message: "this duplicate must not execute",
-      });
+        "this duplicate must not execute",
+      );
 
       const replay = await replayPromise;
       expect(replay.payload).toEqual(terminal.payload);
