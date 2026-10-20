@@ -8,6 +8,41 @@ afterEach(() => {
   resetPluginRuntimeStateForTest();
 });
 
+function registryEntry(
+  id: string,
+  gateway: {
+    loginWithQrStart: ReturnType<typeof vi.fn>;
+    loginWithQrWait?: ReturnType<typeof vi.fn>;
+  },
+  aliases: string[] = [],
+) {
+  return {
+    pluginId: id,
+    source: "test",
+    plugin: {
+      id,
+      config: { listAccountIds: () => ["default"] },
+      meta: { aliases },
+      gatewayMethods: gateway.loginWithQrWait
+        ? ["web.login.start", "web.login.wait"]
+        : ["web.login.start"],
+      gateway,
+    },
+  };
+}
+
+function requestContext(withLogger = false) {
+  const cfg = {};
+  return {
+    getRuntimeConfig: () => cfg,
+    isConfigReloadSettled: () => true,
+    getRuntimeSnapshot: () => ({ channels: {}, channelAccounts: {} }),
+    stopChannel: vi.fn(),
+    startChannel: vi.fn(),
+    ...(withLogger ? { logGateway: { warn: vi.fn(), debug: vi.fn() } } : {}),
+  } as unknown as GatewayRequestContext;
+}
+
 describe("web QR login Gateway dispatch", () => {
   it("routes an alias and forwards the opaque session key through the Gateway", async () => {
     const weixinStart = vi.fn().mockResolvedValue({
@@ -22,45 +57,18 @@ describe("web QR login Gateway dispatch", () => {
     const whatsappWait = vi.fn();
     setActivePluginRegistry(
       createTestRegistry([
-        {
-          pluginId: "whatsapp",
-          source: "test",
-          plugin: {
-            id: "whatsapp",
-            config: { listAccountIds: () => ["default"] },
-            meta: { aliases: [] },
-            gatewayMethods: ["web.login.start", "web.login.wait"],
-            gateway: {
-              loginWithQrStart: whatsappStart,
-              loginWithQrWait: whatsappWait,
-            },
-          },
-        },
-        {
-          pluginId: "openclaw-weixin",
-          source: "test",
-          plugin: {
-            id: "openclaw-weixin",
-            config: { listAccountIds: () => ["default"] },
-            meta: { aliases: ["weixin", "wechat"] },
-            gatewayMethods: ["web.login.start", "web.login.wait"],
-            gateway: {
-              loginWithQrStart: weixinStart,
-              loginWithQrWait: weixinWait,
-            },
-          },
-        },
+        registryEntry("whatsapp", {
+          loginWithQrStart: whatsappStart,
+          loginWithQrWait: whatsappWait,
+        }),
+        registryEntry(
+          "openclaw-weixin",
+          { loginWithQrStart: weixinStart, loginWithQrWait: weixinWait },
+          ["weixin", "wechat"],
+        ),
       ]),
     );
-    const cfg = {};
-    const context = {
-      getRuntimeConfig: () => cfg,
-      isConfigReloadSettled: () => true,
-      getRuntimeSnapshot: () => ({ channels: {}, channelAccounts: {} }),
-      stopChannel: vi.fn(),
-      startChannel: vi.fn(),
-      logGateway: { warn: vi.fn(), debug: vi.fn() },
-    } as unknown as GatewayRequestContext;
+    const context = requestContext(true);
     const client = {
       connId: "conn-test",
       connect: {
@@ -124,30 +132,10 @@ describe("web QR login Gateway dispatch", () => {
     const globalWhatsappStart = vi.fn();
     const scopedWeixinStart = vi.fn().mockResolvedValue({ connected: true });
     const globalRegistry = createTestRegistry([
-      {
-        pluginId: "whatsapp",
-        source: "test",
-        plugin: {
-          id: "whatsapp",
-          config: { listAccountIds: () => ["default"] },
-          meta: { aliases: [] },
-          gatewayMethods: ["web.login.start"],
-          gateway: { loginWithQrStart: globalWhatsappStart },
-        },
-      },
+      registryEntry("whatsapp", { loginWithQrStart: globalWhatsappStart }),
     ]);
     const scopedRegistry = createTestRegistry([
-      {
-        pluginId: "openclaw-weixin",
-        source: "test",
-        plugin: {
-          id: "openclaw-weixin",
-          config: { listAccountIds: () => ["default"] },
-          meta: { aliases: ["wechat"] },
-          gatewayMethods: ["web.login.start"],
-          gateway: { loginWithQrStart: scopedWeixinStart },
-        },
-      },
+      registryEntry("openclaw-weixin", { loginWithQrStart: scopedWeixinStart }, ["wechat"]),
     ]);
     setActivePluginRegistry(globalRegistry);
     const methodRegistry = {
@@ -155,14 +143,6 @@ describe("web QR login Gateway dispatch", () => {
       pluginRegistry: scopedRegistry,
     };
     const respond = vi.fn();
-    const cfg = {};
-    const context = {
-      getRuntimeConfig: () => cfg,
-      isConfigReloadSettled: () => true,
-      getRuntimeSnapshot: () => ({ channels: {}, channelAccounts: {} }),
-      stopChannel: vi.fn(),
-      startChannel: vi.fn(),
-    } as unknown as GatewayRequestContext;
 
     await handleGatewayRequest({
       methodRegistry,
@@ -175,7 +155,7 @@ describe("web QR login Gateway dispatch", () => {
       respond,
       client: null,
       isWebchatConnect: () => false,
-      context,
+      context: requestContext(),
     });
 
     expect(globalWhatsappStart).not.toHaveBeenCalled();

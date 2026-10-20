@@ -10,6 +10,17 @@ import {
 import type { GatewayRequestContext, GatewayRequestHandlerOptions, RespondFn } from "./types.js";
 import { defineValidatedGatewayMethod } from "./validation.js";
 
+function createRequest(params: Record<string, unknown>): GatewayRequestHandlerOptions {
+  return {
+    req: { type: "req", id: "validation", method: "conversations.list" },
+    params,
+    client: null,
+    isWebchatConnect: () => false,
+    respond: vi.fn<RespondFn>(),
+    context: {} as GatewayRequestContext,
+  };
+}
+
 describe("typed gateway method validation", () => {
   it("binds schema-derived payloads without losing the admitted request authority", async () => {
     expectTypeOf<
@@ -23,7 +34,7 @@ describe("typed gateway method validation", () => {
       Parameters<typeof defineValidatedGatewayMethod<"conversations.list">>[1]
     >();
 
-    const respond = vi.fn<RespondFn>();
+    const options = createRequest({ agentId: "main", limit: 5 });
     const handler = defineValidatedGatewayMethod(
       "conversations.list",
       validateConversationListParams,
@@ -34,23 +45,13 @@ describe("typed gateway method validation", () => {
         reply(true, { agentId: params.agentId, limit: params.limit });
       },
     );
-    const options: GatewayRequestHandlerOptions = {
-      req: { type: "req", id: "typed-1", method: "conversations.list" },
-      params: { agentId: "main", limit: 5 },
-      client: null,
-      isWebchatConnect: () => false,
-      respond,
-      context: {} as GatewayRequestContext,
-    };
-
     await handler(options);
-
-    expect(respond).toHaveBeenCalledWith(true, { agentId: "main", limit: 5 });
+    expect(options.respond).toHaveBeenCalledWith(true, { agentId: "main", limit: 5 });
   });
 
   it("rejects malformed payloads before invoking the typed handler", async () => {
     const action = vi.fn();
-    const respond = vi.fn<RespondFn>();
+    const options = createRequest({ agentId: "main", limit: "five" });
     const mapError = vi.fn(() => errorShape(ErrorCodes.UNAVAILABLE, "method failed"));
     const handler = defineValidatedGatewayMethod(
       "conversations.list",
@@ -59,18 +60,10 @@ describe("typed gateway method validation", () => {
       mapError,
     );
 
-    await handler({
-      req: { type: "req", id: "typed-2", method: "conversations.list" },
-      params: { agentId: "main", limit: "five" },
-      client: null,
-      isWebchatConnect: () => false,
-      respond,
-      context: {} as GatewayRequestContext,
-    });
-
+    await handler(options);
     expect(action).not.toHaveBeenCalled();
     expect(mapError).not.toHaveBeenCalled();
-    expect(respond).toHaveBeenCalledWith(
+    expect(options.respond).toHaveBeenCalledWith(
       false,
       undefined,
       expect.objectContaining({
@@ -82,15 +75,7 @@ describe("typed gateway method validation", () => {
 
   it.each([false, true])("maps handler failures after validation (async: %s)", async (async) => {
     const failure = new Error("method failed");
-    const respond = vi.fn<RespondFn>();
-    const options: GatewayRequestHandlerOptions = {
-      req: { type: "req", id: "mapped-1", method: "conversations.list" },
-      params: { agentId: "main" },
-      client: null,
-      isWebchatConnect: () => false,
-      respond,
-      context: {} as GatewayRequestContext,
-    };
+    const options = createRequest({ agentId: "main" });
     const handler = defineValidatedGatewayMethod(
       "conversations.list",
       validateConversationListParams,
@@ -109,7 +94,7 @@ describe("typed gateway method validation", () => {
 
     await handler(options);
 
-    expect(respond).toHaveBeenCalledExactlyOnceWith(
+    expect(options.respond).toHaveBeenCalledExactlyOnceWith(
       false,
       undefined,
       errorShape(ErrorCodes.UNAVAILABLE, "method failed"),

@@ -31,22 +31,20 @@ it("preserves the workspace file when editor authority expires during write prep
     return opened;
   });
 
-  const error = await updateWorkspaceFile(
-    tempDir,
-    "notes.txt",
-    "unapproved replacement",
-    createHash("sha256").update(original).digest("hex"),
-    () => {
-      if (!authorized) {
-        throw revoked;
-      }
-    },
-  ).then(
-    () => undefined,
-    (caught: unknown) => caught,
-  );
+  await expect(
+    updateWorkspaceFile(
+      tempDir,
+      "notes.txt",
+      "unapproved replacement",
+      createHash("sha256").update(original).digest("hex"),
+      () => {
+        if (!authorized) {
+          throw revoked;
+        }
+      },
+    ),
+  ).rejects.toBe(revoked);
   expect(authorized).toBe(false);
-  expect(error).toBe(revoked);
   expect(await readFile(filePath, "utf8")).toBe(original);
 });
 
@@ -57,76 +55,55 @@ type FileHandleRead = (
   position: number | null,
 ) => Promise<{ bytesRead: number; buffer: Uint8Array }>;
 
-async function getFileHandleRead(filePath: string) {
-  const probe = await open(filePath, "r");
-  const fileHandlePrototype = Object.getPrototypeOf(probe) as { read: FileHandleRead };
-  await probe.close();
-  return fileHandlePrototype;
+async function readPrefix(
+  content: string | Buffer,
+  maxBytes = 100,
+  chunkSize?: number,
+  eofRead?: number,
+) {
+  const tempDir = tempDirs.make("openclaw-workspace-fs-prefix-");
+  const filePath = path.join(tempDir, "notes.txt");
+  await writeFile(filePath, content);
+  let readCount = 0;
+  if (chunkSize !== undefined) {
+    const probe = await open(filePath, "r");
+    const fileHandlePrototype = Object.getPrototypeOf(probe) as { read: FileHandleRead };
+    await probe.close();
+    const originalRead = fileHandlePrototype.read;
+    vi.spyOn(fileHandlePrototype, "read").mockImplementation(async function (
+      this: unknown,
+      target,
+      offset,
+      length,
+      position,
+    ) {
+      if (++readCount === eofRead) {
+        return { bytesRead: 0, buffer: target };
+      }
+      return await originalRead.call(this, target, offset, Math.min(length, chunkSize), position);
+    });
+  }
+  const result = await readWorkspaceFilePrefix(tempDir, "notes.txt", maxBytes);
+  assert(result && result !== "unsupported");
+  return { result, readCount };
 }
 
 describe("readWorkspaceFilePrefix", () => {
   it("fills the bounded prefix when the handle serves short reads", async () => {
-    const tempDir = tempDirs.make("openclaw-workspace-fs-prefix-");
-    const filePath = path.join(tempDir, "notes.txt");
     const content = Buffer.from("prefix-bytes-that-must-not-be-truncated");
-    await writeFile(filePath, content);
-
-    const fileHandlePrototype = await getFileHandleRead(filePath);
-    const originalRead = fileHandlePrototype.read;
-    vi.spyOn(fileHandlePrototype, "read").mockImplementation(async function (
-      this: unknown,
-      target,
-      offset,
-      length,
-      position,
-    ) {
-      return await originalRead.call(this, target, offset, Math.min(length, 1), position);
-    });
-
-    const result = await readWorkspaceFilePrefix(tempDir, "notes.txt", 100);
-
-    assert(result && result !== "unsupported");
+    const { result } = await readPrefix(content, 100, 1);
     expect(result.buffer).toEqual(content);
-    expect(result?.canonicalPath).toBe("notes.txt");
-    expect(result?.stat.size).toBe(content.length);
+    expect(result).toMatchObject({ canonicalPath: "notes.txt", stat: { size: content.length } });
   });
 
   it("returns bytes read before an explicit EOF", async () => {
-    const tempDir = tempDirs.make("openclaw-workspace-fs-prefix-eof-");
-    const filePath = path.join(tempDir, "notes.txt");
-    await writeFile(filePath, "prefix");
-
-    const fileHandlePrototype = await getFileHandleRead(filePath);
-    const originalRead = fileHandlePrototype.read;
-    let readCount = 0;
-    vi.spyOn(fileHandlePrototype, "read").mockImplementation(async function (
-      this: unknown,
-      target,
-      offset,
-      length,
-      position,
-    ) {
-      readCount += 1;
-      if (readCount === 2) {
-        return { bytesRead: 0, buffer: target };
-      }
-      return await originalRead.call(this, target, offset, Math.min(length, 3), position);
-    });
-
-    const result = await readWorkspaceFilePrefix(tempDir, "notes.txt", 100);
-
-    assert(result && result !== "unsupported");
+    const { result, readCount } = await readPrefix("prefix", 100, 3, 2);
     expect(result.buffer.toString()).toBe("pre");
     expect(readCount).toBe(2);
   });
 
   it("still bounds the returned prefix to maxBytes", async () => {
-    const tempDir = tempDirs.make("openclaw-workspace-fs-prefix-bound-");
-    await writeFile(path.join(tempDir, "notes.txt"), "bounded-prefix");
-
-    const result = await readWorkspaceFilePrefix(tempDir, "notes.txt", 7);
-
-    assert(result && result !== "unsupported");
+    const { result } = await readPrefix("bounded-prefix", 7);
     expect(result.buffer.toString()).toBe("bounded");
   });
 });

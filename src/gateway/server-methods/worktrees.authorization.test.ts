@@ -28,26 +28,21 @@ function worktreeRecord(repoRoot: string): ManagedWorktreeRecord {
   };
 }
 
-async function dispatchCreate(params: { repoRoot: string; scopes: string[]; workspace: string }) {
-  const create = vi.fn(async () => worktreeRecord(params.repoRoot));
+async function dispatchCreate(repoRoot: string, workspace: string, scopes: string[]) {
+  const create = vi.fn(async () => worktreeRecord(repoRoot));
   const handler = createWorktreesHandlers({ create } as never)["worktrees.create"];
   if (!handler) {
     throw new Error("worktrees.create handler is not registered");
   }
   const respond = vi.fn();
   await handleGatewayRequest({
-    req: {
-      type: "req",
-      id: "req-worktree-create",
-      method: "worktrees.create",
-      params: { repoRoot: params.repoRoot },
-    },
+    req: { type: "req", id: "create", method: "worktrees.create", params: { repoRoot } },
     respond,
     client: {
       connId: "conn-worktree-create",
       connect: {
         role: "operator",
-        scopes: params.scopes,
+        scopes,
         client: { id: "test", version: "1", platform: "test", mode: "test" },
         minProtocol: 1,
         maxProtocol: 1,
@@ -56,7 +51,7 @@ async function dispatchCreate(params: { repoRoot: string; scopes: string[]; work
     isWebchatConnect: () => false,
     context: {
       getRuntimeConfig: () => ({
-        agents: { entries: { main: { workspace: params.workspace } } },
+        agents: { entries: { main: { workspace } } },
       }),
       logGateway: { warn: vi.fn() },
     } as unknown as Parameters<typeof handleGatewayRequest>[0]["context"],
@@ -71,11 +66,7 @@ describe("worktrees.create authorization", () => {
     const repoRoot = path.join(workspace, "project");
     await fs.mkdir(repoRoot);
 
-    const { create, respond } = await dispatchCreate({
-      repoRoot,
-      scopes: ["operator.write"],
-      workspace,
-    });
+    const { create, respond } = await dispatchCreate(repoRoot, workspace, ["operator.write"]);
 
     expect(create).toHaveBeenCalledWith({
       repoRoot,
@@ -93,11 +84,7 @@ describe("worktrees.create authorization", () => {
     const outside = path.join(root, "outside");
     await Promise.all([fs.mkdir(workspace), fs.mkdir(outside)]);
 
-    const write = await dispatchCreate({
-      repoRoot: outside,
-      scopes: ["operator.write"],
-      workspace,
-    });
+    const write = await dispatchCreate(outside, workspace, ["operator.write"]);
     expect(write.create).not.toHaveBeenCalled();
     expect(write.respond).toHaveBeenCalledWith(
       false,
@@ -113,11 +100,7 @@ describe("worktrees.create authorization", () => {
       }),
     );
 
-    const admin = await dispatchCreate({
-      repoRoot: outside,
-      scopes: ["operator.admin"],
-      workspace,
-    });
+    const admin = await dispatchCreate(outside, workspace, ["operator.admin"]);
     expect(admin.create).toHaveBeenCalledWith(
       expect.objectContaining({ repoRoot: outside, runSetupScript: true }),
     );
