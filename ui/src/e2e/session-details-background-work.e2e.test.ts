@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { Locator } from "playwright";
 import { expect, it } from "vitest";
 import type { SessionProcessSummary } from "../../../packages/gateway-protocol/src/schema/session-processes.js";
 import type { GatewaySessionRow } from "../api/types.ts";
@@ -77,62 +78,42 @@ const children: SessionFixture[] = [
   child("i18n", "Locale baseline", ended("done", 12_000, 700_000), 700_000),
 ];
 
-const processes: SessionProcessSummary[] = [
-  {
-    processId: "dev-server",
-    instanceId: "dev-server-1",
-    name: "pnpm ui:dev --port 5173",
-    status: "running",
-    startedAt: now - 1_380_000,
-    tail: "ready in 412 ms",
+function processRow(
+  processId: string,
+  name: string,
+  offset: number,
+  tail: string,
+  result?: { status: "completed" | "failed"; endedAt: number; exitCode: number },
+): SessionProcessSummary {
+  return {
+    processId,
+    instanceId: `${processId}-1`,
+    name,
+    startedAt: now - offset,
+    tail,
     truncated: false,
-    canStop: true,
-  },
-  {
-    processId: "watch-tests",
-    instanceId: "watch-tests-1",
-    name: "node scripts/run-vitest.mjs run ui/src/pages/chat",
     status: "running",
-    startedAt: now - 74_000,
-    tail: "",
-    truncated: false,
-    canStop: true,
-  },
-  {
-    processId: "build",
-    instanceId: "build-1",
-    name: "pnpm ui:build",
+    canStop: !result,
+    ...result,
+  };
+}
+const processes = [
+  processRow("dev-server", "pnpm ui:dev --port 5173", 1_380_000, "ready in 412 ms"),
+  processRow("watch-tests", "node scripts/run-vitest.mjs run ui/src/pages/chat", 74_000, ""),
+  processRow("build", "pnpm ui:build", 900_000, "built in 53.2s", {
     status: "completed",
-    startedAt: now - 900_000,
     endedAt: now - 846_000,
     exitCode: 0,
-    tail: "built in 53.2s",
-    truncated: false,
-    canStop: false,
-  },
-  {
-    processId: "typecheck",
-    instanceId: "typecheck-1",
-    name: "pnpm tsgo:ui",
+  }),
+  processRow("typecheck", "pnpm tsgo:ui", 820_000, "error TS2322", {
     status: "failed",
-    startedAt: now - 820_000,
     endedAt: now - 790_000,
     exitCode: 2,
-    tail: "error TS2322",
-    truncated: false,
-    canStop: false,
-  },
+  }),
 ];
 
 suite.define(() => {
   it("visualizes subagents and background processes in Details", async () => {
-    const rowInsets: Array<{
-      label: string;
-      left: number;
-      right: number;
-      top: number;
-      bottom: number;
-    }> = [];
     for (const colorScheme of ["light", "dark"] as const) {
       await suite.withPage(
         { colorScheme, locale: "en-US", viewport: { width: 1728, height: 1100 } },
@@ -190,6 +171,21 @@ suite.define(() => {
           const details = await openChatDetails(pane);
           const subagents = details.locator('[data-details-group="subagents"]');
           const processGroup = details.locator('[data-details-group="processes"]');
+          const capture = async (
+            name: string,
+            content: Locator,
+            elements = [details],
+            pageName?: string,
+          ) => {
+            const frame = await takeControlUiScreenshotFrame(page, details, [content], {
+              animations: "disabled",
+              elements,
+            });
+            await writeFile(path.join(suite.artifactDir, `${name}.png`), frame.elements[0]!.png);
+            if (pageName) {
+              await writeFile(path.join(suite.artifactDir, `${pageName}.png`), frame.png);
+            }
+          };
           await expect
             .poll(() =>
               details
@@ -222,14 +218,7 @@ suite.define(() => {
             .poll(() => subagents.locator(".chat-subagent-activity__steps").textContent())
             .toBe("2/4");
 
-          const frame = await takeControlUiScreenshotFrame(page, details, [details], {
-            animations: "disabled",
-            elements: [details],
-          });
-          await writeFile(
-            path.join(suite.artifactDir, `details-background-${colorScheme}.png`),
-            frame.elements[0]!.png,
-          );
+          await capture(`details-background-${colorScheme}`, details);
           // Every full-width action should give its contents the same breathing room,
           // whether Details is docked, floating, or opened from the mobile menu.
           for (const width of [1728, 1100, 390]) {
@@ -241,31 +230,35 @@ suite.define(() => {
             const controls = details.locator(
               ".chat-subagent-activity__row, .chat-details__process, .chat-details__more, .chat-details__navigation",
             );
-            rowInsets.push(
-              ...(await controls.evaluateAll((rows) =>
-                rows.map((row) => {
-                  const bounds = row.getBoundingClientRect();
-                  const content = Array.from(row.childNodes).flatMap((node) => {
-                    if (node instanceof Element) {
-                      return [node.getBoundingClientRect()];
-                    }
-                    if (!node.textContent?.trim()) {
-                      return [];
-                    }
-                    const range = document.createRange();
-                    range.selectNodeContents(node);
-                    return [range.getBoundingClientRect()];
-                  });
-                  return {
-                    label: row.className,
-                    left: Math.min(...content.map((box) => box.left)) - bounds.left,
-                    right: bounds.right - Math.max(...content.map((box) => box.right)),
-                    top: Math.min(...content.map((box) => box.top)) - bounds.top,
-                    bottom: bounds.bottom - Math.max(...content.map((box) => box.bottom)),
-                  };
-                }),
-              )),
+            const rowInsets = await controls.evaluateAll((rows) =>
+              rows.map((row) => {
+                const bounds = row.getBoundingClientRect();
+                const content = Array.from(row.childNodes).flatMap((node) => {
+                  if (node instanceof Element) {
+                    return [node.getBoundingClientRect()];
+                  }
+                  if (!node.textContent?.trim()) {
+                    return [];
+                  }
+                  const range = document.createRange();
+                  range.selectNodeContents(node);
+                  return [range.getBoundingClientRect()];
+                });
+                return {
+                  label: row.className,
+                  left: Math.min(...content.map((box) => box.left)) - bounds.left,
+                  right: bounds.right - Math.max(...content.map((box) => box.right)),
+                  top: Math.min(...content.map((box) => box.top)) - bounds.top,
+                  bottom: bounds.bottom - Math.max(...content.map((box) => box.bottom)),
+                };
+              }),
             );
+            for (const inset of rowInsets) {
+              expect(inset.left, inset.label).toBeGreaterThanOrEqual(7.5);
+              expect(inset.right, inset.label).toBeGreaterThanOrEqual(7.5);
+              expect(inset.top, inset.label).toBeGreaterThanOrEqual(5.5);
+              expect(inset.bottom, inset.label).toBeGreaterThanOrEqual(5.5);
+            }
             const firstRow = subagents.locator("button.chat-subagent-activity__row").first();
             await firstRow.hover({ position: { x: 4, y: 10 } });
             expect(
@@ -274,20 +267,11 @@ suite.define(() => {
                 return row.contains(document.elementFromPoint(bounds.left + 4, bounds.top + 10));
               }),
             ).toBe(true);
-            const hovered = await takeControlUiScreenshotFrame(page, details, [firstRow], {
-              animations: "disabled",
-              elements: [subagents, processGroup],
-            });
-            await writeFile(
-              path.join(suite.artifactDir, "details-padding-" + colorScheme + "-" + width + ".png"),
-              hovered.png,
-            );
-            await writeFile(
-              path.join(
-                suite.artifactDir,
-                "details-padding-" + colorScheme + "-" + width + "-rows.png",
-              ),
-              hovered.elements[0]!.png,
+            await capture(
+              `details-padding-${colorScheme}-${width}-rows`,
+              firstRow,
+              [subagents, processGroup],
+              `details-padding-${colorScheme}-${width}`,
             );
           }
           await page.setViewportSize({ width: 1728, height: 1100 });
@@ -300,26 +284,12 @@ suite.define(() => {
             .poll(() => processGroup.evaluate((group) => (group as HTMLDetailsElement).open))
             .toBe(false);
           expect(await processGroup.locator("summary .chat-details__tally").isVisible()).toBe(true);
-          const expanded = await takeControlUiScreenshotFrame(page, details, [details], {
-            animations: "disabled",
-            elements: [details],
-          });
-          await writeFile(
-            path.join(suite.artifactDir, `details-background-${colorScheme}-expanded.png`),
-            expanded.elements[0]!.png,
-          );
+          await capture(`details-background-${colorScheme}-expanded`, details);
           await processGroup.locator("summary").click();
           await processGroup.getByRole("button", { name: "All processes" }).click();
           await page.locator("openclaw-chat-processes-panel").first().waitFor();
-          expect(gateway).toBeDefined();
         },
       );
-    }
-    for (const inset of rowInsets) {
-      expect(inset.left, inset.label).toBeGreaterThanOrEqual(7.5);
-      expect(inset.right, inset.label).toBeGreaterThanOrEqual(7.5);
-      expect(inset.top, inset.label).toBeGreaterThanOrEqual(5.5);
-      expect(inset.bottom, inset.label).toBeGreaterThanOrEqual(5.5);
     }
   });
 });

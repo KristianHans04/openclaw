@@ -60,15 +60,10 @@ suite.define(() => {
           });
           await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
           await gateway.waitForRequest("chat.startup");
-          const trigger = page.getByRole("button", { name: "Details", exact: true });
           const details = page.locator(".chat-details");
           const context = details.locator(".chat-details__context");
           const meter = context.locator("meter");
-          if (viewport.width <= 900) {
-            await openChatDetails(page);
-          } else {
-            await trigger.click();
-          }
+          await openChatDetails(page);
           await meter.waitFor();
 
           for (const [percent, fresh, token] of [
@@ -136,19 +131,16 @@ suite.define(() => {
             // not a host style that could be ignored by the fill pseudo-element.
             try {
               const pixels = image.get_raw_pixels();
-              let matches = 0;
-              for (let offset = 0; offset < pixels.length; offset += 4) {
-                if (
+              const matches = pixels.some(
+                (_, offset) =>
+                  offset % 4 === 0 &&
                   expected.every(
                     (channel, index) => Math.abs(channel - pixels[offset + index]!) <= 1,
-                  )
-                ) {
-                  matches += 1;
-                }
-              }
+                  ),
+              );
               expect
                 .soft(matches, `${percent}% ${fresh ? "fresh" : "stale"} fill uses ${token}`)
-                .toBeGreaterThan(0);
+                .toBe(true);
             } finally {
               image.free();
             }

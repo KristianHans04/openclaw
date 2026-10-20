@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { Locator, Page } from "playwright";
 import { expect, it } from "vitest";
 import { takeControlUiViewportScreenshot } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
@@ -7,6 +8,14 @@ import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts"
 
 const suite = createControlUiE2eSuite({ name: "Control UI session kinds" });
 const captureUiProof = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
+async function capture(page: Page, name: string, content: Locator[]) {
+  if (captureUiProof) {
+    await writeFile(
+      path.join(suite.artifactDir, `${name}.png`),
+      await takeControlUiViewportScreenshot(page, page.locator(".shell"), content),
+    );
+  }
+}
 
 suite.define(() => {
   it.each([1440, 390])("keeps the sessions header and actions usable at %i px", async (width) => {
@@ -43,24 +52,17 @@ suite.define(() => {
         const refresh = actions.getByRole("button", { name: "Refresh" });
         const filter = actions.getByRole("button", { name: "Filters", exact: true });
         const create = actions.getByRole("link", { name: "New session" });
-        await search.waitFor({ state: "visible" });
-        await refresh.waitFor({ state: "visible" });
-        await filter.waitFor({ state: "visible" });
-        await create.waitFor({ state: "visible" });
+        const controls = [search, refresh, filter, create];
+        for (const control of controls) {
+          await control.waitFor({ state: "visible" });
+        }
         expect(await create.getAttribute("href")).toContain("/new");
-        const positions = await Promise.all(
-          [search, refresh, filter, create].map((control) =>
-            control.evaluate((element) => element.getBoundingClientRect().left),
-          ),
-        );
-        expect(positions[0]).toBeLessThan(positions[1]!);
-        expect(positions[1]).toBeLessThan(positions[2]!);
-        expect(positions[2]).toBeLessThan(positions[3]!);
         const styles = await Promise.all(
-          [search, refresh, filter, create].map((control) =>
+          controls.map((control) =>
             control.evaluate((element) => {
               const style = getComputedStyle(element);
               return {
+                left: element.getBoundingClientRect().left,
                 width: element.getBoundingClientRect().width,
                 height: element.getBoundingClientRect().height,
                 background: style.backgroundColor,
@@ -69,6 +71,9 @@ suite.define(() => {
             }),
           ),
         );
+        for (let index = 1; index < styles.length; index++) {
+          expect(styles[index - 1]!.left).toBeLessThan(styles[index]!.left);
+        }
         expect(styles.map(({ width: controlWidth, height }) => [controlWidth, height])).toEqual(
           Array.from({ length: 4 }, () => [34, 34]),
         );
@@ -82,21 +87,11 @@ suite.define(() => {
         expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
           width,
         );
-        if (captureUiProof) {
-          await writeFile(
-            path.join(suite.artifactDir, `sessions-${width}-collapsed.png`),
-            await takeControlUiViewportScreenshot(page, page.locator(".shell"), [header, actions]),
-          );
-        }
+        await capture(page, `sessions-${width}-collapsed`, [header, actions]);
         await search.click();
         const transcriptInput = page.getByRole("searchbox", { name: "Search session transcripts" });
         await transcriptInput.waitFor();
-        if (captureUiProof) {
-          await writeFile(
-            path.join(suite.artifactDir, `sessions-${width}-search.png`),
-            await takeControlUiViewportScreenshot(page, page.locator(".shell"), [header, actions]),
-          );
-        }
+        await capture(page, `sessions-${width}-search`, [header, actions]);
         await transcriptInput.press("Escape");
         await filter.click();
         const popover = page.locator(".sessions-filter-popover:popover-open");
@@ -106,12 +101,7 @@ suite.define(() => {
           .waitFor();
         await popover.getByRole("radiogroup", { name: "Session state" }).waitFor();
         await expect.poll(() => popover.getAttribute("data-phase")).toBe("open");
-        if (captureUiProof) {
-          await writeFile(
-            path.join(suite.artifactDir, `sessions-${width}-filters.png`),
-            await takeControlUiViewportScreenshot(page, page.locator(".shell"), [header, actions]),
-          );
-        }
+        await capture(page, `sessions-${width}-filters`, [header, actions]);
         await page.keyboard.press("Escape");
         await create.click();
         await expect.poll(() => new URL(page.url()).pathname).toBe("/new");
@@ -158,12 +148,7 @@ suite.define(() => {
         "Actions",
       ]);
       expect(await table.locator(".session-data-row .session-kind").count()).toBe(0);
-      if (captureUiProof) {
-        await writeFile(
-          path.join(suite.artifactDir, "session-table-compact.png"),
-          await takeControlUiViewportScreenshot(page, page.locator(".shell"), [table]),
-        );
-      }
+      await capture(page, "session-table-compact", [table]);
 
       await page.getByRole("button", { name: "Filters", exact: true }).click();
       await page.locator(".sessions-filter-popover:popover-open").waitFor();
@@ -172,11 +157,8 @@ suite.define(() => {
       await page.locator(".sessions-filter-popover").waitFor({ state: "hidden" });
       await table.locator(".session-group-row").first().waitFor();
       const groups = await table.locator(".session-group-row__label").allTextContents();
+      await capture(page, "kind-groups", [table]);
       if (captureUiProof) {
-        await writeFile(
-          path.join(suite.artifactDir, "kind-groups.png"),
-          await takeControlUiViewportScreenshot(page, page.locator(".shell"), [table]),
-        );
         await writeFile(
           path.join(suite.artifactDir, "kind-proof.json"),
           JSON.stringify({ groups, requests: await gateway.getRequests("sessions.list") }, null, 2),

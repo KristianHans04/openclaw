@@ -7,6 +7,7 @@ import {
   installMockGateway,
 } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { dashboardWidget } from "./session-dashboard.test-support.ts";
 
 const suite = createControlUiE2eSuite({
   name: "Control UI dashboard grant failure",
@@ -17,15 +18,16 @@ const sessionKey = "agent:main:dashboard-grant-failure";
 suite.define(() => {
   it("keeps a network-capability decision retryable and toasts when Allow fails", async () => {
     const recordProof = process.env.OPENCLAW_UI_E2E_RECORD === "1";
+    const proofPath = (name = "") => path.join(suite.artifactDir, "workboard-grant-failure", name);
     if (recordProof) {
-      await mkdir(path.join(suite.artifactDir, "workboard-grant-failure"), { recursive: true });
+      await mkdir(proofPath(), { recursive: true });
     }
     const context = await suite.browser.newContext({
       viewport: { height: 900, width: 1280 },
       ...(recordProof
         ? {
             recordVideo: {
-              dir: path.join(suite.artifactDir, "workboard-grant-failure"),
+              dir: proofPath(),
               size: { height: 900, width: 1280 },
             },
           }
@@ -41,18 +43,9 @@ suite.define(() => {
           revision: 1,
           tabs: [{ tabId: "main", title: "Main", position: 0, chatDock: "right" }],
           widgets: [
-            {
-              name: "status",
-              tabId: "main",
-              title: "Status",
-              contentKind: "html",
-              sizeW: 6,
-              sizeH: 4,
-              position: 0,
-              grantState: "pending",
+            dashboardWidget("status", "Status", {
               declared: { netOrigins: ["https://api.example.com"] },
-              revision: 1,
-            },
+            }),
           ],
         },
         "board.widget.grant": {
@@ -102,23 +95,13 @@ suite.define(() => {
       await pending.waitFor();
       await page.locator('[data-test-id="board-widget-action-error"]').waitFor();
       if (recordProof) {
-        await page.screenshot({
-          path: path.join(
-            path.join(suite.artifactDir, "workboard-grant-failure"),
-            "grant-failed.png",
-          ),
-        });
+        await page.screenshot({ path: proofPath("grant-failed.png") });
       }
     } finally {
       const video = page.video();
       await context.close();
       if (recordProof && video) {
-        await video.saveAs(
-          path.join(
-            path.join(suite.artifactDir, "workboard-grant-failure"),
-            "workboard-grant-failure.webm",
-          ),
-        );
+        await video.saveAs(proofPath("workboard-grant-failure.webm"));
       }
     }
   });
