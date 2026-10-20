@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { createSignal, For, onCleanup, Show } from "solid-js";
 import type { AgentsAvatarGenerateResult } from "../../../../packages/gateway-protocol/src/index.js";
 import { LobsterSvg } from "../../components/lobster-pet-artwork.tsx";
 import { canonicalLobsterLook, lobsterLookStyle } from "../../components/lobster-pet-identity.ts";
@@ -43,9 +43,13 @@ export function AvatarPicker(props: AvatarPickerProps) {
   const [candidate, setCandidate] = createSignal<Candidate | null>(null);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
-  createEffect(busy, (isBusy) => {
-    props.onBusyChange?.(isBusy);
-  });
+  const changeBusy = (next: boolean) => {
+    if (busy() === next) {
+      return;
+    }
+    setBusy(next);
+    props.onBusyChange?.(next);
+  };
   let operation = 0;
   let fileInput: HTMLInputElement | undefined;
   onCleanup(() => {
@@ -66,14 +70,14 @@ export function AvatarPicker(props: AvatarPickerProps) {
   };
   const changeMode = (next: Mode) => {
     operation += 1;
-    setBusy(false);
+    changeBusy(false);
     setError(null);
     setCandidate(null);
     setMode(next);
   };
   const selectPreset = async (paletteId: string) => {
     const current = ++operation;
-    setBusy(true);
+    changeBusy(true);
     setError(null);
     setCandidate(null);
     try {
@@ -95,7 +99,7 @@ export function AvatarPicker(props: AvatarPickerProps) {
       }
     } finally {
       if (operation === current) {
-        setBusy(false);
+        changeBusy(false);
       }
     }
   };
@@ -105,7 +109,7 @@ export function AvatarPicker(props: AvatarPickerProps) {
       return;
     }
     const current = ++operation;
-    setBusy(true);
+    changeBusy(true);
     setError(null);
     setCandidate(null);
     try {
@@ -120,7 +124,7 @@ export function AvatarPicker(props: AvatarPickerProps) {
       }
     } finally {
       if (operation === current) {
-        setBusy(false);
+        changeBusy(false);
       }
     }
   };

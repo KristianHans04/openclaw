@@ -1,4 +1,4 @@
-import { createMemo, createSignal, createUniqueId, Show, untrack } from "solid-js";
+import { createMemo, createSignal, createUniqueId, Show } from "solid-js";
 import type { AgentsAvatarGenerateResult } from "../../../packages/gateway-protocol/src/index.js";
 import type { ApplicationContext } from "../app/context.ts";
 import { Icon } from "../components/solid/icon.tsx";
@@ -81,16 +81,12 @@ export function AgentCreateDialog(props: {
 
   let submitted = false;
   function submit() {
-    const identity = untrack(() => ({
-      name: name().trim(),
-      avatar: avatar(),
-      disabled: pickerBusy() || uploadBusy(),
-    }));
-    if (submitted || !identity.name || identity.disabled) {
+    const submittedName = name().trim();
+    if (submitted || !submittedName || pickerBusy() || uploadBusy()) {
       return;
     }
     submitted = true;
-    props.onCreate({ name: identity.name, avatar: identity.avatar });
+    props.onCreate({ name: submittedName, avatar: avatar() });
   }
 
   return (

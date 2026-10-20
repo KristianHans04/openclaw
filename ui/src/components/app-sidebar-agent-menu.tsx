@@ -3,17 +3,14 @@ import { createMemo, createUniqueId, Show } from "solid-js";
 import type { NavigationRouteId } from "../app-navigation.ts";
 import { pathForAgentPanel } from "../app-route-paths.ts";
 import type { ApplicationNavigationOptions } from "../app/context.ts";
-import { currentThemeBranding } from "../app/theme-branding.ts";
-import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "../lib/external-link.ts";
-import { openExternalUrlSafe } from "../lib/open-external-url.ts";
 import { t } from "../lib/reactive/i18n.ts";
-import { SidebarDropdown, renderSidebarMenuAction } from "./app-sidebar-nav-menus.tsx";
-import type { IconName } from "./icon-data.ts";
+import { SidebarDropdown } from "./app-sidebar-nav-menus.tsx";
 import {
   AGENT_VALUE_PREFIX,
   renderSidebarAgentMenuSwitcher,
   type SidebarAgentMenuSwitcherParams,
 } from "./sidebar-agent-menu-switcher.tsx";
+import { COMMAND_VALUE_PREFIX } from "./sidebar-identity-menu-links.tsx";
 import { Icon } from "./solid/icon.tsx";
 import {
   createMenuControls,
@@ -21,28 +18,6 @@ import {
   type MenuHandle,
   type MenuItem,
 } from "./solid/menu.tsx";
-
-const IDENTITY_MENU_LINKS: ReadonlyArray<{
-  href: string;
-  icon: IconName;
-  label: () => string;
-}> = [
-  { href: "https://docs.openclaw.ai", icon: "book", label: () => t("common.docs") },
-  {
-    href: "https://docs.openclaw.ai/help",
-    icon: "messageSquare",
-    label: () => t("agentChip.getHelp"),
-  },
-  { href: "https://discord.gg/clawd", icon: "users", label: () => t("agentChip.discord") },
-  {
-    href: "https://docs.openclaw.ai/releases",
-    icon: "scrollText",
-    label: () => t("agentChip.viewChangelog"),
-  },
-];
-
-export const COMMAND_VALUE_PREFIX = "command:";
-const LINK_VALUE_PREFIX = "link:";
 
 type SidebarAgentMenuParams = Omit<
   SidebarAgentMenuSwitcherParams,
@@ -64,51 +39,6 @@ type SidebarAgentMenuParams = Omit<
   onNavigate: (routeId: NavigationRouteId, options?: ApplicationNavigationOptions) => void;
   ref?: (handle: MenuHandle) => void;
 };
-
-export function renderSidebarHelpMenu(): MenuItem | undefined {
-  if (!currentThemeBranding().communityLinks) {
-    return undefined;
-  }
-  return {
-    ...renderSidebarMenuAction("command:help", t("agentChip.help"), "circleQuestionMark", {
-      className: "sidebar-identity-menu__help",
-    }),
-    trigger: (
-      <span class="sidebar-customize-menu__trigger">
-        <span class="nav-item__icon" aria-hidden="true">
-          <Icon name="circleQuestionMark" />
-        </span>
-        <span class="sidebar-customize-menu__text">{t("agentChip.help")}</span>
-      </span>
-    ),
-    content: undefined,
-    children: IDENTITY_MENU_LINKS.map((link) => ({
-      id: `${LINK_VALUE_PREFIX}${encodeURIComponent(link.href)}`,
-      label: link.label(),
-      href: link.href,
-      class: "sidebar-customize-menu__item",
-      attributes: {
-        "data-new-tab-action": "",
-        target: EXTERNAL_LINK_TARGET,
-        rel: buildExternalLinkRel(),
-      },
-      icon: (
-        <span class="nav-item__icon" aria-hidden="true">
-          <Icon name={link.icon} />
-        </span>
-      ),
-      content: <span class="sidebar-customize-menu__text">{link.label()}</span>,
-    })),
-  };
-}
-
-export function selectSidebarHelpLink(value: string): boolean {
-  if (!value.startsWith(LINK_VALUE_PREFIX)) {
-    return false;
-  }
-  openExternalUrlSafe(decodeURIComponent(value.slice(LINK_VALUE_PREFIX.length)));
-  return true;
-}
 
 export function renderSidebarAgentMenu(params: SidebarAgentMenuParams): JSX.Element {
   const controls = createMenuControls();
