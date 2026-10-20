@@ -11,6 +11,7 @@ export const pgSearchName = (name: string) => `"${name.replaceAll('"', '""')}"`;
 export const searchConfig = "openclaw_simple_unaccent";
 const key: SqliteDatabaseFactKey<string[]> = {
   name: "database.postgres.search",
+  lifetime: "process",
   schemaDependent: true,
 };
 

@@ -93,7 +93,7 @@ export function admitStoreSearchExtension(
       rollback: () => retainPostgresSchema(db, base),
       commit: () => publishSqliteDatabaseSchemaChange(db),
     });
-    publishPostgresSearchExtensionFacts(db, facts, after.catalog);
+    publishPostgresSearchExtensionFacts(db, facts, after.catalog, next.searchExtensions);
     for (const item of [next.search, ...Object.values(next.searchExtensions)].filter(
       (candidate) => candidate !== undefined,
     )) {

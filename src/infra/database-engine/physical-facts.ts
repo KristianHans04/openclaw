@@ -27,11 +27,13 @@ export type PostgresPhysicalFacts = {
   version: number;
   capabilities: PostgresCapabilities;
   catalog: readonly PostgresCatalogFact[];
+  searchExtensions?: StoreSchema["searchExtensions"];
 };
 const recovery =
   "Use the matching OpenClaw version or restore the matching PostgreSQL schema and anchor.";
 const admissionKey: SqliteDatabaseFactKey<PostgresPhysicalFacts> = {
   name: "database.engine.schema",
+  lifetime: "process",
   schemaDependent: true,
 };
 
@@ -44,7 +46,7 @@ export function getPostgresPhysicalFactsForPath(path: string) {
   return getOrLoadSqliteDatabaseAdmissionForPath(path, admissionKey, () => undefined);
 }
 
-/** Retain PostgreSQL admission facts on its admitted connection. */
+/** Physical admission survives idle handles; workers consume the owner's schema revision. */
 export function admitPostgresPhysicalFacts(params: {
   db: PostgresSqlConnection;
   namespace: string;
@@ -57,6 +59,12 @@ export function admitPostgresPhysicalFacts(params: {
 }): PostgresPhysicalFacts {
   const retained = getPostgresPhysicalFacts(params.db);
   if (retained) {
+    if (params.schema) {
+      retainPostgresSchema(params.db, {
+        ...params.schema,
+        searchExtensions: retained.searchExtensions,
+      });
+    }
     return retained;
   }
   const capabilities = admitPostgresCapabilities(params.db);
@@ -70,8 +78,8 @@ export function admitPostgresPhysicalFacts(params: {
   if (row.version !== params.version || row.store_id !== params.storeId) {
     throw new Error(`PostgreSQL metadata identity or version mismatch. ${recovery}`);
   }
-  if (params.schema) {
-    const schema = withPostgresSearchExtensions(params.schema, snapshot);
+  const schema = params.schema && withPostgresSearchExtensions(params.schema, snapshot);
+  if (schema) {
     if (params.recordSchema) {
       recordPostgresSchema(params.db, params.namespace, schema, snapshot);
     } else {
@@ -94,6 +102,7 @@ export function admitPostgresPhysicalFacts(params: {
     version: row.version,
     capabilities,
     catalog,
+    searchExtensions: schema?.searchExtensions,
   };
   publishSqliteDatabaseAdmission(params.db, admissionKey, facts);
   return facts;
@@ -103,11 +112,13 @@ export function publishPostgresSearchExtensionFacts(
   db: PostgresSqlConnection,
   facts: PostgresPhysicalFacts,
   catalog: readonly PostgresCatalogFact[],
+  searchExtensions: StoreSchema["searchExtensions"],
 ): void {
   publishSqliteDatabaseAdmission(db, admissionKey, {
     ...facts,
     admissionId: randomUUID(),
     catalog,
+    searchExtensions,
   });
 }
 

@@ -157,6 +157,9 @@ with the effective state-family engine.
 A supported store never silently falls back to SQLite when its PostgreSQL
 connection or admission fails.
 
+Healthy PostgreSQL agent closes report `postgres-closed`; SQLite WAL checkpoint
+receipts apply only to SQLite stores.
+
 Doctor can acquire offline maintenance custody and run data-only state migrations
 on PostgreSQL. A live or unverifiable Gateway owner still prevents maintenance;
 state writes use the existing PostgreSQL writer advisory lock. Registered state
@@ -345,9 +348,12 @@ Owning components can register additional search definitions with
 `admitStoreSearch(connection, definition, { extension: name })` on an admitted
 worker connection. PostgreSQL installs
 the derived objects and records their definitions in one writer transaction.
-Reopening the store verifies PostgreSQL's catalog fingerprint, including these
-extensions, without recreating the indexes. Changing a registered definition,
-including its vector dimension, is refused with `SearchExtensionDefinitionChangedError`;
+The first store admission verifies PostgreSQL's catalog fingerprint, including
+these extensions. Its facts survive idle connection closure and are shared with
+workers for the process lifetime; owner-published schema changes invalidate them.
+Reopening an unchanged store does not repeat the catalog query or recreate indexes.
+Changing a registered definition, including its vector dimension, is refused with
+`SearchExtensionDefinitionChangedError`;
 restore the previous definition until the owning component provides a derived-index
 rebuild. Canonical embeddings remain unchanged. SQLite registration only binds
 the existing capability and leaves its FTS5 and vec0 lifecycle unchanged.

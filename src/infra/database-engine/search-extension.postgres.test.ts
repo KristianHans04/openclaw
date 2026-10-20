@@ -174,6 +174,19 @@ describe.skipIf(!connection)("PostgreSQL search extension admission", () => {
         admitStoreSearch(db, textSchema("keywords_archive"), {
           extension: "keywords-archive-search",
         });
+        const pathname = anchor.location()!;
+        connections.forEach((opened) => opened.close());
+        anchor.close();
+        anchor = openNodeSqliteDatabase(pathname);
+        const idleStart = statements.length;
+        db = open();
+        admitStoreSearch(db, selected, { extension: "keywords-search" });
+        admitStoreSearch(db, textSchema("keywords_archive"), {
+          extension: "keywords-archive-search",
+        });
+        expect(
+          statements.slice(idleStart).filter((sql) => sql.startsWith("WITH captured")),
+        ).toHaveLength(0);
       } finally {
         events.unsubscribe(observe);
       }

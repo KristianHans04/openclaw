@@ -31,10 +31,12 @@ function fixture(
     open: (schema?: StoreSchema, existingVersion?: boolean) => PostgresSyncConnection;
     db: PostgresSyncConnection;
     invalidate: () => void;
+    reopen: () => PostgresSyncConnection;
   }) => void,
 ) {
   withEngineStoreAdmission(() => {
-    const anchor = openNodeSqliteDatabase(path.join(dirs.make("pg-schema-"), "anchor.sqlite"));
+    const pathname = path.join(dirs.make("pg-schema-"), "anchor.sqlite");
+    let anchor = openNodeSqliteDatabase(pathname);
     const connections: PostgresSyncConnection[] = [];
     const open = (selected = schema, existingVersion = false) => {
       const db = openEngineStore({
@@ -59,10 +61,20 @@ function fixture(
     };
     try {
       const db = open();
-      test({ open, db, invalidate: () => publishSqliteDatabaseSchemaChange(anchor) });
+      test({
+        open,
+        db,
+        invalidate: () => publishSqliteDatabaseSchemaChange(anchor),
+        reopen: () => {
+          connections.forEach((item) => item.close());
+          anchor.close();
+          anchor = openNodeSqliteDatabase(pathname);
+          return open();
+        },
+      });
     } finally {
       try {
-        const db = connections[0];
+        const db = connections.at(-1);
         if (db) {
           db.exec(`DROP SCHEMA "${db.schema}" CASCADE`);
         }
@@ -75,6 +87,31 @@ function fixture(
 }
 
 describe.skipIf(!connection)("PostgreSQL schema admission", () => {
+  it("retains physical admission across the last handle closing", () => {
+    fixture(({ db, reopen }) => {
+      const admissionId = getPostgresPhysicalFacts(db)?.admissionId;
+      const queries: string[] = [];
+      const observations = channel("openclaw.database.statement");
+      const listener = (message: unknown) => {
+        const event = message as { engine: string; sql: string };
+        if (event.engine === "postgres") {
+          queries.push(event.sql);
+        }
+      };
+      observations.subscribe(listener);
+      try {
+        const reopened = reopen();
+        expect(queries.filter((sql) => sql.startsWith("WITH captured"))).toHaveLength(0);
+        expect(getPostgresPhysicalFacts(reopened)?.admissionId).toBe(admissionId);
+        expect(queries.filter((sql) => sql.startsWith("SELECT current_setting"))).toHaveLength(0);
+        reopened.runTransaction(() => reopened.exec("INSERT INTO items (id) VALUES (1)"));
+        expect(reopened.prepare("SELECT value FROM items").get()?.value).toBe(1);
+      } finally {
+        observations.unsubscribe(listener);
+      }
+    });
+  });
+
   it("reads an existing anchor while another handle holds write admission", () => {
     fixture(({ db }) => {
       db.exec("INSERT INTO items (id) VALUES (1)");

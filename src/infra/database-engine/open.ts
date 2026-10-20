@@ -28,6 +28,7 @@ type EngineAdmission =
   | { engine: "postgres"; storeId: string; namespace: string; version: number };
 const admissionKey: SqliteDatabaseFactKey<EngineAdmission> = {
   name: "database.engine",
+  lifetime: "process",
 };
 
 export function readEngineAnchor(
