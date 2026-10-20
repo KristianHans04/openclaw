@@ -44,12 +44,8 @@ const { GatewayPlugin, HttpsAgent, HttpsProxyAgent, MockWebSocket, guardedFetch 
         return this.createWebSocket(url);
       }
     }
-    class DirectAgent {
-      static lastCreated: DirectAgent | undefined;
-      constructor(options?: unknown) {
-        DirectAgent.lastCreated = this;
-        mocks.httpsAgent(options);
-      }
+    function DirectAgent(options?: unknown) {
+      mocks.httpsAgent(options);
     }
     class ProxyAgent {
       static lastCreated: ProxyAgent | undefined;
@@ -153,7 +149,6 @@ describe("createDiscordGatewayPlugin", () => {
     }
     guardedFetch.mockClear();
     mocks.debugSettings.mockReset().mockReturnValue({ enabled: false });
-    HttpsAgent.lastCreated = undefined;
     HttpsProxyAgent.lastCreated = undefined;
   });
   afterEach(() => {
@@ -162,20 +157,21 @@ describe("createDiscordGatewayPlugin", () => {
     vi.unstubAllEnvs();
   });
 
+  function gatewayInfo(overrides: Partial<APIGatewayBotInfo> = {}): APIGatewayBotInfo {
+    return {
+      url: "wss://gateway.discord.gg",
+      shards: 1,
+      session_start_limit: {
+        total: 1000,
+        remaining: 999,
+        reset_after: 120_000,
+        max_concurrency: 1,
+      },
+      ...overrides,
+    };
+  }
   function metadata(overrides: Partial<APIGatewayBotInfo> = {}) {
-    return new Response(
-      JSON.stringify({
-        url: "wss://gateway.discord.gg",
-        shards: 1,
-        session_start_limit: {
-          total: 1000,
-          remaining: 999,
-          reset_after: 120_000,
-          max_concurrency: 1,
-        },
-        ...overrides,
-      }),
-    );
+    return new Response(JSON.stringify(gatewayInfo(overrides)));
   }
   function createPlugin(
     discordConfig: Parameters<typeof createDiscordGatewayPlugin>[0]["discordConfig"] = {},
@@ -356,16 +352,14 @@ describe("createDiscordGatewayPlugin", () => {
   });
 
   it("refreshes fallback gateway metadata on the next register attempt", async () => {
-    const refreshed = {
+    const refreshed = gatewayInfo({
       url: "wss://gateway.discord.gg/?v=10",
       shards: 8,
       session_start_limit: {
-        total: 1000,
-        remaining: 999,
-        reset_after: 120_000,
+        ...gatewayInfo().session_start_limit,
         max_concurrency: 16,
       },
-    };
+    });
     mocks.fetch
       .mockResolvedValueOnce(new Response("upstream connect error", { status: 503 }))
       .mockResolvedValueOnce(metadata(refreshed));

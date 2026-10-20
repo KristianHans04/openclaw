@@ -1,4 +1,3 @@
-// Discord question component feedback tests.
 import { InteractionResponseType, MessageFlags } from "discord-api-types/v10";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -12,13 +11,21 @@ import {
 } from "../internal/test-builders.test-support.js";
 import { createDiscordQuestionButton } from "./questions.js";
 
-type InteractionHarness = {
-  interaction: BaseComponentInteraction;
-  acknowledge: ReturnType<typeof vi.fn>;
-  followUp: ReturnType<typeof vi.fn>;
-};
+const answer = { status: "answered" as const, questionId: "target", optionValue: "Production" };
+const data = { id: "ask_0123456789abcdef0123456789abcdef", i: "1" };
+const callbackPath = "/interactions/interaction-1/interaction-token/callback";
+type ButtonParams = Parameters<typeof createDiscordQuestionButton>[0];
+function createButton(overrides: Partial<ButtonParams> = {}) {
+  return createDiscordQuestionButton({
+    cfg: {} as never,
+    accountId: "default",
+    authorizeQuestion: vi.fn(async () => true),
+    resolveQuestion: vi.fn(async () => answer),
+    ...overrides,
+  });
+}
 
-function createInteraction(): InteractionHarness {
+function createInteraction() {
   const acknowledge = vi.fn();
   const followUp = vi.fn();
   const interaction = {
@@ -34,17 +41,9 @@ describe("Discord question button", () => {
   it("does not resolve unauthorized clicks", async () => {
     const { interaction, acknowledge } = createInteraction();
     const resolveQuestion = vi.fn();
-    const button = createDiscordQuestionButton({
-      cfg: {} as never,
-      accountId: "default",
-      authorizeQuestion: vi.fn(async () => false),
-      resolveQuestion,
-    });
+    const button = createButton({ authorizeQuestion: vi.fn(async () => false), resolveQuestion });
 
-    await button.run(interaction, {
-      id: "ask_0123456789abcdef0123456789abcdef",
-      i: "1",
-    });
+    await button.run(interaction, data);
 
     expect(resolveQuestion).not.toHaveBeenCalled();
     expect(acknowledge).not.toHaveBeenCalled();
@@ -53,39 +52,16 @@ describe("Discord question button", () => {
   it("does not turn a committed answer into an error when feedback fails", async () => {
     const { interaction, followUp } = createInteraction();
     followUp.mockRejectedValue(new Error("receipt failed"));
-    const button = createDiscordQuestionButton({
-      cfg: {} as never,
-      accountId: "default",
-      authorizeQuestion: vi.fn(async () => true),
-      resolveQuestion: vi.fn(async () => ({
-        status: "answered" as const,
-        questionId: "target",
-        optionValue: "Production",
-      })),
-    });
-
-    await expect(
-      button.run(interaction, {
-        id: "ask_0123456789abcdef0123456789abcdef",
-        i: "1",
-      }),
-    ).resolves.toBeUndefined();
+    await expect(createButton().run(interaction, data)).resolves.toBeUndefined();
     expect(followUp).toHaveBeenCalledOnce();
-    expect(followUp).toHaveBeenCalledWith({
-      content: "Answer submitted.",
-      ephemeral: true,
-    });
+    expect(followUp).toHaveBeenCalledWith({ content: "Answer submitted.", ephemeral: true });
   });
 
   it.each([
     {
       name: "submitted answer",
       acknowledged: false,
-      result: {
-        status: "answered" as const,
-        questionId: "target",
-        optionValue: "Production",
-      },
+      result: answer,
       expectedText: "Answer submitted.",
     },
     {
@@ -127,26 +103,12 @@ describe("Discord question button", () => {
       }
       return testCase.result;
     });
-    const button = createDiscordQuestionButton({
-      cfg: {} as never,
-      accountId: "default",
-      authorizeQuestion: vi.fn(async () => true),
-      resolveQuestion: resolveQuestion as never,
-    });
-
-    await button.run(interaction, {
-      id: "ask_0123456789abcdef0123456789abcdef",
-      i: "1",
-    });
+    await createButton({ resolveQuestion: resolveQuestion as never }).run(interaction, data);
 
     expect(resolveQuestion).toHaveBeenCalledOnce();
-    expect(post).toHaveBeenNthCalledWith(
-      1,
-      "/interactions/interaction-1/interaction-token/callback",
-      {
-        body: { type: InteractionResponseType.DeferredMessageUpdate },
-      },
-    );
+    expect(post).toHaveBeenNthCalledWith(1, callbackPath, {
+      body: { type: InteractionResponseType.DeferredMessageUpdate },
+    });
     if (testCase.acknowledged) {
       expect(post).toHaveBeenNthCalledWith(
         2,
@@ -156,16 +118,12 @@ describe("Discord question button", () => {
       );
       expect(interaction.responseState).toBe("deferred-update");
     } else {
-      expect(post).toHaveBeenNthCalledWith(
-        2,
-        "/interactions/interaction-1/interaction-token/callback",
-        {
-          body: {
-            type: InteractionResponseType.ChannelMessageWithSource,
-            data: { content: testCase.expectedText, flags: MessageFlags.Ephemeral },
-          },
+      expect(post).toHaveBeenNthCalledWith(2, callbackPath, {
+        body: {
+          type: InteractionResponseType.ChannelMessageWithSource,
+          data: { content: testCase.expectedText, flags: MessageFlags.Ephemeral },
         },
-      );
+      });
       expect(interaction.responseState).toBe("replied");
     }
   });

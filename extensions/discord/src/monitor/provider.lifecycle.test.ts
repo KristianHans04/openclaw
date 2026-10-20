@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { GatewayCloseCodes, type GatewayPlugin } from "../internal/gateway.js";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { GatewayCloseCodes } from "../internal/gateway.js";
 import type { waitForDiscordGatewayStop } from "../monitor.gateway.js";
 import {
   DISCORD_GATEWAY_TRANSPORT_ACTIVITY_EVENT,
@@ -12,20 +12,11 @@ import type { DiscordGatewayEvent } from "./gateway-supervisor.js";
 type LifecycleParams = Parameters<
   typeof import("./provider.lifecycle.js").runDiscordGatewayLifecycle
 >[0];
-type MockGateway = {
-  isConnected: boolean;
-  options: GatewayPlugin["options"];
-  disconnect: Mock<() => void>;
-  connect: Mock<(resume?: boolean) => void>;
-  emitter: EventEmitter;
-};
 
 const { stopLogging, unregisterGateway, waitForStop } = vi.hoisted(() => ({
   stopLogging: vi.fn(),
   unregisterGateway: vi.fn(),
-  waitForStop: vi.fn((_params: Parameters<typeof waitForDiscordGatewayStop>[0]) =>
-    Promise.resolve(),
-  ),
+  waitForStop: vi.fn<typeof waitForDiscordGatewayStop>(async () => {}),
 }));
 vi.mock("../gateway-logging.js", () => ({ attachDiscordGatewayLogging: () => stopLogging }));
 vi.mock("../monitor.gateway.js", async (importOriginal) => ({
@@ -59,11 +50,11 @@ describe("runDiscordGatewayLifecycle", () => {
     pending?: DiscordGatewayEvent[];
   } = {}) {
     const emitter = new EventEmitter();
-    const gateway: MockGateway = {
+    const gateway = {
       isConnected: ready,
       options: { intents: 0 },
-      disconnect: vi.fn(),
-      connect: vi.fn(),
+      disconnect: vi.fn<() => void>(),
+      connect: vi.fn<(resume?: boolean) => void>(),
       emitter,
     };
     const threadStop = vi.fn();
@@ -104,6 +95,23 @@ describe("runDiscordGatewayLifecycle", () => {
     expect(stopLogging).toHaveBeenCalledOnce();
     expect(h.threadStop).toHaveBeenCalledOnce();
     expect(h.gatewaySupervisor.detachLifecycle).toHaveBeenCalledTimes(detaches);
+  }
+
+  function expectStatus(
+    h: ReturnType<typeof createHarness>,
+    patch: Record<string, unknown>,
+    last = false,
+  ) {
+    const assertion = expect(h.statusSink);
+    if (last) {
+      assertion.toHaveBeenLastCalledWith(expect.objectContaining(patch));
+    } else {
+      assertion.toHaveBeenCalledWith(expect.objectContaining(patch));
+    }
+  }
+
+  function expectError(h: ReturnType<typeof createHarness>, message: string) {
+    expect(h.runtime.error).toHaveBeenCalledWith(expect.stringContaining(message));
   }
 
   it.each([false, true])("joins bindings after voice cleanup fails=%s", async (fails) => {
@@ -156,13 +164,7 @@ describe("runDiscordGatewayLifecycle", () => {
     });
     const lifecycle = runDiscordGatewayLifecycle(h.params);
     await entered.promise;
-    expect(h.statusSink).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connected: true,
-        lifecycle: "ready",
-        lastDisconnect: null,
-      }),
-    );
+    expectStatus(h, { connected: true, lifecycle: "ready", lastDisconnect: null });
     const baseline = h.statusSink.mock.calls.length;
     for (const at of [100_000, 101_000, 131_000]) {
       h.emitter.emit(DISCORD_GATEWAY_TRANSPORT_ACTIVITY_EVENT, { at });
@@ -213,23 +215,12 @@ describe("runDiscordGatewayLifecycle", () => {
     expect(h.gateway.connect).toHaveBeenCalledTimes(2);
     expect(h.gateway.connect).toHaveBeenCalledWith(false);
     expect(waitForStop).not.toHaveBeenCalled();
-    expect(h.runtime.error).toHaveBeenCalledWith(
-      expect.stringContaining("gateway READY wait timed out after 15000ms"),
-    );
-    expect(h.statusSink).toHaveBeenCalledWith(
-      expect.objectContaining({ connected: false, lifecycle: "recovering" }),
-    );
+    expectError(h, "gateway READY wait timed out after 15000ms");
+    expectStatus(h, { connected: false, lifecycle: "recovering" });
     h.gateway.isConnected = true;
     await vi.advanceTimersByTimeAsync(2_500);
     await lifecycle;
-    expect(h.statusSink).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connected: true,
-        lifecycle: "ready",
-        lastDisconnect: null,
-        lastError: null,
-      }),
-    );
+    expectStatus(h, { connected: true, lifecycle: "ready", lastDisconnect: null, lastError: null });
     expectCleanup(h, 1);
   });
 
@@ -238,18 +229,14 @@ describe("runDiscordGatewayLifecycle", () => {
       pending: [gatewayEvent("disallowed-intents", "Fatal Gateway error: 4014")],
     });
     await runDiscordGatewayLifecycle(h.params);
-    expect(h.runtime.error).toHaveBeenCalledWith(
-      expect.stringContaining("discord: gateway closed with code 4014"),
-    );
+    expectError(h, "discord: gateway closed with code 4014");
     expectCleanup(h, 0);
   });
 
   it("logs queued non-fatal startup errors and continues", async () => {
     const h = createHarness({ pending: [gatewayEvent("other", "transient startup error")] });
     await runDiscordGatewayLifecycle(h.params);
-    expect(h.runtime.error).toHaveBeenCalledWith(
-      expect.stringContaining("discord gateway error: Error: transient startup error"),
-    );
+    expectError(h, "discord gateway error: Error: transient startup error");
     expectCleanup(h, 1);
   });
 
@@ -304,9 +291,7 @@ describe("runDiscordGatewayLifecycle", () => {
     );
     await vi.advanceTimersByTimeAsync(1_500);
     await outcome;
-    expect(h.runtime.error).toHaveBeenCalledWith(
-      expect.stringContaining("discord gateway fatal: Error: Fatal Gateway error: 4001"),
-    );
+    expectError(h, "discord gateway fatal: Error: Fatal Gateway error: 4001");
     expect(h.gateway.disconnect).not.toHaveBeenCalled();
     expect(h.gateway.connect).not.toHaveBeenCalled();
     expectCleanup(h, 0);
@@ -319,15 +304,13 @@ describe("runDiscordGatewayLifecycle", () => {
       h.emitter.emit("debug", `Gateway websocket closed: ${code}`);
     });
     await runDiscordGatewayLifecycle(h.params);
-    expect(h.statusSink).toHaveBeenCalledWith(
-      expect.objectContaining({
-        connected: false,
-        lifecycle: "blocked",
-        terminalDisconnect: true,
-        lastError: `Gateway websocket closed: ${code}`,
-        lastDisconnect: expect.objectContaining({ status: code }),
-      }),
-    );
+    expectStatus(h, {
+      connected: false,
+      lifecycle: "blocked",
+      terminalDisconnect: true,
+      lastError: `Gateway websocket closed: ${code}`,
+      lastDisconnect: expect.objectContaining({ status: code }),
+    });
   });
 
   it("publishes recovery through socket close, scheduled reconnect, and READY", async () => {
@@ -336,31 +319,25 @@ describe("runDiscordGatewayLifecycle", () => {
     waitForStop.mockImplementationOnce(async () => {
       h.gateway.isConnected = false;
       h.emitter.emit("debug", "Gateway websocket closed: 1006");
-      expect(h.statusSink).toHaveBeenLastCalledWith(
-        expect.objectContaining({
+      expectStatus(
+        h,
+        {
           connected: false,
           lifecycle: "recovering",
           lastDisconnect: expect.objectContaining({ status: 1006 }),
-        }),
+        },
+        true,
       );
       const reconnect = "Gateway reconnect scheduled in 1000ms (zombie, resume=true)";
       h.emitter.emit("debug", reconnect);
-      expect(h.statusSink).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          connected: false,
-          lifecycle: "recovering",
-          lastError: reconnect,
-        }),
-      );
+      expectStatus(h, { connected: false, lifecycle: "recovering", lastError: reconnect }, true);
       h.emitter.emit("debug", "Gateway websocket opened");
-      expect(h.statusSink).toHaveBeenLastCalledWith(expect.objectContaining({ connected: false }));
+      expectStatus(h, { connected: false }, true);
       setTimeout(() => {
         h.gateway.isConnected = true;
       }, 1_000);
       await vi.advanceTimersByTimeAsync(1_500);
-      expect(h.statusSink).toHaveBeenLastCalledWith(
-        expect.objectContaining({ connected: true, lifecycle: "ready", lastDisconnect: null }),
-      );
+      expectStatus(h, { connected: true, lifecycle: "ready", lastDisconnect: null }, true);
     });
     await runDiscordGatewayLifecycle(h.params);
   });
