@@ -54,6 +54,28 @@ function lastSnapshot(f: Awaited<ReturnType<typeof createFixture>>) {
     ?.payload.sessions[sessionKey];
 }
 
+async function readChecks(f: Awaited<ReturnType<typeof createFixture>>, respond = vi.fn()) {
+  await handleGatewayRequest({
+    req: {
+      type: "req",
+      id: "own-checks",
+      method: "controlUi.sessionPullRequests.checks",
+      params: {
+        sessionKey,
+        owner: "example",
+        repo: "repository",
+        number: 7,
+        headSha: headCommit,
+      },
+    },
+    client: f.client,
+    context: f.context,
+    isWebchatConnect: () => false,
+    respond,
+  });
+  return respond;
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -253,25 +275,7 @@ it("admits only the prepared own binding and clears withdrawn private/profile ac
     await f.subscriptions.pollNow();
     expect(lastSnapshot(f)?.pullRequests).toHaveLength(1);
     expect(lastSnapshot(f)?.pullRequests[0].checks).toMatchObject({ state: "passing", passed: 1 });
-    const respond = vi.fn();
-    await handleGatewayRequest({
-      req: {
-        type: "req",
-        id: "own-checks",
-        method: "controlUi.sessionPullRequests.checks",
-        params: {
-          sessionKey,
-          owner: "example",
-          repo: "repository",
-          number: 7,
-          headSha: headCommit,
-        },
-      },
-      client: f.client,
-      context: f.context,
-      isWebchatConnect: () => false,
-      respond,
-    });
+    const respond = await readChecks(f);
     expect(respond).toHaveBeenCalledWith(
       true,
       expect.objectContaining({
@@ -388,3 +392,98 @@ it.each(["grant", "unsubscribe"] as const)(
     });
   },
 );
+
+it.each([
+  ["snapshot", false],
+  ["snapshot", true],
+  ["checks", false],
+  ["checks", true],
+] as const)("keeps own-PR %s transport scoped (retired=%s)", async (mode, retired) => {
+  await withOwnFixture(async (f, remote) => {
+    await f.seed(sessionKey, f.profile.id, { worktree });
+    await syncCanonicalGitHubIdentity({
+      identity: { accountId: 101, login: "contributor" },
+      authenticationAlias: { kind: "email", email: f.readerEmail },
+    });
+    remote.base.private = true;
+    remote.pr.state = "open";
+    if (mode === "checks") {
+      await f.subscribe();
+      await f.subscriptions.pollNow();
+      expect(lastSnapshot(f)?.pullRequests).toHaveLength(1);
+    }
+    f.socket.send.mockClear();
+    remote.fetch.mockClear();
+    const entered = createDeferredCore();
+    const release = createDeferredCore();
+    remote.fetch.mockImplementation(async (input, init) => {
+      expect(new Headers(init?.headers).get("authorization")).toBe(
+        "Bearer synthetic-own-pr-read-token",
+      );
+      const url = new URL(requestUrl(input));
+      expect(url.origin + url.pathname).toBe(
+        `https://api.github.com/repos/example/repository/commits/${headCommit}/check-runs`,
+      );
+      const page = Number(url.searchParams.get("page"));
+      expect([1, 2]).toContain(page);
+      if (page === 1) {
+        entered.resolve();
+        await release.promise;
+      }
+      return githubJson({
+        total_count: 101,
+        check_runs: Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
+          id: (page - 1) * 100 + index + 1,
+          name: `Private transport check ${(page - 1) * 100 + index + 1}`,
+          head_sha: headCommit,
+          status: "completed",
+          conclusion: "success",
+        })),
+      });
+    });
+    const respond = vi.fn();
+    let pending: Promise<unknown> | undefined;
+    try {
+      if (mode === "snapshot") {
+        await f.subscribe();
+      }
+      pending = mode === "snapshot" ? f.subscriptions.pollNow() : readChecks(f, respond);
+      await awaitGateBeforeSettlement(entered.promise, pending, "Selected transport never started");
+      if (retired) {
+        await f.changeReader("visibility");
+      }
+      release.resolve();
+      await pending;
+      expect(remote.fetch).toHaveBeenCalledTimes(retired ? 1 : 2);
+      if (retired) {
+        expect(JSON.stringify(frames(f))).not.toContain("Original contribution");
+        expect(JSON.stringify(frames(f))).not.toContain("Private transport check");
+        if (mode === "checks") {
+          expect(respond).toHaveBeenCalledExactlyOnceWith(
+            false,
+            undefined,
+            expect.objectContaining({ code: "UNAVAILABLE" }),
+          );
+        }
+      } else if (mode === "snapshot") {
+        expect(lastSnapshot(f)?.pullRequests).toMatchObject([
+          { title: "Original contribution", checks: { state: "passing", passed: 101 } },
+        ]);
+      } else {
+        expect(respond).toHaveBeenCalledExactlyOnceWith(
+          true,
+          expect.objectContaining({
+            status: "ready",
+            checks: expect.arrayContaining([
+              expect.objectContaining({ id: 101, name: "Private transport check 101" }),
+            ]),
+          }),
+          undefined,
+        );
+      }
+    } finally {
+      release.resolve();
+      await pending;
+    }
+  });
+});
