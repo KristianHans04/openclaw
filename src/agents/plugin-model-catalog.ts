@@ -174,7 +174,6 @@ function replacePersistedPluginModelCatalogEntries(
 }
 
 type PluginModelCatalogMigrationResult = {
-  detected: number;
   migrated: number;
   warnings: string[];
   issues: PluginModelCatalogMigrationIssue[];
@@ -449,7 +448,7 @@ export function migrateLegacyPluginModelCatalogs(params: {
           cause: directoryError,
         });
       }
-      return { detected: 0, migrated: 0, warnings, issues };
+      return { migrated: 0, warnings, issues };
     }
     if (
       params.expectedContents &&
@@ -461,7 +460,7 @@ export function migrateLegacyPluginModelCatalogs(params: {
       });
     }
     retireOrphanedPluginModelCatalogMigrations({ agentDir });
-    return { detected: 0, migrated: 0, warnings: [], issues: [] };
+    return { migrated: 0, warnings: [], issues: [] };
   }
 
   retireOrphanedPluginModelCatalogMigrations({
@@ -489,7 +488,7 @@ export function migrateLegacyPluginModelCatalogs(params: {
   }
 
   if (legacyCatalogs.length === 0) {
-    return { detected: 0, migrated: 0, warnings, issues };
+    return { migrated: 0, warnings, issues };
   }
 
   let migrated = 0;
@@ -595,7 +594,7 @@ export function migrateLegacyPluginModelCatalogs(params: {
     });
     migrated += 1;
   }
-  return { detected: legacyCatalogs.length, migrated, warnings, issues };
+  return { migrated, warnings, issues };
 }
 
 /** Replaces rebuildable provider catalogs in the existing per-agent SQLite cache. */

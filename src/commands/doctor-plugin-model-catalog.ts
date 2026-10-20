@@ -132,14 +132,7 @@ export async function maybeMigrateLegacyPluginModelCatalogs(params: {
   runtime: RuntimeEnv;
   note?: typeof note;
   reportFindings?: (findings: readonly HealthFinding[], warnings?: readonly string[]) => void;
-}): Promise<{
-  detected: number;
-  migrated: number;
-  repaired: number;
-  removedRootCopies: number;
-  warnings: string[];
-  findings: readonly HealthFinding[];
-}> {
+}): Promise<void> {
   const warnings: string[] = [];
   const findings: HealthFinding[] = [];
   const report = (reported: readonly HealthFinding[], rawWarnings?: readonly string[]) => {
@@ -258,11 +251,10 @@ export async function maybeMigrateLegacyPluginModelCatalogs(params: {
         },
       ]);
     }
-    return { detected, migrated: 0, repaired: 0, removedRootCopies: 0, warnings, findings };
+    return;
   }
 
   let migrated = 0;
-  let removedRootCopies = 0;
   const rootCopyChanges: string[] = [];
   const repairs: ReturnType<typeof repairPersistedPluginModelCatalogs> = [];
   for (const agent of agents) {
@@ -337,7 +329,6 @@ export async function maybeMigrateLegacyPluginModelCatalogs(params: {
     }
     try {
       const backupPath = await removeRootProviderCopies({ agentDir: agent.agentDir, file, review });
-      removedRootCopies += review.copies.length;
       rootCopyChanges.push(
         ...review.copies.map(
           ({ providerId, pluginId }) =>
@@ -378,5 +369,4 @@ export async function maybeMigrateLegacyPluginModelCatalogs(params: {
   if (rootCopyChanges.length > 0) {
     emitNote(rootCopyChanges.join("\n"), "Doctor changes");
   }
-  return { detected, migrated, repaired: repairs.length, removedRootCopies, warnings, findings };
 }
