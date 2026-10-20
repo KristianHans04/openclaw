@@ -31,6 +31,7 @@ import {
   type SidebarHomeSession,
 } from "./app-sidebar-agent-session-rows.ts";
 import { AppSidebarBase } from "./app-sidebar-base.ts";
+import { resolveSidebarDisplayAgent } from "./app-sidebar-display-agent.ts";
 import {
   personalSidebarZone,
   createSidebarPinnedSessions,
@@ -54,7 +55,6 @@ import {
   findProjectedSidebarSession,
   findSidebarSessionInTree,
   projectSidebarVisibleMainSession,
-  resolveActiveSidebarAgent,
   resolveLatestSidebarAgentSession,
   resolveSidebarMainSessionKey,
   type SidebarSessionNavigationState,
@@ -557,10 +557,14 @@ export abstract class AppSidebarSessionNavigationElement extends AppSidebarBase 
   }
 
   activeChipAgent() {
-    return resolveActiveSidebarAgent({
+    return resolveSidebarDisplayAgent({
       activeId: this.expandedAgentId(),
       roster: this.context.agents.state.agentsList?.agents ?? [],
       identities: this.context.agentIdentity.entries(),
+      pending: this.context.agents.state.pendingAgent,
+      creation: this.context.chatSubmissions.readCreate(),
+      sessionKey: this.sessionKey,
+      chipMode: this.sidebarAgentsMode === "chip",
     });
   }
 

@@ -16,7 +16,7 @@ import {
   settleChatPage,
   stubMatchMedia,
 } from "./chat-page.test-support.ts";
-import { ChatPage } from "./chat-page.ts";
+import "./chat-page.ts";
 import { PendingSessionCreate } from "./pending-session-create-lazy.ts";
 
 const presentedSessions: string[] = [];
@@ -68,7 +68,7 @@ it.each([
     if (split) {
       patchSettings({ chatSplitLayout: createSplitLayout(previousKey) });
     }
-    const page = new ChatPage();
+    const page = document.createElement("openclaw-chat-page");
     const { context } = setNavigationContext(page);
     Object.assign(context, { theme: { subscribe: () => () => undefined } });
     Object.assign(context.agents, { subscribe: () => () => undefined });
@@ -105,10 +105,10 @@ it.each([
     );
     if (!agentCreation) {
       expect(page.textContent).not.toContain("Creating new agent…");
-      expect(page.textContent).not.toContain("Hi! What would you like to call me?");
+      expect(page.textContent).not.toContain("Hi, I’m New agent. Happy to help.");
     } else {
       expect(page.querySelector(".chat-group.assistant .chat-text")?.textContent?.trim()).toBe(
-        "Hi! What would you like to call me?",
+        "Hi, I’m New agent. Happy to help.",
       );
     }
     expect(page.textContent).not.toContain("Reconnecting");
@@ -152,7 +152,7 @@ it.each(["rollback", "admission"] as const)(
         ],
       },
     });
-    const page = new ChatPage();
+    const page = document.createElement("openclaw-chat-page");
     const { context } = setNavigationContext(page);
     Object.assign(context, { theme: { subscribe: () => () => undefined } });
     Object.assign(context.agents, { subscribe: () => () => undefined });

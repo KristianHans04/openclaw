@@ -129,7 +129,12 @@ describe("AppSidebar agent chip", () => {
     expect(dom.query('[data-value="command:agents-directory"]')).toBeNull();
     expect(dom.query('[data-value="command:capabilities"]')).toBeNull();
     expect(dom.query('[data-value="command:agent-settings"]')).toBeNull();
-    expect(dom.query('[data-value="agent:shared"] .sidebar-agent-menu__settings')).not.toBeNull();
+    const sharedSettings = dom.query('[data-value="agent:shared"] .sidebar-agent-menu__settings');
+    if (discovery === "loading") {
+      expect(sharedSettings).toBeNull();
+    } else {
+      expect(sharedSettings).not.toBeNull();
+    }
   });
 
   it("keeps the configured roster label when identity hydration returns a fallback", async () => {
@@ -153,7 +158,7 @@ describe("AppSidebar agent chip", () => {
       const labels = [...dom.all(".sidebar-agent-menu .agent-select__option-label")].map(
         (element) => element.textContent?.trim(),
       );
-      expect(labels).toEqual(["Show all", "Workspace Molty", "rust-claw"]);
+      expect(labels).toEqual(["Create new agent", "Show all", "Workspace Molty", "rust-claw"]);
     });
     await vi.waitFor(() => {
       const rustRow = menuAgent(sidebar, "rust-claw");
@@ -221,7 +226,7 @@ describe("AppSidebar agent chip", () => {
     const commands = [...menuDom.all('[data-value^="command:"]')];
     expect(commands.map((item) => item.textContent?.trim())).toEqual(["Create new agent"]);
     for (const command of commands) {
-      expect(command.querySelector(".oc-menu-item__icon svg")).not.toBeNull();
+      expect(command.querySelector(".sidebar-agent-menu__create-icon svg")).not.toBeNull();
     }
 
     const agentRows = [...menuDom.all('[data-value^="agent:"]')];

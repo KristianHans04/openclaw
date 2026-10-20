@@ -10,7 +10,7 @@ import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { createSolidApplicationContextProvider } from "../../test-helpers/solid-application-context.tsx";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { settleChatPage, stubMatchMedia } from "./chat-page.test-support.ts";
-import { ChatPage } from "./chat-page.ts";
+import "./chat-page.ts";
 import { createMountedPanes } from "./chat-pane-mounted.test-support.ts";
 import { nativeHistoryMessage } from "./chat-pane.test-support.ts";
 import type { ChatPaneElement } from "./chat-pane.tsx";
@@ -57,7 +57,7 @@ it.each(["admission", "rollback"] as const)(
           messages: [
             nativeHistoryMessage(
               2,
-              key === previousKey ? "Previous transcript" : "Hi! What would you like to call me?",
+              key === previousKey ? "Previous transcript" : "Hi, I’m New agent. Happy to help.",
             ),
           ],
           sessionInfo: row,
@@ -72,7 +72,10 @@ it.each(["admission", "rollback"] as const)(
     const provider = createSolidApplicationContextProvider(context);
     const container = document.body.appendChild(createApplicationContextProvider(context));
     const view = mountSolid(
-      () => Object.assign(new ChatPage(), { data: { sessionKey: previousKey } }),
+      () =>
+        Object.assign(document.createElement("openclaw-chat-page"), {
+          data: { sessionKey: previousKey },
+        }),
       {
         container,
         wrapper: provider.wrapper,
@@ -80,7 +83,7 @@ it.each(["admission", "rollback"] as const)(
     );
     try {
       const page = expectDefined(
-        container.querySelector<ChatPage>("openclaw-chat-page"),
+        container.querySelector<HTMLElementTagNameMap["openclaw-chat-page"]>("openclaw-chat-page"),
         "chat page",
       );
       await vi.waitFor(() => expect(page.textContent).toContain("Previous transcript"));
@@ -109,7 +112,7 @@ it.each(["admission", "rollback"] as const)(
       expect(page.querySelector("openclaw-pending-session-create")).not.toBeNull();
       expect(
         page.querySelector(".chat-pane-cache__pane--visible .chat-text")?.textContent?.trim(),
-      ).toBe("Hi! What would you like to call me?");
+      ).toBe("Hi, I’m New agent. Happy to help.");
       expect(startupKeys).toEqual([previousKey]);
 
       context.agents.state.pendingAgent = undefined;
@@ -124,13 +127,13 @@ it.each(["admission", "rollback"] as const)(
       await settleChatPage(page);
       await vi.waitFor(() =>
         expect(page.querySelector(".chat-pane-cache__pane--visible")?.textContent).toContain(
-          outcome === "admission" ? "Hi! What would you like to call me?" : "Previous transcript",
+          outcome === "admission" ? "Hi, I’m New agent. Happy to help." : "Previous transcript",
         ),
       );
       expect(page.querySelector("openclaw-pending-session-create")).toBeNull();
       expect(
         [...page.querySelectorAll(".chat-text")].filter(
-          (entry) => entry.textContent?.trim() === "Hi! What would you like to call me?",
+          (entry) => entry.textContent?.trim() === "Hi, I’m New agent. Happy to help.",
         ),
       ).toHaveLength(outcome === "admission" ? 1 : 0);
       expect
