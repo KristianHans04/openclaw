@@ -160,7 +160,14 @@ write access to the fork. Publisher credentials remain outside the sandbox.
 A remote change not already accepted through preparation or an earlier successful
 publication refuses the update and preserves local work. An interrupted push is
 reconciled against its original commit and PR before another write; it never
-creates a replacement PR. Other PR actions for an imported association remain
+creates a replacement PR. When confirmation is pending, the accepted request
+retains its `requestId` and `requested` or `publishing` status. Finish the turn
+and await that request's result in the conversation; do not submit another
+publication to recover it. Inspecting the remote PR does not settle the
+publication receipt. The Gateway's existing recovery continues the original
+request and reports its result without starting another agent turn.
+
+Other PR actions for an imported association remain
 unavailable until their own support is enabled.
 Keep the updated Gateway when continuing an imported workspace; older versions
 do not understand this association.

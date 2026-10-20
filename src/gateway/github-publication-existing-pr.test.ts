@@ -361,26 +361,75 @@ describe("shared publication to a prepared original PR", () => {
     expect(f.mutations).toEqual([]);
   });
 
-  it("reconciles an accepted push after a lost response without another push or replacement PR", async () => {
-    const f = await fixture(true);
-    f.loseResponse();
-    f.afterPush(async () => {
-      f.pr.maintainer_can_modify = false;
-    });
-    await expect(f.publish("lost-response")).rejects.toThrow(/unconfirmed/);
-    expect(f.pushes).toHaveLength(1);
-    expect(await f.publish("lost-response")).toMatchObject({
-      status: "published",
-      url: f.pr.html_url,
-      headCommit: f.pr.head.sha,
-    });
-    expect(f.pushes).toHaveLength(1);
-    expect(f.mutations).toEqual([]);
-  });
+  it.each(["push response", "PR observation"])(
+    "retains the accepted receipt after losing %s and recovers without a new request",
+    async (failure) => {
+      const f = await fixture(true);
+      const claim =
+        failure === "PR observation"
+          ? await f.placements.claimTurn({
+              sessionId: f.session.sessionId,
+              sessionKey: f.session.sessionKey,
+              agentId: "main",
+              claimId: "original-pr-claim",
+              runId: "original-pr-run",
+              owner: { kind: "local" },
+            })
+          : undefined;
+      if (failure === "push response") {
+        f.loseResponse();
+      } else {
+        f.onRead(async (endpoint) => {
+          if (f.pushes.length > 0 && endpoint.endsWith("/pulls/7")) {
+            f.onRead(undefined);
+            throw new Error("PR observation unavailable after the accepted push");
+          }
+        });
+      }
+      f.afterPush(async () => {
+        f.pr.maintainer_can_modify = false;
+      });
+      const pending = await f.coordinator.requestForSessionV2({
+        ...f.request("lost-response", f.guest),
+        ...(claim ? { expectedRunId: claim.runId } : {}),
+      });
+      expect(pending).toMatchObject({
+        status: "publishing",
+        requestId: expect.any(String),
+        message: expect.stringContaining("Finish the turn"),
+      });
+      expect(f.pushes).toHaveLength(1);
+      const session = {
+        agentId: "main",
+        sessionKey: f.session.sessionKey,
+        sessionId: f.session.sessionId,
+      };
+      expect(await f.coordinator.latestShared(session, "lost-response")).toMatchObject({
+        result: { requestId: pending.requestId, status: "publishing" },
+      });
+      if (claim) {
+        await f.placements.releaseTurn(claim);
+        await f.coordinator.deferOrphanedRequestsAsync();
+      }
+      await f.coordinator.resumeSessionRequests();
+      expect(await f.coordinator.sharedStatus(session, pending.requestId)).toMatchObject({
+        result: {
+          requestId: pending.requestId,
+          status: "published",
+          url: f.pr.html_url,
+          headCommit: f.pr.head.sha,
+        },
+      });
+      expect(f.pushes).toHaveLength(1);
+      expect(f.mutations).toEqual([]);
+    },
+  );
   it("reconciles an accepted update without repushing after a remote branch rewind", async () => {
     const f = await fixture(true);
     f.loseResponse();
-    await expect(f.publish("rewound-after-acceptance")).rejects.toThrow(/unconfirmed/);
+    expect(await f.publish("rewound-after-acceptance")).toMatchObject({
+      status: "publishing",
+    });
     f.rewindRemoteBranch();
     f.pr.maintainer_can_modify = false;
     expect(await f.publish("rewound-after-acceptance")).toMatchObject({
@@ -391,6 +440,24 @@ describe("shared publication to a prepared original PR", () => {
     expect(f.pushes).toHaveLength(1);
     expect(f.mutations).toEqual([]);
   });
+
+  it.each(["closed", "revoked"])(
+    "preserves an accepted request without returning a receipt to a %s requester",
+    async (change) => {
+      const f = await fixture(true);
+      f.loseResponse();
+      f.afterPush(async () => {
+        if (change === "closed") {
+          f.guestSource.release();
+        } else {
+          await f.revoke();
+        }
+      });
+      await expect(f.publish("unavailable-after-push")).rejects.toThrow(/authoriz|authority/);
+      expect(f.pushes).toHaveLength(1);
+      expect(f.mutations).toEqual([]);
+    },
+  );
 
   it("publishes accepted newer source instead of selecting an older publication receipt", async () => {
     const f = await fixture(true);

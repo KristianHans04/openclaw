@@ -127,16 +127,42 @@ export function createGitHubPublicationCoordinatorMethods(params: {
     assertRequester();
     // Inline processing completes during the requesting run's tool call; its
     // transcript notice belongs to that run rather than splitting the turn.
-    const processDuringRun = (row: PublicationRow, validateExecution: () => boolean) => {
+    const processDuringRun = async (row: PublicationRow, validateExecution: () => boolean) => {
       if (input.expectedRunId) {
         params.recordRequestingRun(row.request_id, input.expectedRunId);
       }
-      return processRow(
-        row,
-        validateExecution,
-        input.requester.assertInvocationCurrent,
-        input.requester.signal,
-      );
+      try {
+        return await processRow(
+          row,
+          validateExecution,
+          input.requester.assertInvocationCurrent,
+          input.requester.signal,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof GitHubPublicationRecoveryPendingError) ||
+          !initialAuthority.loaded.entry.worktree?.githubPullRequest
+        ) {
+          throw error;
+        }
+        // Native recovery retains this accepted request; a new tool call has a different key.
+        params.assertCurrent();
+        assertRequester();
+        const retained = await readSharedGitHubPublication(session, { requestId: row.request_id });
+        params.assertCurrent();
+        assertRequester();
+        if (!retained) {
+          throw error;
+        }
+        const result = publicationResult(retained);
+        return result.status === "requested" || result.status === "publishing"
+          ? {
+              ...result,
+              message:
+                "The original PR publication is awaiting confirmation. Finish the turn and wait for this request's result in the conversation; do not submit another publication to recover it.",
+            }
+          : result;
+      }
     };
     using selectedSession = await prepareGitHubPublicationSession(input.sessionKey, {
       cfg: params.getCommittedRuntimeConfig(),
