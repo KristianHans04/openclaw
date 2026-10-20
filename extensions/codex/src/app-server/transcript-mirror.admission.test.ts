@@ -123,14 +123,10 @@ it.each([
       const projector = new CodexAppServerEventProjector(params, "thread-1", "turn-1", {
         upstreamUserText,
       });
-      projector.recordDynamicToolCall({
-        callId: "result",
-        tool: "heartbeat_respond",
-        arguments: {},
-      });
+      const tool = { callId: "result", tool: "heartbeat_respond" };
+      projector.recordDynamicToolCall({ ...tool, arguments: {} });
       projector.recordDynamicToolResult({
-        callId: "result",
-        tool: "heartbeat_respond",
+        ...tool,
         success: true,
         terminalType: "completed",
         contentItems: [{ type: "inputText", text: "Monitor completed." }],

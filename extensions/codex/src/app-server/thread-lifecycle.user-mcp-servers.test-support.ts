@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { text } from "node:stream/consumers";
+import { promisify } from "node:util";
 import { afterEach, beforeEach } from "vitest";
 import { resetCodexTestBindingStore } from "./session-binding.test-helpers.js";
 import { resetThreadLifecycleTestFixtures } from "./thread-lifecycle.test-fixtures.js";
@@ -16,8 +18,7 @@ export function setupUserMcpServerTestHooks(): void {
     }
     await context.codexAttemptRuntime.start();
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-80814-"));
-    // Bindings are keyed by session identity, not tempDir, so sibling tests
-    // would otherwise leak resumable threads into fresh-start expectations.
+    // Session identities survive fresh temp directories.
     resetCodexTestBindingStore();
   });
 
@@ -35,43 +36,31 @@ export function setupUserMcpServerTestHooks(): void {
 }
 
 export async function startPolicyHttpServer(): Promise<string> {
-  const server = http.createServer((request, response) => {
-    void (async () => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of request) {
-        chunks.push(Buffer.from(chunk));
-      }
-      const body = Buffer.concat(chunks).toString("utf8");
-      if (!body) {
-        response.writeHead(202).end();
-        return;
-      }
-      const message = JSON.parse(body) as {
-        id?: string | number;
-        method?: string;
-      };
-      if (message.id === undefined) {
-        response.writeHead(202).end();
-        return;
-      }
-      const result =
-        message.method === "initialize"
+  const server = http.createServer(async (request, response) => {
+    const body = await text(request);
+    const message = (body ? JSON.parse(body) : {}) as {
+      id?: string | number;
+      method?: string;
+    };
+    if (message.id === undefined) {
+      response.writeHead(202).end();
+      return;
+    }
+    const result =
+      message.method === "initialize"
+        ? {
+            protocolVersion: "2024-11-05",
+            capabilities: { tools: {} },
+            serverInfo: { name: "policy-http-probe", version: "1" },
+          }
+        : message.method === "tools/list"
           ? {
-              protocolVersion: "2024-11-05",
-              capabilities: { tools: {} },
-              serverInfo: { name: "policy-http-probe", version: "1" },
+              tools: [{ name: "read_docs", description: "read", inputSchema: { type: "object" } }],
             }
-          : message.method === "tools/list"
-            ? {
-                tools: [
-                  { name: "read_docs", description: "read", inputSchema: { type: "object" } },
-                ],
-              }
-            : {};
-      response
-        .writeHead(200, { "content-type": "application/json" })
-        .end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
-    })();
+          : {};
+    response
+      .writeHead(200, { "content-type": "application/json" })
+      .end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
   });
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
@@ -111,13 +100,10 @@ lines.on("line", (line) => {
 
 async function closePolicyHttpServers(): Promise<void> {
   await Promise.all(
-    [...activeHttpServers].map(
-      (server) =>
-        new Promise<void>((resolve, reject) => {
-          server.closeAllConnections();
-          server.close((error) => (error ? reject(error) : resolve()));
-        }),
-    ),
+    [...activeHttpServers].map(async (server) => {
+      server.closeAllConnections();
+      await promisify(server.close.bind(server))();
+    }),
   );
   activeHttpServers.clear();
 }

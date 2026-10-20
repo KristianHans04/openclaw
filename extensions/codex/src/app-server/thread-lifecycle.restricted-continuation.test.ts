@@ -16,6 +16,7 @@ import { useAutoCleanupTempDirTracker } from "./test-support.js";
 import {
   createAppServerOptions,
   createLeasedCodexLifecycleHarness,
+  createLifecycleRequest,
   createParams,
   resetThreadLifecycleTestFixtures,
   startOrResumeAttemptThreadWithoutSkills as startOrResumeThread,
@@ -37,13 +38,7 @@ async function createFixture(rejectStartNumber?: number) {
   let starts = 0;
   const fixture = await createLeasedCodexLifecycleHarness({
     agentDir: path.join(tempDir, "agent"),
-    respond: async (method, params) => {
-      if (method === "config/read") {
-        return { config: {}, origins: {}, layers: [] };
-      }
-      if (method === "configRequirements/read") {
-        return { requirements: null };
-      }
+    respond: createLifecycleRequest(async (method, params) => {
       if (method === "thread/start") {
         if (++starts === rejectStartNumber) {
           throw new Error("synthetic restricted successor creation failed");
@@ -64,7 +59,7 @@ async function createFixture(rejectStartNumber?: number) {
         return {};
       }
       throw new Error(`unexpected method: ${method}`);
-    },
+    }),
   });
   const common = {
     client: fixture.client,
@@ -118,7 +113,7 @@ async function createFixture(rejectStartNumber?: number) {
     expect(next).toMatchObject({ threadId: durable.threadId, lifecycle: { action: "resumed" } });
     expect(read()?.threadId).toBe(durable.threadId);
   };
-  return { fixture, common, attempt, identity, read, idle, start, calls, expectIsolation };
+  return { fixture, attempt, identity, read, idle, start, calls, expectIsolation };
 }
 
 describe("persistent restricted Codex continuation", () => {
@@ -131,19 +126,29 @@ describe("persistent restricted Codex continuation", () => {
     vi.restoreAllMocks();
   });
 
-  it.each(["warm", "cold"] as const)(
-    "keeps the native ID across no-op wildcard changes for a %s owner",
-    async (mode) => {
+  it.each([
+    ["warm", false],
+    ["cold", false],
+    ["cold", true],
+  ] as const)(
+    "keeps a %s conversation policy durable (empty allowlist: %s)",
+    async (mode, empty) => {
       const { read, idle, start, calls } = await createFixture();
-      const first = await start();
+      const policy = empty ? { toolsAllow: [] } : {};
+      const first = await start(policy);
+      expect(first.lifecycle.preserveExistingBinding).toBeUndefined();
+      expect(read()).toMatchObject({
+        threadId: first.threadId,
+        restrictedThreadConfigFingerprint: expect.any(String),
+      });
       await idle(first, mode);
-      const scheduled = await start({ runId: "scheduled", toolsAllow: ["*"] });
+      const scheduled = await start({ runId: "scheduled", toolsAllow: empty ? [] : ["*"] });
       expect(scheduled).toMatchObject({
         threadId: first.threadId,
         lifecycle: { action: "resumed" },
       });
       await idle(scheduled, mode);
-      const next = await start({ runId: "follow-up" });
+      const next = await start({ ...policy, runId: "follow-up" });
       expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
       expect(read()).toMatchObject({
         threadId: first.threadId,
@@ -156,27 +161,43 @@ describe("persistent restricted Codex continuation", () => {
     },
   );
 
-  it.each(["warm", "cold"] as const)(
-    "recovers safe-denied image_generate drift from a %s owner",
-    async (mode) => {
-      const { fixture, read, idle, start, calls } = await createFixture();
+  it.each([
+    ["warm", false],
+    ["cold", false],
+    ["cold", true],
+  ] as const)(
+    "recovers a %s restricted owner (missing legacy attestation: %s)",
+    async (mode, legacy) => {
+      const { fixture, identity, read, idle, start, calls } = await createFixture();
       const first = await start();
       const previous = read();
       await idle(first, mode);
-      const changed = {
-        runId: "changed-policy",
-        pluginHarnessToolPolicySafeDeniedTools: ["image_generate"],
-      };
-      const successor = await start(changed);
+      if (legacy) {
+        await testCodexAppServerBindingStore.mutate(identity, {
+          kind: "patch",
+          threadId: first.threadId,
+          patch: { restrictedThreadConfigFingerprint: undefined },
+        });
+        expect(read()?.restrictedThreadConfigFingerprint).toBeUndefined();
+      }
+      const changed = legacy ? {} : { pluginHarnessToolPolicySafeDeniedTools: ["image_generate"] };
+      const successor = await start({
+        ...changed,
+        runId: legacy ? "legacy-upgrade" : "changed-policy",
+      });
       expect(successor).toMatchObject({
         threadId: "restricted-2",
         lifecycle: { action: "started" },
       });
-      expect(read()?.restrictedThreadConfigFingerprint).not.toBe(
-        previous?.restrictedThreadConfigFingerprint,
-      );
+      if (legacy) {
+        expect(read()?.restrictedThreadConfigFingerprint).toEqual(expect.any(String));
+      } else {
+        expect(read()?.restrictedThreadConfigFingerprint).not.toBe(
+          previous?.restrictedThreadConfigFingerprint,
+        );
+      }
       await fixture.endTurn(successor.threadId);
-      const next = await start({ ...changed, runId: "recovered" });
+      const next = await start({ ...changed, runId: legacy ? "after-upgrade" : "recovered" });
       expect(next).toMatchObject({
         threadId: successor.threadId,
         lifecycle: { action: "resumed" },
@@ -214,25 +235,6 @@ describe("persistent restricted Codex continuation", () => {
     }
   });
 
-  it("replaces an unattested legacy owner once, then resumes its attested successor", async () => {
-    const { fixture, identity, read, start, calls } = await createFixture();
-    const first = await start();
-    await fixture.endTurn(first.threadId);
-    await testCodexAppServerBindingStore.mutate(identity, {
-      kind: "patch",
-      threadId: first.threadId,
-      patch: { restrictedThreadConfigFingerprint: undefined },
-    });
-    expect(read()?.restrictedThreadConfigFingerprint).toBeUndefined();
-    const successor = await start({ runId: "legacy-upgrade" });
-    expect(successor).toMatchObject({ threadId: "restricted-2", lifecycle: { action: "started" } });
-    expect(read()?.restrictedThreadConfigFingerprint).toEqual(expect.any(String));
-    await fixture.endTurn(successor.threadId);
-    const next = await start({ runId: "after-upgrade" });
-    expect(next).toMatchObject({ threadId: successor.threadId, lifecycle: { action: "resumed" } });
-    expect(calls("thread/start")).toHaveLength(2);
-  });
-
   it("preserves the exact durable predecessor when a changed-policy fresh start fails", async () => {
     const { fixture, read, start, calls } = await createFixture(2);
     const first = await start();
@@ -246,21 +248,15 @@ describe("persistent restricted Codex continuation", () => {
   });
 
   it.each([
-    { restriction: "disabled tools", patch: { disableTools: true } },
-    { restriction: "host-only delegation", patch: { delegationCapability: "host_only" } },
-    { restriction: "workspace-only work", patch: { requireWorkspaceOnly: true } },
-    { restriction: "turn policy", patch: { pluginHarnessToolPolicyScope: "turn" } },
-    {
-      restriction: "temporary empty allowlist",
-      patch: { toolsAllow: [], pluginHarnessToolPolicyScope: "turn" },
-    },
-    {
-      restriction: "unscoped wildcard",
-      patch: { toolsAllow: ["*"], pluginHarnessToolPolicyScope: undefined },
-    },
-  ] satisfies Array<{ restriction: string; patch: Partial<CodexAttemptThreadInput["params"]> }>)(
-    "isolates initial and follow-up $restriction while retaining the durable conversation",
-    async ({ patch }) => {
+    ["disabled tools", { disableTools: true }],
+    ["host-only delegation", { delegationCapability: "host_only" }],
+    ["workspace-only work", { requireWorkspaceOnly: true }],
+    ["turn policy", { pluginHarnessToolPolicyScope: "turn" }],
+    ["temporary empty allowlist", { toolsAllow: [], pluginHarnessToolPolicyScope: "turn" }],
+    ["unscoped wildcard", { toolsAllow: ["*"], pluginHarnessToolPolicyScope: undefined }],
+  ] satisfies Array<[string, Partial<CodexAttemptThreadInput["params"]>]>)(
+    "isolates initial and follow-up %s while retaining the durable conversation",
+    async (_restriction, patch) => {
       const { start, expectIsolation } = await createFixture();
       await expectIsolation(
         (initial) => start({ ...patch, ...(!initial ? { runId: "temporary" } : {}) }),
@@ -310,36 +306,30 @@ describe("persistent restricted Codex continuation", () => {
   it.each(["unchanged", "skills", "generic policy", "safe deny"] as const)(
     "preserves the restricted incognito owner for %s",
     async (change) => {
-      const { fixture, common, attempt, idle, calls } = await createFixture();
+      const { fixture, attempt, idle, calls, start } = await createFixture();
       attempt.sessionKey = "agent:main:dashboard:incognito-restricted";
-      const original = {
-        ...common,
-        developerInstructions: "generic policy",
-        refreshableInstructions: "original skills",
-      };
-      const first = await startOrResumeThread(original);
-      await idle(first, "warm");
-      const changed = {
-        ...original,
-        developerInstructions: change === "generic policy" ? "changed policy" : "generic policy",
-        refreshableInstructions: change === "skills" ? "updated skills" : "original skills",
-        params: {
-          ...attempt,
-          runId: "incognito-follow-up",
-          ...(change === "safe deny"
-            ? { pluginHarnessToolPolicySafeDeniedTools: ["image_generate"] }
-            : {}),
-        },
-      };
-      if (change === "generic policy" || change === "safe deny") {
-        await expect(startOrResumeThread(changed)).rejects.toBeInstanceOf(
-          CodexIncognitoPolicyChangeError,
+      const continueWith = (policy?: typeof change) =>
+        start(
+          {
+            ...(policy ? { runId: "incognito-follow-up" } : {}),
+            ...(policy === "safe deny"
+              ? { pluginHarnessToolPolicySafeDeniedTools: ["image_generate"] }
+              : {}),
+          },
+          {
+            developerInstructions:
+              policy === "generic policy" ? "changed policy" : "generic policy",
+            refreshableInstructions: policy === "skills" ? "updated skills" : "original skills",
+          },
         );
+      const first = await continueWith();
+      await idle(first, "warm");
+      const rejected = change === "generic policy" || change === "safe deny";
+      if (rejected) {
+        await expect(continueWith(change)).rejects.toBeInstanceOf(CodexIncognitoPolicyChangeError);
         expect(hasCodexAppServerLiveThread(fixture.client, first.threadId)).toBe(true);
       }
-      const next = await startOrResumeThread(
-        change === "generic policy" || change === "safe deny" ? original : changed,
-      );
+      const next = await continueWith(rejected ? undefined : change);
       expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
       expect(calls("thread/start")).toHaveLength(1);
       expect(calls("thread/resume")).toHaveLength(0);
@@ -351,27 +341,21 @@ describe("persistent restricted Codex continuation", () => {
   );
 
   it("isolates additive turn grants while native tools remain unrestricted", async () => {
-    const { common, attempt, expectIsolation } = await createFixture();
-    const ordinary = {
-      ...common,
-      nativeCodeModeEnabled: true,
-      params: { ...attempt, pluginHarnessToolPolicyRestricted: false },
-    };
-    const granted = {
-      ...ordinary,
-      params: { ...ordinary.params, pluginHarnessToolPolicyScope: "turn" as const },
-      dynamicTools: [
-        {
-          type: "function" as const,
-          name: "fixture_lookup",
-          description: "Run-owned plugin tool",
-          inputSchema: { type: "object", properties: {} },
-        },
-      ],
-    };
+    const { start, expectIsolation } = await createFixture();
+    const params = { pluginHarnessToolPolicyRestricted: false };
+    const options = { nativeCodeModeEnabled: true };
+    const dynamicTools = [
+      {
+        type: "function" as const,
+        name: "fixture_lookup",
+        description: "Run-owned plugin tool",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ];
     await expectIsolation(
-      () => startOrResumeThread(granted),
-      () => startOrResumeThread(ordinary),
+      () =>
+        start({ ...params, pluginHarnessToolPolicyScope: "turn" }, { ...options, dynamicTools }),
+      () => start(params, options),
     );
   });
 
@@ -386,20 +370,5 @@ describe("persistent restricted Codex continuation", () => {
     );
     expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
     expect(next.lifecycle.preserveExistingBinding).toBeUndefined();
-  });
-
-  it("persists and resumes an empty allowlist from conversation policy", async () => {
-    const { fixture, read, start, calls } = await createFixture();
-    const configured = { toolsAllow: [] };
-    const first = await start(configured);
-    expect(first.lifecycle.preserveExistingBinding).toBeUndefined();
-    expect(read()).toMatchObject({
-      threadId: first.threadId,
-      restrictedThreadConfigFingerprint: expect.any(String),
-    });
-    await fixture.endTurn(first.threadId);
-    const next = await start({ ...configured, runId: "empty-policy" });
-    expect(next).toMatchObject({ threadId: first.threadId, lifecycle: { action: "resumed" } });
-    expect(calls("thread/start")).toHaveLength(1);
   });
 });
