@@ -63,11 +63,16 @@ it.each(["allowed", "disposed", "disabled", "accepted-disposed"] as const)(
         text,
         ...(deduplicate ? { idempotencyKey } : {}),
       });
-    const harness = createStartedThreadHarness(undefined, { persistedThreads: [] });
-    const steers = () =>
-      harness.requests
-        .filter(({ method }) => method === "turn/steer")
-        .map((request) => request.params);
+    const dispatchedSteers: unknown[] = [];
+    const harness = createStartedThreadHarness(
+      async (method, input) => {
+        if (method === "turn/steer") {
+          dispatchedSteers.push(input);
+        }
+      },
+      { persistedThreads: [] },
+    );
+    const steers = () => dispatchedSteers;
     const { run, started } = startClockControlledAttempt(params);
     await started;
     const handle = registrations.mock.calls.findLast((call) => call[0] === params.sessionId)?.[1];

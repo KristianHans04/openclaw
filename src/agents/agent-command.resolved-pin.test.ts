@@ -48,7 +48,6 @@ it.each([
       },
     };
     const sessionEntry: SessionEntry = { sessionId: "resolved-pin", updatedAt: 1 };
-    sessionEntry.modelSelectionLocked = mode === "locked";
     if (mode !== "default" && mode !== "explicit") {
       applyModelOverrideToSessionEntry({
         entry: sessionEntry,
@@ -58,6 +57,7 @@ it.each([
     if (mode === "raw") {
       delete sessionEntry.modelOverrideRouteResolution;
     }
+    sessionEntry.modelSelectionLocked = mode === "locked";
     const sessionKey = "agent:main:resolved-pin";
     await withPluginRuntimeGenerationScope(
       { metadataSnapshot, pluginRegistry: createEmptyPluginRegistry() },
