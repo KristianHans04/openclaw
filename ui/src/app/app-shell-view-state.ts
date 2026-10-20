@@ -10,6 +10,7 @@ import { isGatewayConnectionAttemptPending, resolveGatewayStatus } from "../lib/
 import { readSessionMethodAccess } from "../lib/session-method-access.ts";
 import { normalizeAgentId } from "../lib/sessions/session-key.ts";
 import { isTerminalAvailable } from "../lib/terminal-availability.ts";
+import { isClawsAvailable } from "../pages/claws/availability.ts";
 import { pluginTabKey, pluginTabRefFromSearch } from "../pages/plugin/route.ts";
 import type { ShellRouteState } from "./app-host-route-state.ts";
 import type { DevicePairSetupLoader } from "./app-shell-device-pair-setup.tsx";
@@ -212,7 +213,10 @@ export function readShellView(host: ShellViewHost) {
     activeRouteId: activeRoute,
     router: runtime.router,
     activePluginTabId: activePluginRef ? pluginTabKey(activePluginRef) : "",
-    enabledRouteIds: APP_ROUTE_IDS,
+    enabledRouteIds:
+      isClawsAvailable(context.runtimeConfig.state) === true
+        ? APP_ROUTE_IDS
+        : APP_ROUTE_IDS.filter((routeId) => routeId !== "claws"),
     sessionKey: host.activeSessionKey,
     connected: gatewayConnected,
     connectionStatus,
