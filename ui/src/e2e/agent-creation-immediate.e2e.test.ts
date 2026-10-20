@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   controlUiBundledSettingsStorageKey,
+  defaultControlUiFeatureMethods,
   installMockGateway,
   waitForControlUiRoute,
 } from "../test-helpers/control-ui-e2e.ts";
@@ -72,6 +73,74 @@ suite.define(() => {
           Math.max(...frames.map((frame) => frame.top)) -
             Math.min(...frames.map((frame) => frame.top)),
         ).toBeLessThanOrEqual(1);
+      },
+    );
+  });
+
+  it("keeps its height as avatar tabs change and generates through the footer", async () => {
+    await suite.withPage(
+      { locale: "en-US", serviceWorkers: "block", viewport: { width: 1440, height: 1000 } },
+      async ({ page }) => {
+        const gateway = await installMockGateway(page, {
+          assistantName: "Harbor",
+          featureMethods: [...defaultControlUiFeatureMethods, "agents.avatar.generate"],
+          methodResponses: {
+            "config.get": { exists: true, valid: true, sourceConfig: {} },
+            "agents.avatar.generate": {
+              name: "Sky helper",
+              description: "A friendly blue avatar.",
+              svg: '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><circle cx="48" cy="48" r="44" fill="#4488ff"/></svg>',
+            },
+          },
+        });
+        await page.goto(`${suite.server.baseUrl}chat`);
+        await waitForControlUiRoute(page, { routeId: "chat" });
+        const sidebar = page.locator("openclaw-app-sidebar");
+        await sidebar.locator(".sidebar-agent-card__main").click();
+        await sidebar.locator('[data-value="command:new-agent"]').click();
+        const dialog = page.locator(".agent-create-dialog");
+        await dialog.waitFor({ state: "visible" });
+        expect(await dialog.locator("h2").textContent()).toBe("Create new agent");
+        await page.waitForTimeout(250);
+        const initialHeight = await dialog.evaluate(
+          (element) => element.getBoundingClientRect().height,
+        );
+        const assertStableHeight = async () => {
+          const height = await dialog.evaluate((element) => element.getBoundingClientRect().height);
+          expect(Math.abs(height - initialHeight)).toBeLessThanOrEqual(1);
+        };
+
+        await dialog.getByRole("button", { name: "Generate", exact: true }).first().click();
+        await assertStableHeight();
+        expect(await dialog.locator(".avatar-picker__preview").count()).toBe(0);
+        const action = dialog.locator(".agent-create-dialog__actions button").last();
+        await expect.poll(() => action.textContent()).toBe("Generate");
+        await dialog.locator("textarea").fill("A friendly blue guide");
+        await action.click();
+        await expect
+          .poll(async () => (await gateway.getRequests("agents.avatar.generate")).length)
+          .toBe(1);
+        await expect.poll(() => action.textContent()).toBe("Save");
+        await expect
+          .poll(() => dialog.locator(".agent-create-dialog__actions button").first().textContent())
+          .toBe("Reset");
+        await expect
+          .poll(() => dialog.locator(".agent-create-dialog__preview img").count())
+          .toBe(1);
+        await assertStableHeight();
+
+        await dialog.locator(".agent-create-dialog__actions button").first().click();
+        await expect.poll(() => dialog.locator("textarea").inputValue()).toBe("");
+        await expect
+          .poll(() => dialog.locator(".agent-create-dialog__preview img").count())
+          .toBe(0);
+        await expect.poll(() => action.textContent()).toBe("Generate");
+        await assertStableHeight();
+
+        await dialog.getByRole("button", { name: "Upload", exact: true }).click();
+        await assertStableHeight();
+        await dialog.getByRole("button", { name: "Blobster", exact: true }).click();
+        await assertStableHeight();
       },
     );
   });

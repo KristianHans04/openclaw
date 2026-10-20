@@ -1,17 +1,46 @@
 import { flush } from "solid-js";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ApplicationContext } from "../app/context.ts";
+import { registerSettingsEnglish } from "../i18n/locales/en-settings.ts";
+import { registerEnglishCatalog } from "../lib/reactive/i18n.ts";
 import { createApplicationGateway } from "../test-helpers/application-context.ts";
 import { mountSolid } from "../test-helpers/solid-render.tsx";
 import { AgentCreateDialog } from "./agent-create-dialog.tsx";
 
-const picker = vi.hoisted(() => ({ select: null as ((avatar: string) => void) | null }));
+const picker = vi.hoisted(() => ({
+  select: null as ((avatar: string) => void) | null,
+  footerChange: null as
+    | ((state: {
+        mode: "bot" | "generate" | "upload";
+        canGenerate: boolean;
+        generated: boolean;
+      }) => void)
+    | null,
+  generate: vi.fn(),
+}));
 const selectedAvatar = "data:image/webp;base64,Ym90";
+registerEnglishCatalog(registerSettingsEnglish);
 // mock-isolation: exercise the dialog's name and selection contract without mounting the avatar generator.
 vi.mock("../pages/agents/avatar-picker.tsx", () => ({
-  AvatarPicker: (props: { onSelect: (avatar: string) => void }) => {
-    picker.select = props.onSelect;
-    return <div data-testid="choose-avatar" />;
+  AvatarPicker: (props: {
+    onSelect: (avatar: string) => void;
+    onFooterStateChange?: (state: {
+      mode: "bot" | "generate" | "upload";
+      canGenerate: boolean;
+      generated: boolean;
+    }) => void;
+    onActionsReady?: (actions: { generate: () => Promise<void>; reset: () => void }) => void;
+  }) => {
+    return (
+      <div
+        data-testid="choose-avatar"
+        ref={() => {
+          picker.select = props.onSelect;
+          picker.footerChange = props.onFooterStateChange ?? null;
+          props.onActionsReady?.({ generate: async () => picker.generate(), reset: () => {} });
+        }}
+      />
+    );
   },
 }));
 
@@ -64,5 +93,35 @@ it("cancels without creating an agent", () => {
 
   expect(onCancel).toHaveBeenCalledOnce();
   expect(onCreate).not.toHaveBeenCalled();
+  view.dispose();
+});
+
+it("generates first, then saves the named agent with the generated avatar", () => {
+  picker.generate.mockClear();
+  const onCreate = vi.fn();
+  const view = mountSolid(AgentCreateDialog, {
+    context: dialogContext(),
+    onCancel: vi.fn(),
+    onCreate,
+  });
+  document.body.append(view.container);
+  const name = view.container.querySelector<HTMLInputElement>('input[name="name"]')!;
+  name.value = "Sky helper";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  picker.footerChange!({ mode: "generate", canGenerate: true, generated: false });
+  flush();
+
+  const action = view.container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(action.textContent?.trim()).toBe("Generate");
+  action.click();
+  expect(picker.generate).toHaveBeenCalledOnce();
+  expect(onCreate).not.toHaveBeenCalled();
+
+  picker.select!(selectedAvatar);
+  picker.footerChange!({ mode: "generate", canGenerate: true, generated: true });
+  flush();
+  expect(action.textContent?.trim()).toBe("Save");
+  action.click();
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({ name: "Sky helper", avatar: selectedAvatar });
   view.dispose();
 });

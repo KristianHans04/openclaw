@@ -11,7 +11,12 @@ import { formatUiError } from "../lib/format-error.ts";
 import { canCallGatewayMethod } from "../lib/gateway-methods.ts";
 import { t } from "../lib/reactive/i18n.ts";
 import { fileToAvatarDataUrl } from "../pages/agents/avatar-image.ts";
-import { AvatarPicker, type GeneratedAvatar } from "../pages/agents/avatar-picker.tsx";
+import {
+  AvatarPicker,
+  type AvatarPickerActions,
+  type AvatarPickerFooterState,
+  type GeneratedAvatar,
+} from "../pages/agents/avatar-picker.tsx";
 import "../styles/agent-create-dialog.css";
 
 registerAgentCreationEnglish();
@@ -28,6 +33,12 @@ export function AgentCreateDialog(props: {
   const [pickerBusy, setPickerBusy] = createSignal(false);
   const [uploadBusy, setUploadBusy] = createSignal(false);
   const [avatarError, setAvatarError] = createSignal<string | null>(null);
+  const [pickerFooter, setPickerFooter] = createSignal<AvatarPickerFooterState>({
+    mode: "bot",
+    canGenerate: false,
+    generated: false,
+  });
+  let pickerActions: AvatarPickerActions | null = null;
   const draftAgentId = `bot-draft-${createUniqueId()}`;
   const dialogTitle = createMemo(() => t("agentChip.createDialogTitle"));
   const namePlaceholder = createMemo(() => t("agentChip.createDialogName"));
@@ -37,7 +48,13 @@ export function AgentCreateDialog(props: {
     avatar: avatar() ?? undefined,
   }));
   const mainAgentId = () => props.context.agents.state.agentsList?.defaultId;
-  const creatingDisabled = createMemo(() => !name().trim() || pickerBusy() || uploadBusy());
+  const needsGeneration = () => pickerFooter().mode === "generate" && !pickerFooter().generated;
+  const primaryDisabled = createMemo(
+    () =>
+      pickerBusy() ||
+      uploadBusy() ||
+      (needsGeneration() ? !pickerFooter().canGenerate : !name().trim()),
+  );
 
   async function generateAvatar(prompt: string): Promise<GeneratedAvatar> {
     const client = props.context.gateway.snapshot.client;
@@ -84,6 +101,12 @@ export function AgentCreateDialog(props: {
 
   let submitted = false;
   function submit() {
+    if (needsGeneration()) {
+      if (!pickerBusy() && !uploadBusy() && pickerFooter().canGenerate) {
+        void pickerActions?.generate();
+      }
+      return;
+    }
     const submittedName = name().trim();
     if (submitted || !submittedName || pickerBusy() || uploadBusy()) {
       return;
@@ -152,6 +175,13 @@ export function AgentCreateDialog(props: {
             onUpload={(file) => void uploadAvatar(file)}
             onGenerate={generateAvatar}
             onBusyChange={setPickerBusy}
+            footerGeneration
+            onFooterStateChange={setPickerFooter}
+            onActionsReady={(actions) => (pickerActions = actions)}
+            onReset={() => {
+              setAvatar(null);
+              setAvatarError(null);
+            }}
           />
           <Show when={avatarError()}>
             {(message) => (
@@ -162,16 +192,32 @@ export function AgentCreateDialog(props: {
           </Show>
         </div>
         <openclaw-modal-actions class="agent-create-dialog__actions">
-          <button type="button" class="btn" data-action="cancel" onClick={() => props.onCancel()}>
-            {t("common.cancel")}
-          </button>
           <button
-            type="submit"
-            class="btn primary"
-            disabled={creatingDisabled()}
-            onClick={() => submit()}
+            type="button"
+            class="btn"
+            data-action={
+              pickerFooter().mode === "generate" && pickerFooter().generated ? "reset" : "cancel"
+            }
+            onClick={() => {
+              if (pickerFooter().mode === "generate" && pickerFooter().generated) {
+                pickerActions?.reset();
+              } else {
+                props.onCancel();
+              }
+            }}
           >
-            {t("common.create")}
+            {pickerFooter().mode === "generate" && pickerFooter().generated
+              ? t("common.reset")
+              : t("common.cancel")}
+          </button>
+          <button type="submit" class="btn primary" disabled={primaryDisabled()}>
+            {needsGeneration()
+              ? pickerBusy()
+                ? t("agents.identity.avatarGenerating")
+                : t("agents.identity.avatarGenerate")
+              : pickerFooter().mode === "generate"
+                ? t("common.save")
+                : t("common.create")}
           </button>
         </openclaw-modal-actions>
       </form>

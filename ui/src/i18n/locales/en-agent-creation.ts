@@ -3,7 +3,7 @@ import { en } from "./en.ts";
 
 const enAgentCreation = {
   agentChip: {
-    createDialogTitle: "Create New Agent",
+    createDialogTitle: "Create new agent",
     createDialogName: "Name your agent",
     creationUnavailable:
       "Creating an agent requires agents.create with operator.admin access. Pair this browser with operator.admin scope, then reconnect.",
