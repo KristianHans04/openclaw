@@ -230,8 +230,7 @@ export function createSessionRepositoryWorkspaceStore(
       await publicationSettled;
     }
   }
-  const requireWorkspace = async (command: Mutation, assertCurrent: () => void) => {
-    const result = await mutate(command, assertCurrent);
+  const requireWorkspace = (result: RepositoryWorkspaceMutationResult) => {
     if (!result.workspace) {
       throw new Error("Repository workspace mutation returned no workspace");
     }
@@ -269,49 +268,55 @@ export function createSessionRepositoryWorkspaceStore(
     },
     async create(input: Guarded<RepositoryWorkspaceCreate>) {
       return requireWorkspace(
-        {
-          type: "repositoryWorkspaces.create",
-          input: {
-            agentId: input.agentId,
-            sessionKey: input.sessionKey,
-            url: input.url,
-            requestedRef: input.requestedRef,
-            runSetupScript: input.runSetupScript,
-            branch: input.branch,
-            nowMs: now?.(),
+        await mutate(
+          {
+            type: "repositoryWorkspaces.create",
+            input: {
+              agentId: input.agentId,
+              sessionKey: input.sessionKey,
+              url: input.url,
+              requestedRef: input.requestedRef,
+              runSetupScript: input.runSetupScript,
+              branch: input.branch,
+              nowMs: now?.(),
+            },
           },
-        },
-        input.assertCurrent,
+          input.assertCurrent,
+        ),
       );
     },
     async bindBase(input: Guarded<RepositoryWorkspaceBase>) {
       return requireWorkspace(
-        {
-          type: "repositoryWorkspaces.bindBase",
-          input: {
-            workspaceId: input.workspaceId,
-            expectedRevision: input.expectedRevision,
-            baseCommit: input.baseCommit,
-            baseManifestHash: input.baseManifestHash,
-            nowMs: now?.(),
+        await mutate(
+          {
+            type: "repositoryWorkspaces.bindBase",
+            input: {
+              workspaceId: input.workspaceId,
+              expectedRevision: input.expectedRevision,
+              baseCommit: input.baseCommit,
+              baseManifestHash: input.baseManifestHash,
+              nowMs: now?.(),
+            },
           },
-        },
-        input.assertCurrent,
+          input.assertCurrent,
+        ),
       );
     },
     async acceptCheckpoint(input: Guarded<RepositoryWorkspaceCheckpoint>) {
       return requireWorkspace(
-        {
-          type: "repositoryWorkspaces.acceptCheckpoint",
-          input: {
-            workspaceId: input.workspaceId,
-            expectedRevision: input.expectedRevision,
-            checkpointRef: input.checkpointRef,
-            manifestHash: input.manifestHash,
-            nowMs: now?.(),
+        await mutate(
+          {
+            type: "repositoryWorkspaces.acceptCheckpoint",
+            input: {
+              workspaceId: input.workspaceId,
+              expectedRevision: input.expectedRevision,
+              checkpointRef: input.checkpointRef,
+              manifestHash: input.manifestHash,
+              nowMs: now?.(),
+            },
           },
-        },
-        input.assertCurrent,
+          input.assertCurrent,
+        ),
       );
     },
     async delete(

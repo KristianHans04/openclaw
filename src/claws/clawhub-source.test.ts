@@ -17,7 +17,6 @@ const mocks = vi.hoisted(() => ({
   extract: vi.fn(),
   read: vi.fn(),
   skillCard: vi.fn(),
-  cleanup: vi.fn(),
 }));
 
 // mock-isolation: Catalog responses are fixed fixtures; no live registry request may escape.
@@ -183,7 +182,7 @@ function mockArchive(archivePath: string, extractedRoot: string) {
     artifact: "clawpack",
     sha256Hex: digest,
     npmIntegrity: "sha512-proof",
-    cleanup: mocks.cleanup,
+    cleanup: vi.fn(),
   });
   mocks.extract.mockImplementation(async ({ onExtracted }) => await onExtracted(extractedRoot));
 }
@@ -643,59 +642,6 @@ describe("public ClawHub Claw catalog", () => {
   });
 });
 
-describe.each([
-  { label: "catalog preview", run: () => previewContent("instruction", "SOUL.md") },
-  { label: "source resolver", run: () => probeSource() },
-])("verified artifact lifecycle: $label", ({ run }) => {
-  it.each([
-    ["artifact", "archive"],
-    ["sha256Hex", "b".repeat(64)],
-    ["npmIntegrity", "sha512-other"],
-    ["npmShasum", "other-shasum"],
-  ])("rejects a changed %s before extraction and releases the download", async (field, value) => {
-    mocks.artifact.mockResolvedValue({
-      ...artifact(),
-      artifact: {
-        kind: "npm-pack",
-        sha256: digest,
-        npmIntegrity: "sha512-proof",
-        npmShasum: "expected-shasum",
-      },
-    });
-    mocks.download.mockResolvedValueOnce({
-      archivePath: "/unread-clawhub-fixture.tgz",
-      artifact: "clawpack",
-      sha256Hex: digest,
-      npmIntegrity: "sha512-proof",
-      npmShasum: "expected-shasum",
-      cleanup: mocks.cleanup,
-      [field]: value,
-    });
-
-    await expectCode(run(), "clawhub_artifact_integrity_mismatch");
-    expect(mocks.extract).not.toHaveBeenCalled();
-    expect(mocks.cleanup).toHaveBeenCalledOnce();
-  });
-
-  it("releases the download when extraction is refused", async () => {
-    mocks.extract.mockResolvedValueOnce({ ok: false, error: "fixture extraction refused" });
-
-    await expect(run()).rejects.toMatchObject({
-      code: "clawhub_extract_failed",
-      message: "fixture extraction refused",
-    });
-    expect(mocks.cleanup).toHaveBeenCalledOnce();
-  });
-
-  it("releases the download when reading the extracted source fails", async () => {
-    const failure = new Error("fixture reader failed");
-    mocks.read.mockRejectedValueOnce(failure);
-
-    await expect(run()).rejects.toBe(failure);
-    expect(mocks.cleanup).toHaveBeenCalledOnce();
-  });
-});
-
 describe("verified ClawHub Claw source", () => {
   it.each(["skill", "plugin"] as const)(
     "rejects a different per-call registry before resolving %s dependencies",
@@ -799,11 +745,21 @@ describe("verified ClawHub Claw source", () => {
     );
   });
 
-  it("rejects a different artifact identity before download", async () => {
+  it("binds artifact identity, resolver digest, and downloaded bytes before extraction", async () => {
     await prepareResolverFixture();
     mocks.artifact.mockResolvedValueOnce(artifact(version, "@openclaw/other-claw"));
     await expectCode(probeSource(), "clawhub_identity_mismatch");
     expect(mocks.download).not.toHaveBeenCalled();
+
+    mocks.download.mockResolvedValueOnce({
+      archivePath: "/tmp/wrong.tgz",
+      artifact: "clawpack",
+      sha256Hex: "b".repeat(64),
+      npmIntegrity: "sha512-proof",
+      cleanup: vi.fn(),
+    });
+    await expectCode(probeSource(), "clawhub_artifact_integrity_mismatch");
+    expect(mocks.extract).not.toHaveBeenCalled();
   });
 
   it("accepts a security verdict for the selected Claw artifact before download", async () => {

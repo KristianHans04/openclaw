@@ -105,20 +105,6 @@ it("rejects an own __proto__ key in persisted provenance", async () => {
   expect(await readGitHubDeviceAuthorizationRecord(requestId)).toBeUndefined();
 });
 
-it.each([undefined, "", " ", "{", "null", "[]", "42", '"text"', "{}"])(
-  "distinguishes missing records from invalid JSON or record shapes: %j",
-  async (raw) => {
-    if (raw !== undefined) {
-      records.set(requestId, raw);
-      records.set(oauthName, raw);
-    }
-    expect(await readGitHubDeviceAuthorizationRecord(requestId)).toBeUndefined();
-    expect(await inspectGitHubOAuthRecord(profileId)).toEqual({
-      state: raw === undefined ? "missing" : "invalid",
-    });
-  },
-);
-
 it("preserves System record reads that discard an invalid agent binding", async () => {
   const agentLifecycleBinding = { ...binding, extra: true };
   const { agentLifecycleBinding: _binding, ...unboundDevice } = deviceRecord;

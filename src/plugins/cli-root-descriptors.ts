@@ -8,6 +8,7 @@ import { validatePluginConfig } from "./loader-shared.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { buildPluginRuntimeLoadOptions } from "./runtime/load-context.js";
 import { resolvePluginRuntimeLoadContext } from "./runtime/load-context.resolve.js";
+import { hasKind } from "./slots.js";
 import type { OpenClawPluginCliRootCommandDescriptor, PluginLogger } from "./types.js";
 
 const quietLogger = {
@@ -72,7 +73,7 @@ export async function getPluginCliCommandDescriptors(
       if (!memoryDecision.enabled) {
         continue;
       }
-      if (memoryDecision.selected) {
+      if (memoryDecision.selected && hasKind(plugin.kind, "memory")) {
         selectedMemoryPluginId = plugin.id;
       }
       if (plugin.cliCommands) {

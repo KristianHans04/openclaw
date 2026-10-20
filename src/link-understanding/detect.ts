@@ -1,5 +1,4 @@
 // Link detection extracts unique safe bare HTTP(S) URLs from inbound text while filtering SSRF targets.
-import { floorPositiveFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { findMarkdownLinkSourceSpans } from "../../packages/markdown-core/src/link-spans.js";
 import { isBlockedHostnameOrIp } from "../infra/net/ssrf.js";
 import { DEFAULT_MAX_LINKS } from "./defaults.js";
@@ -15,6 +14,13 @@ function stripMarkdownLinks(message: string): string {
   }
   chunks.push(message.slice(cursor));
   return chunks.join("");
+}
+
+function resolveMaxLinks(value?: number): number {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return Math.floor(value);
+  }
+  return DEFAULT_MAX_LINKS;
 }
 
 function isAllowedUrl(raw: string): boolean {
@@ -36,7 +42,7 @@ export function extractLinksFromMessage(message: string, opts?: { maxLinks?: num
     return [];
   }
 
-  const maxLinks = floorPositiveFiniteNumber(opts?.maxLinks) ?? DEFAULT_MAX_LINKS;
+  const maxLinks = resolveMaxLinks(opts?.maxLinks);
   const sanitized = stripMarkdownLinks(source);
   const seen = new Set<string>();
   const results: string[] = [];

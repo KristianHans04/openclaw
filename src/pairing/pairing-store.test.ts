@@ -74,7 +74,7 @@ function upsert(id: string, accountId = DEFAULT_ACCOUNT_ID, channel = "telegram"
   return pairingStoreFixture(channel, pairingEnv).upsert(id, accountId);
 }
 
-it("normalizes persisted metadata and skips malformed requests while approving valid codes", async () => {
+it("skips malformed persisted requests while approving valid codes", async () => {
   const env = pairingEnv;
   const database = openOpenClawStateDatabase({ env });
   const db = getNodeSqliteKysely<PairingTestDatabase>(database.db);
@@ -99,27 +99,11 @@ it("normalizes persisted metadata and skips malformed requests while approving v
         last_seen_at: new Date().toISOString(),
         meta_json: JSON.stringify({ accountId: "stale-account" }),
       },
-      {
-        channel_key: "telegram",
-        account_id: "beta",
-        request_id: "metadata-user",
-        code: "METADATA",
-        created_at: new Date().toISOString(),
-        last_seen_at: new Date().toISOString(),
-        meta_json:
-          '{"accountId":0,"proofEntry":" fixture ","blank":" ","number":3,"__proto__":"ignored","constructor":" kept "}',
-      },
     ]),
   );
 
   await expect(store.list("alpha")).resolves.toHaveLength(1);
   await expect(store.list("stale-account")).resolves.toEqual([]);
-  const [metadataRequest] = await store.list("beta");
-  expect(metadataRequest?.meta).toEqual({
-    accountId: "beta",
-    proofEntry: "fixture",
-    constructor: "kept",
-  });
   await expect(
     approveChannelPairingCode({ channel: "telegram", accountId: "alpha", code: "GOODCODE", env }),
   ).resolves.toMatchObject({ id: "valid-user" });

@@ -1,4 +1,4 @@
-import { clampPositiveTimerTimeoutMs } from "../../packages/normalization-core/src/number-coercion.js";
+import { clampTimerTimeoutMs } from "../../packages/normalization-core/src/number-coercion.js";
 import { asNonArrayRecord } from "../../packages/normalization-core/src/record-coerce.js";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -56,18 +56,24 @@ function resolveProviderRuntimeConfig(
   return registry.runtimeConfig ?? resolveTtsRuntimeConfig(cfg);
 }
 
+function resolvePositiveTimeoutMs(timeoutMs: number | undefined): number | undefined {
+  return typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? clampTimerTimeoutMs(timeoutMs)
+    : undefined;
+}
+
 export function resolveSpeechProviderTimeoutMs(params: {
   timeoutMs?: number;
   config: ResolvedTtsConfig;
   provider: Pick<SpeechProviderPlugin, "defaultTimeoutMs">;
 }): number {
   if (params.timeoutMs !== undefined) {
-    return clampPositiveTimerTimeoutMs(params.timeoutMs) ?? params.config.timeoutMs;
+    return resolvePositiveTimeoutMs(params.timeoutMs) ?? params.config.timeoutMs;
   }
   if (params.config.timeoutMsSource !== "default") {
-    return clampPositiveTimerTimeoutMs(params.config.timeoutMs) ?? DEFAULT_TTS_TIMEOUT_MS;
+    return resolvePositiveTimeoutMs(params.config.timeoutMs) ?? DEFAULT_TTS_TIMEOUT_MS;
   }
-  return clampPositiveTimerTimeoutMs(params.provider.defaultTimeoutMs) ?? params.config.timeoutMs;
+  return resolvePositiveTimeoutMs(params.provider.defaultTimeoutMs) ?? params.config.timeoutMs;
 }
 
 function sortSpeechProvidersForAutoSelection(

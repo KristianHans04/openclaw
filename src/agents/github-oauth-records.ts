@@ -1,4 +1,3 @@
-import { safeParseJson } from "@openclaw/normalization-core/json-coercion";
 import { z } from "zod";
 import { isManagedGitHubProfileId } from "../config/github-identity-profile-id.js";
 import { normalizeAgentId } from "../routing/session-key.js";
@@ -179,7 +178,13 @@ function parseGitHubOAuthProfileId(name: string): string | undefined {
 }
 
 function parseGitHubRecord<T>(raw: string, schema: z.ZodType<T>): T | undefined {
-  const result = schema.safeParse(safeParseJson(raw));
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  const result = schema.safeParse(value);
   return result.success ? result.data : undefined;
 }
 

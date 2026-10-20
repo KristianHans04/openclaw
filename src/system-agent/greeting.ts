@@ -10,7 +10,6 @@ import {
   createSqliteAuditRecordWriter,
 } from "../infra/sqlite-audit-record-store.async.js";
 import { getUpdateAvailable, type UpdateAvailable } from "../infra/update-status-state.js";
-import { getOrCreateWeakOwnerMap } from "../shared/weak-owner-map.js";
 import { formatSystemAgentStartupMessage, type SystemAgentOverview } from "./overview.js";
 
 const SYSTEM_AGENT_GREETING_SCOPE = "system-agent-greeting";
@@ -456,7 +455,11 @@ async function resolveSystemAgentGreetingText(
   if (failure && failure.retryAfter <= at) {
     greetingFailures.delete(cacheKey);
   }
-  const flights = getOrCreateWeakOwnerMap(greetingFlights, cacheKey);
+  let flights = greetingFlights.get(cacheKey);
+  if (!flights) {
+    flights = new Map();
+    greetingFlights.set(cacheKey, flights);
+  }
   const existingFlight = flights.get(factsHash);
   if (existingFlight) {
     const result = await existingFlight;

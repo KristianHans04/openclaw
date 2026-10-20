@@ -1,4 +1,4 @@
-import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   readVoiceWakeMachineState,
   writeConfigMachineStateAsync,
@@ -14,7 +14,9 @@ const DEFAULT_TRIGGERS = ["openclaw", "claude", "computer"];
 const VOICEWAKE_TRIGGERS_STATE_KEY = "voicewake.triggers";
 
 function sanitizeTriggers(triggers: unknown): string[] {
-  const cleaned = normalizeTrimmedStringList(triggers);
+  const cleaned = (Array.isArray(triggers) ? triggers : [])
+    .map((w) => normalizeOptionalString(w) ?? "")
+    .filter((w) => w.length > 0);
   return cleaned.length > 0 ? cleaned : DEFAULT_TRIGGERS;
 }
 

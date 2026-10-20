@@ -11,7 +11,6 @@ import {
   resolveWindowsSpawnProgramCandidate,
 } from "../plugin-sdk/windows-spawn.js";
 import type { CliBackendRuntimeArtifactPolicy } from "../plugins/cli-backend.types.js";
-import { dedupeByKey } from "../shared/dedupe-by-key.js";
 
 type CliExecutableFileIdentity = Readonly<{
   path: string;
@@ -374,6 +373,14 @@ function resolveSelfContainedArtifact(
     : undefined;
 }
 
+function dedupeFileIdentities(
+  files: readonly CliExecutableFileIdentity[],
+): CliExecutableFileIdentity[] {
+  return files.filter(
+    (file, index) => files.findIndex((candidate) => candidate.path === file.path) === index,
+  );
+}
+
 /**
  * Resolve and fingerprint the exact program a CLI child will execute.
  *
@@ -472,7 +479,7 @@ export async function resolveCliExecutableIdentity(params: {
         leadingArgv,
         resolution: candidate.resolution,
       },
-      files: dedupeByKey(files, (file) => file.path),
+      files: dedupeFileIdentities(files),
       runtimeArtifact,
     };
   }
@@ -540,7 +547,7 @@ export async function resolveCliExecutableIdentity(params: {
     command,
     resolvedPath: canonicalPath,
     invocation,
-    files: dedupeByKey(files, (file) => file.path),
+    files: dedupeFileIdentities(files),
     runtimeArtifact,
   };
 }

@@ -12,7 +12,9 @@ import {
   parseOpenClawManifestInstallBase,
   parseFrontmatterBool,
   resolveOpenClawManifestBlock,
-  resolveOpenClawManifestCommonFields,
+  resolveOpenClawManifestInstall,
+  resolveOpenClawManifestOs,
+  resolveOpenClawManifestRequires,
 } from "../../shared/frontmatter.js";
 import type {
   OpenClawSkillMetadata,
@@ -134,10 +136,18 @@ export function resolveSkillManifestMetadata(
   if (!metadataObj) {
     return undefined;
   }
+  const requires = resolveOpenClawManifestRequires(metadataObj);
+  const install = resolveOpenClawManifestInstall(metadataObj, parseInstallSpec);
+  const osRaw = resolveOpenClawManifestOs(metadataObj);
   return {
-    ...resolveOpenClawManifestCommonFields(metadataObj, parseInstallSpec),
+    always: typeof metadataObj.always === "boolean" ? metadataObj.always : undefined,
+    emoji: readStringValue(metadataObj.emoji),
+    homepage: readStringValue(metadataObj.homepage),
     skillKey: readNonEmptyStringPreservingWhitespace(metadataObj.skillKey),
     primaryEnv: readStringValue(metadataObj.primaryEnv),
+    os: osRaw.length > 0 ? osRaw : undefined,
+    requires,
+    install: install.length > 0 ? install : undefined,
   };
 }
 

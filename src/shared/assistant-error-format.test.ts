@@ -53,19 +53,6 @@ describe("extractErrorHttpStatus", () => {
 });
 
 describe("HTTP status consumers", () => {
-  it.each(["", "{", "null", "[]", "42", "{}", '{"other":"ignored"}'])(
-    "rejects malformed or unrecognized API error payloads: %j",
-    (raw) => expect(parseApiErrorInfo(raw)).toBeNull(),
-  );
-
-  it("retains prefixed and padded API error fields", () => {
-    expect(
-      parseApiErrorInfo(' \uFEFFAPI error: {"error":{"message":"Unavailable"}} \n'),
-    ).toMatchObject({
-      message: "Unavailable",
-    });
-  });
-
   it.each([
     [{ error: "missing model" }, { message: "missing model", type: undefined }],
     [

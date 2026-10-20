@@ -17,7 +17,6 @@ import type {
   SessionCatalogListProviderParams,
   SessionCatalogProvider,
 } from "../../plugins/session-catalog.js";
-import { getOrCreateWeakOwnerMap } from "../../shared/weak-owner-map.js";
 import { SessionCatalogListAdmission } from "./session-catalog-list-admission.js";
 import { startSessionCatalogListDiagnostics } from "./session-catalog-list-diagnostics.js";
 import { catalogError } from "./session-catalog-result.js";
@@ -255,7 +254,11 @@ export function resolveProviderCreateTarget(
     byProvider = new WeakMap();
     providerCreateTargetsByConfig.set(config, byProvider);
   }
-  const byAgent = getOrCreateWeakOwnerMap(byProvider, provider);
+  let byAgent = byProvider.get(provider);
+  if (!byAgent) {
+    byAgent = new Map();
+    byProvider.set(provider, byAgent);
+  }
   const cached = byAgent.get(agentId);
   if (cached) {
     // The provider contract makes create targets config-derived. A reload changes config identity;

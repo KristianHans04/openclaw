@@ -1,15 +1,12 @@
 import type { AcpElicitationRequest } from "@openclaw/acp-core/runtime/types";
 import {
-  structuredInputString,
-  structuredInputValue,
-} from "../../agents/harness/structured-input-boundary.js";
-import {
   compileStructuredInputForm,
   compileStructuredInputUrl,
   isStructuredInputRecord,
   snapshotStructuredInput,
   type StructuredInputCompileResult,
   type StructuredInputRecord,
+  type StructuredInputValue,
 } from "../../agents/harness/structured-input.js";
 
 const MAX_CORRELATION_TEXT = 128;
@@ -33,14 +30,14 @@ export function parseAcpElicitationRequest(
   if (typeof correlation === "string") {
     return unsupported(correlation);
   }
-  const mode = structuredInputString(snapshot, "mode");
+  const mode = readAcpElicitationString(snapshot, "mode");
   if (mode === "url") {
     return {
       correlation,
       input: compileStructuredInputUrl({
-        url: structuredInputValue(snapshot, "url"),
-        elicitationId: structuredInputValue(snapshot, "elicitationId"),
-        message: structuredInputValue(snapshot, "message"),
+        url: readValue(snapshot, "url"),
+        elicitationId: readValue(snapshot, "elicitationId"),
+        message: readValue(snapshot, "message"),
         fallbackMessage: "ACP provided a URL",
         protocolName: "ACP",
       }),
@@ -54,8 +51,8 @@ export function parseAcpElicitationRequest(
   return {
     correlation,
     input: compileStructuredInputForm({
-      schema: structuredInputValue(snapshot, "requestedSchema"),
-      message: structuredInputString(snapshot, "message"),
+      schema: readValue(snapshot, "requestedSchema"),
+      message: readAcpElicitationString(snapshot, "message"),
       fallbackMessage: "ACP needs input",
       options: {
         protocolName: "ACP",
@@ -75,8 +72,8 @@ export function parseAcpElicitationRequest(
 function readScope(
   request: StructuredInputRecord,
 ): ParsedAcpElicitationRequest["correlation"] | string {
-  const sessionId = structuredInputValue(request, "sessionId");
-  const requestId = structuredInputValue(request, "requestId");
+  const sessionId = readValue(request, "sessionId");
+  const requestId = readValue(request, "requestId");
   const hasSession = sessionId !== undefined;
   const hasRequest = requestId !== undefined;
   if (hasSession === hasRequest) {
@@ -87,7 +84,7 @@ function readScope(
     if (!normalizedSessionId) {
       return "OpenClaw declined an ACP input request with an invalid session id.";
     }
-    const toolCallId = structuredInputValue(request, "toolCallId");
+    const toolCallId = readValue(request, "toolCallId");
     const normalizedToolCallId =
       toolCallId === undefined || toolCallId === null
         ? toolCallId
@@ -120,6 +117,15 @@ function readCorrelationText(value: unknown): string | undefined {
     }
   }
   return value;
+}
+
+function readValue(record: StructuredInputRecord, key: string): StructuredInputValue | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function readAcpElicitationString(record: StructuredInputRecord, key: string): string | undefined {
+  const value = readValue(record, key);
+  return typeof value === "string" ? value : undefined;
 }
 
 function unsupported(message: string): ParsedAcpElicitationRequest {

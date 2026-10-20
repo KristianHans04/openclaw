@@ -26,7 +26,6 @@ import {
   resolveSessionVisibility,
   SessionMutationAuthorizationChangedError,
 } from "../session-sharing.js";
-import { sharingExpectedEntry } from "./sessions-sharing-authority.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
 export async function requireSuggestionTarget(params: {
@@ -176,12 +175,8 @@ export async function createSessionSuggestionMutation(params: {
   signal?: AbortSignal;
   assertCurrent?: () => void;
 }) {
-  const expectedSessionId = params.target.entry.sessionId;
-  const expectedEntry = {
-    ...sharingExpectedEntry(params.target),
-    lifecycleRevision: params.target.entry.lifecycleRevision,
-  };
   const scope = captureSessionTranscriptTargetBinding(suggestionScope(params.target));
+  const expectedSessionId = params.target.entry.sessionId;
   const facts = await prepareSessionMutationFacts({
     cfg: params.context.getRuntimeConfig(),
     sessionKey: params.target.canonicalKey,
@@ -283,7 +278,7 @@ export async function createSessionSuggestionMutation(params: {
       return { ok: false, error: sessionSuggestionSessionChangedError(params.sessionKey) };
     }
   };
-  return { run, readCurrent, expectedSessionId, expectedEntry, release: facts.release };
+  return { run, readCurrent, release: facts.release };
 }
 
 export function readCollaborationTarget(

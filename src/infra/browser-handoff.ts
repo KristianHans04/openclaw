@@ -19,7 +19,6 @@ import { randomUUID } from "node:crypto";
 import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { escapeHtml } from "../shared/html-escape.js";
 import { openLocalFile } from "./browser-open.js";
 import { resolvePreferredOpenClawTmpDir } from "./tmp-openclaw-dir.js";
 import {
@@ -36,12 +35,21 @@ const HANDOFF_FILE_NAME = "handoff.html";
 // is skipped because the process already exited.
 const HANDOFF_CLEANUP_DELAY_MS = 10 * 60 * 1000;
 
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function escapeScriptString(value: string): string {
   return JSON.stringify(value).replaceAll("<", "\\u003c");
 }
 
 function renderBrowserHandoffDocument(targetUrl: string): string {
-  const href = escapeHtml(targetUrl);
+  const href = escapeHtmlAttribute(targetUrl);
   return [
     "<!doctype html>",
     '<html lang="en">',

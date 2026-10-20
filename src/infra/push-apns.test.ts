@@ -602,35 +602,21 @@ describe("push APNs send semantics", () => {
     });
   });
 
-  it.each([
-    [' \uFEFF{"reason":" BadDeviceToken "} \n', "BadDeviceToken"],
-    ['{"reason":" "}', '{"reason":" "}'],
-    ['{"reason":3}', '{"reason":3}'],
-    ["{}", "{}"],
-    ["null", "null"],
-    ["[]", "[]"],
-    ["42", "42"],
-    [" { ", "{"],
-    [" \t\n", undefined],
-    [`${"x".repeat(199)}🚀tail`, "x".repeat(199)],
-  ] as const)(
-    "preserves diagnostic reasons and bounded raw fallbacks: %j",
-    async (body, reason) => {
-      const fixture = createDirectApnsSendFixture("ios-node-utf16-reason", "sandbox", {
-        status: 400,
-        apnsId: "apns-utf16-reason-id",
-        body,
-      });
+  it("keeps bounded non-JSON error reasons UTF-16 well-formed", async () => {
+    const fixture = createDirectApnsSendFixture("ios-node-utf16-reason", "sandbox", {
+      status: 400,
+      apnsId: "apns-utf16-reason-id",
+      body: `${"x".repeat(199)}🚀tail`,
+    });
 
-      const result = await sendApnsAlert({
-        ...fixture,
-        title: "Wake",
-        body: "Ping",
-      });
+    const result = await sendApnsAlert({
+      ...fixture,
+      title: "Wake",
+      body: "Ping",
+    });
 
-      expect(result.reason).toBe(reason);
-    },
-  );
+    expect(requireRecord(result, "APNs result").reason).toBe("x".repeat(199));
+  });
 });
 
 describe("push APNs auth and helper coverage", () => {

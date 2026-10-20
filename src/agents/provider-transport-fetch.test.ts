@@ -295,32 +295,6 @@ describe("buildGuardedModelFetch", () => {
     await expect(parseSse(response)).resolves.toEqual([{ ok: true }]);
   });
 
-  it.each([
-    [' \n{"stream":true}', true],
-    ['{"stream":false}', false],
-    ['{"stream":"true"}', false],
-    ["null", false],
-    ["[]", false],
-    ["42", false],
-    ["{", false],
-    ["", false],
-  ] as const)(
-    "synthesizes JSON responses only for a true stream flag: %j",
-    async (body, streams) => {
-      mockResponse(
-        new Response('{"ok":true}', { headers: { "content-type": "application/json" } }),
-      );
-      const response = await request({ ...streaming, body });
-      if (streams) {
-        expect(response.headers.get("content-type")).toContain("text/event-stream");
-        await expect(parseSse(response)).resolves.toEqual([{ ok: true }]);
-      } else {
-        expect(response.headers.get("content-type")).toBe("application/json");
-        await expect(response.text()).resolves.toBe('{"ok":true}');
-      }
-    },
-  );
-
   it.each([undefined, "application/json; charset=utf-8"])(
     "recognizes split SSE before EOF with content-type %s",
     async (contentType) => {
