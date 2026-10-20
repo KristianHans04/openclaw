@@ -57,6 +57,7 @@ function colorContrast(foreground: string, background: string): number {
 
 async function openWidgetMenu(page: Page): Promise<void> {
   const widget = page.locator('[data-test-id="board-widget"]').first();
+  await widget.waitFor({ state: "visible" });
   await widget.focus();
   await widget.locator(".board-widget__menu-trigger").click();
   await widget.locator(".board-widget__menu-panel:popover-open").waitFor();
@@ -475,18 +476,18 @@ describeStandaloneMockServer("standalone Control UI mock server", () => {
     });
     await runQaGatewayFixture(
       async () => {
-        await page.goto(`${origin}/chat`, { waitUntil: "networkidle" });
+        await page.goto(`${origin}/chat`);
         // The fixture viewer is Riley; this shared checkout belongs to Peter.
         await selectAllSidebarSessions(page);
         await page.getByText("OpenClaw work checkout", { exact: true }).click();
         await page.getByRole("button", { name: "Write a message to send." }).waitFor();
         await page.screenshot({ path: path.join(artifacts, "chat.png") });
-        await page.goto(`${origin}/profile`, { waitUntil: "networkidle" });
+        await page.goto(`${origin}/profile`);
         await expect
           .poll(() => page.getByRole("textbox", { name: "Display name", exact: true }).inputValue())
           .toBe("Riley");
         await page.screenshot({ path: path.join(artifacts, "profile.png") });
-        await page.goto(`${origin}/focus/terminal`, { waitUntil: "networkidle" });
+        await page.goto(`${origin}/focus/terminal`);
         const terminal = page.locator("openclaw-terminal-panel");
         await terminal.locator(".tabstrip-tab.is-live").waitFor();
         await terminal.locator(".tp-host canvas").waitFor({ state: "visible" });
@@ -641,7 +642,8 @@ describeStandaloneMockServer("standalone Control UI mock server", () => {
         const isolated = await isolatedPage(attachments.url, { serviceWorkers: "block" });
         context = isolated.context;
         const { page, origin, escaped } = isolated;
-        await page.goto(`${origin}/chat`, { waitUntil: "networkidle" });
+        await page.goto(`${origin}/chat`);
+        await page.getByRole("textbox", { name: "Chat composer", exact: true }).waitFor();
         const result = await page.evaluate(async () => {
           const response = await fetch("/__fixtures/chat-attachments/sample-image.svg");
           const blob = await response.blob();
@@ -679,7 +681,7 @@ describeStandaloneMockServer("standalone Control UI mock server", () => {
       const context = await browser.newContext({ colorScheme: mode });
       try {
         const page = await context.newPage();
-        await page.goto(fixtureServer.url, { waitUntil: "networkidle" });
+        await page.goto(fixtureServer.url);
         await expect
           .poll(() =>
             page.locator("html").evaluate((root) => ({
@@ -734,7 +736,7 @@ describeStandaloneMockServer("standalone Control UI mock server", () => {
   it(
     "renders consistent menu options with a leading trash icon",
     withFixturePage(async (page) => {
-      await page.goto(fixtureServer.url, { waitUntil: "networkidle" });
+      await page.goto(fixtureServer.url);
       await openWidgetMenu(page);
       const presentation = await page
         .locator(".board-widget__menu-panel:popover-open .board-widget__menu-danger")
@@ -768,7 +770,7 @@ describeStandaloneMockServer("standalone Control UI mock server", () => {
   it(
     "opens a visible catalog session with its transcript in chronological order",
     withFixturePage(async (page) => {
-      await page.goto(new URL("/chat", fixtureServer.url).toString(), { waitUntil: "networkidle" });
+      await page.goto(new URL("/chat", fixtureServer.url).toString());
       // External catalog sessions have no human owner.
       await selectAllSidebarSessions(page);
       await page.getByText("Release checklist sweep", { exact: true }).click();
@@ -798,7 +800,8 @@ describeStandaloneMockServer("standalone Control UI mock server", () => {
   it(
     "starts with aligned build identity and an upgraded chat pane",
     withFixturePage(async (page) => {
-      await page.goto(new URL("/chat", fixtureServer.url).toString(), { waitUntil: "networkidle" });
+      await page.goto(new URL("/chat", fixtureServer.url).toString());
+      await page.getByRole("textbox", { name: "Chat composer", exact: true }).waitFor();
       expect(await page.locator(".community-invite-card").count()).toBe(0);
       await selectAllSidebarSessions(page);
       await page.getByText("OpenClaw work checkout", { exact: true }).click();
@@ -834,7 +837,7 @@ describeStandaloneMockServer("standalone Control UI mock server", () => {
   it(
     "renders a deterministic reply after generic chat.send",
     withFixturePage(async (page) => {
-      await page.goto(new URL("/chat", fixtureServer.url).toString(), { waitUntil: "networkidle" });
+      await page.goto(new URL("/chat", fixtureServer.url).toString());
       await selectAllSidebarSessions(page);
       await page.getByText("OpenClaw work checkout", { exact: true }).click();
       await page.getByRole("button", { name: "Write a message to send." }).waitFor();
