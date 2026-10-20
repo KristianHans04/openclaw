@@ -112,6 +112,10 @@ fixtures.describeControlUiE2e("Control UI plugin runtime actions", () => {
     await confirmation.waitFor();
     expect(await confirmation.textContent()).toContain("all of its entries");
     expect(await gateway.getRequests("plugins.uninstall")).toHaveLength(0);
+    await button("Cancel", confirmation).click();
+    await confirmation.waitFor({ state: "detached" });
+    expect(await gateway.getRequests("plugins.uninstall")).toHaveLength(0);
+    await button("Uninstall Calendar Plus").click();
     await button("Remove", confirmation).click();
     await row.waitFor({ state: "detached" });
     await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/plugins");
