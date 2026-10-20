@@ -37,6 +37,7 @@ import {
   sessionClientCredentialPath,
 } from "./session-message-client.test-support.js";
 import { registerCronSessionCompletionEventTests } from "./session-message-cron.test-support.js";
+import { findWatchedPresenceEntry, getConnId } from "./session-message-presence.test-support.js";
 import { registerRecoveredSubagentSessionEventTest } from "./session-message-subagent.test-support.js";
 import { createWorkerFanoutFixture } from "./session-message-worker.test-support.js";
 import { seedCompletedSessionTranscript } from "./session-row-fixtures.test-support.js";
@@ -327,12 +328,7 @@ describe("session.message websocket events", () => {
     const watchedWs = await harness.openWs();
     const instanceId = "presence-watched-sessions";
     try {
-      const observerHello = await connectOk(observerWs, { scopes: ["operator.read"] });
-      const observerConnectionId = requireRecord(
-        requireRecord(observerHello, "observer hello").server,
-        "observer server",
-      ).connId;
-      expect(observerConnectionId).toEqual(expect.any(String));
+      const observerConnId = getConnId(await connectOk(observerWs, { scopes: ["operator.read"] }));
       const watchedHello = await connectOk(watchedWs, {
         scopes: ["operator.read"],
         client: {
@@ -348,20 +344,7 @@ describe("session.message websocket events", () => {
       ).snapshot?.stateVersion?.presence;
       expect(initialPresenceVersion).toEqual(expect.any(Number));
 
-      const findWatchedEntry = (message: unknown) => {
-        const record = requireRecord(message, "presence event");
-        if (record.event !== "presence") {
-          return undefined;
-        }
-        const payload = requireRecord(record.payload, "presence payload");
-        const presence = Array.isArray(payload.presence) ? payload.presence : [];
-        return presence.find(
-          (entry): entry is Record<string, unknown> =>
-            Boolean(entry) &&
-            typeof entry === "object" &&
-            (entry as { instanceId?: unknown }).instanceId === instanceId,
-        );
-      };
+      const findWatchedEntry = (message: unknown) => findWatchedPresenceEntry(message, instanceId);
       const declaredKeys = ["agent:main:watch-00", "agent:main:watch-01"];
       const replacementKey = "agent:main:replacement";
       const storePath = await createSessionStoreFile();
@@ -485,7 +468,7 @@ describe("session.message websocket events", () => {
       expect(requireRecord(disconnectedEvent.payload, "presence payload").presence).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            connectionId: observerConnectionId,
+            connectionId: observerConnId,
             deviceId: declaredEntry?.deviceId,
             reason: "connect",
           }),
