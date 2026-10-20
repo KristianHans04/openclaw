@@ -130,13 +130,21 @@ export function renderSidebarAgentMenu(params: SidebarAgentMenuParams): JSX.Elem
   const createAgentItem: MenuItem = {
     id: `${COMMAND_VALUE_PREFIX}new-agent`,
     label: t("agentChip.createAgent"),
-    class: [
-      "sidebar-customize-menu__item sidebar-agent-menu__create",
-      { "session-menu__item--described": Boolean(params.creationDisabledReason) },
-    ],
-    disabled: Boolean(params.creationDisabledReason || params.pendingAgent),
-    attributes: {
-      "aria-describedby": params.creationDisabledReason ? creationReasonId : undefined,
+    get class() {
+      return [
+        "sidebar-customize-menu__item sidebar-agent-menu__create",
+        { "session-menu__item--described": Boolean(params.creationDisabledReason) },
+      ];
+    },
+    get disabled() {
+      return Boolean(params.creationDisabledReason || params.pendingAgent);
+    },
+    get attributes() {
+      return {
+        "aria-disabled":
+          params.creationDisabledReason || params.pendingAgent ? ("true" as const) : undefined,
+        "aria-describedby": params.creationDisabledReason ? creationReasonId : undefined,
+      };
     },
     closeOnSelect: false,
     content: (

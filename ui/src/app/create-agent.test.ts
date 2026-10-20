@@ -462,7 +462,8 @@ describe("application agent creation", () => {
     });
     // A disconnected client cannot undo an already dispatched server creation.
     expect(roster.agents).toHaveLength(2);
-    expect(context.agents.state.agentsList).toBeNull();
+    // Reconnecting retains the last confirmed roster while refresh is unavailable.
+    expect(context.agents.state.agentsList?.agents).toEqual([{ id: "main", name: "Molty" }]);
     expect(context.chatSubmissions.creation).toBeUndefined();
     expect(request.mock.calls.map(([method]) => method)).toEqual(["agents.list", "agents.create"]);
   });

@@ -121,6 +121,7 @@ function renderAgentRow(
     get attributes() {
       return {
         "aria-current": active() ? ("true" as const) : undefined,
+        "aria-disabled": pending() ? ("true" as const) : undefined,
         "data-initial-focus": readAutofocus() ? "" : undefined,
       };
     },
