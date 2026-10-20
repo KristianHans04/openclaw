@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { sessionChanges } from "../../../sessions/session-row-changes.js";
 import { AGENT_RUN_TERMINAL_RETRY_GRACE_MS } from "../../agent-run-terminal-outcome.js";
 import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
@@ -8,7 +8,11 @@ import {
   publishSubagentRunChanges,
   subscribeSubagentRunChanges,
 } from "./subagent-registry-publication.js";
+import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { copySubagentRunRuntimeOwner } from "./subagent-run-generation.js";
+
+const subscribe = (...args: Parameters<typeof subscribeSubagentRunChanges>) =>
+  onTestFinished(subscribeSubagentRunChanges(...args));
 
 it.each(["memory", "persistence", "projection failure"] as const)(
   "publishes projections before session and persistence observers: %s",
@@ -17,16 +21,14 @@ it.each(["memory", "persistence", "projection failure"] as const)(
     const revision = getSubagentRegistryPublicationRevision();
     const event = { runIds: ["run"], sessionKeys: ["child", undefined, "child"] };
     const failure = new Error("projection failed");
-    onTestFinished(
-      subscribeSubagentRunChanges("projection", (published) => {
-        expect(published).toEqual(event);
-        expect(getSubagentRegistryPublicationRevision()).toBe(revision + 1);
-        if (source === "projection failure") {
-          throw failure;
-        }
-        order.push("projection");
-      }),
-    );
+    subscribe("projection", (published) => {
+      expect(published).toEqual(event);
+      expect(getSubagentRegistryPublicationRevision()).toBe(revision + 1);
+      if (source === "projection failure") {
+        throw failure;
+      }
+      order.push("projection");
+    });
     const session = vi.fn<Parameters<typeof sessionChanges.subscribe>[0]>((change) => {
       if ("sessionKey" in change && change.sessionKey === "child") {
         order.push("session");
@@ -38,8 +40,8 @@ it.each(["memory", "persistence", "projection failure"] as const)(
       order.push("persistence");
       throw new Error("observer failed");
     });
-    onTestFinished(subscribeSubagentRunChanges("persistence", persisted));
-    onTestFinished(subscribeSubagentRunChanges("persistence", () => order.push("last")));
+    subscribe("persistence", persisted);
+    subscribe("persistence", () => order.push("last"));
 
     const publish = () =>
       publishSubagentRunChanges(
@@ -49,8 +51,7 @@ it.each(["memory", "persistence", "projection failure"] as const)(
       );
     if (source === "projection failure") {
       expect(publish).toThrow(failure);
-      expect(session).not.toHaveBeenCalled();
-      expect(persisted).not.toHaveBeenCalled();
+      expect([session.mock.calls, persisted.mock.calls]).toEqual([[], []]);
       return;
     }
     expect(publish).not.toThrow();
@@ -63,48 +64,37 @@ it.each(["memory", "persistence", "projection failure"] as const)(
   },
 );
 
-describe("pending lifecycle registration ownership", () => {
-  afterEach(() => vi.useRealTimers());
+afterEach(() => vi.useRealTimers());
 
-  it.each([
-    { schedule: "scheduleError", retainCustody: false },
-    { schedule: "scheduleTimeout", retainCustody: false },
-    { schedule: "scheduleCancellation", retainCustody: false },
-    { schedule: "scheduleError", retainCustody: true },
-  ] as const)(
-    "$schedule cannot settle a same-ID successor (retained custody=$retainCustody)",
-    ({ schedule, retainCustody }) => {
-      vi.useFakeTimers();
-      const original = createSubagentRunRecord({ runId: "reused", generation: 1 });
-      const runs = new Map([[original.runId, original]]);
-      const completeInBackground = vi.fn();
-      const scheduler = createPendingLifecycleScheduler({ runs, completeInBackground });
-      scheduler[schedule]({
-        runId: original.runId,
-        expectedEntry: original,
-        endedAt: 123,
-        error: "old failure",
-      });
-      const successor = retainCustody
-        ? copySubagentRunRuntimeOwner(original, { ...original, generation: 2 })
-        : createSubagentRunRecord({ runId: original.runId, generation: 2 });
-      runs.set(original.runId, successor);
+it.each([
+  { schedule: "scheduleError", retainCustody: false },
+  { schedule: "scheduleTimeout", retainCustody: false },
+  { schedule: "scheduleCancellation", retainCustody: false },
+  { schedule: "scheduleError", retainCustody: true },
+] as const)(
+  "$schedule cannot settle a same-ID successor (retained custody=$retainCustody)",
+  ({ schedule, retainCustody }) => {
+    vi.useFakeTimers();
+    const original = createSubagentRunRecord({ runId: "reused", generation: 1 });
+    const runs = new Map([[original.runId, original]]);
+    const completeInBackground = vi.fn();
+    const scheduler = createPendingLifecycleScheduler({ runs, completeInBackground });
+    const scheduleEntry = (expectedEntry: SubagentRunRecord, endedAt: number) =>
+      scheduler[schedule]({ runId: expectedEntry.runId, expectedEntry, endedAt, error: "failure" });
+    scheduleEntry(original, 123);
+    const successor = retainCustody
+      ? copySubagentRunRuntimeOwner(original, { ...original, generation: 2 })
+      : createSubagentRunRecord({ runId: original.runId, generation: 2 });
+    runs.set(original.runId, successor);
 
-      vi.advanceTimersByTime(AGENT_RUN_TERMINAL_RETRY_GRACE_MS);
+    vi.advanceTimersByTime(AGENT_RUN_TERMINAL_RETRY_GRACE_MS);
 
-      expect(completeInBackground).not.toHaveBeenCalled();
-      scheduler[schedule]({
-        runId: successor.runId,
-        expectedEntry: successor,
-        endedAt: 456,
-        error: "new failure",
-      });
-      vi.advanceTimersByTime(AGENT_RUN_TERMINAL_RETRY_GRACE_MS);
-      expect(completeInBackground).toHaveBeenCalledOnce();
-      expect(completeInBackground).toHaveBeenCalledWith(
-        expect.objectContaining({ runId: successor.runId, endedAt: 456, expectedEntry: successor }),
-        expect.any(String),
-      );
-    },
-  );
-});
+    expect(completeInBackground).not.toHaveBeenCalled();
+    scheduleEntry(successor, 456);
+    vi.advanceTimersByTime(AGENT_RUN_TERMINAL_RETRY_GRACE_MS);
+    expect(completeInBackground).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ runId: successor.runId, endedAt: 456, expectedEntry: successor }),
+      expect.any(String),
+    );
+  },
+);
