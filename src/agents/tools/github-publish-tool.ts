@@ -23,6 +23,7 @@ import {
   canUploadGitHubPublicationEvidence,
 } from "../sandbox/github-publication.js";
 import type { SandboxContext } from "../sandbox/types.js";
+import { stringEnum } from "../schema/string-enum.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult } from "./common.js";
 import {
@@ -30,6 +31,36 @@ import {
   getGatewayToolCallerIdentity,
 } from "./gateway-caller-context.js";
 import { callInProcessGatewayTool, type InProcessGatewayCaller } from "./in-process-gateway.js";
+
+const publicationOperatorActions = GitHubPublicationActionSchema.properties.action.anyOf.map(
+  (action) => action.const,
+);
+const publicationWorkspaceActions = [
+  "publish",
+  "inspect_pr",
+  "refresh_base",
+  "edit",
+  "ready",
+  "request_review",
+  "upload_evidence",
+];
+
+export const githubPublishToolDefinition = {
+  name: "github_publish",
+  parameters: Type.Object(
+    {
+      pullRequestUrl: Type.Optional(GitHubPullRequestInspectSchema.properties.pullRequestUrl),
+      ...GitHubBaseRefreshSchema.properties,
+      ...GitHubPublicationEditSchema.properties,
+      evidence: Type.Optional(GitHubPublicationEvidenceSchema),
+      action: Type.Optional(stringEnum(publicationWorkspaceActions)),
+      title: Type.Optional(GitHubPublicationTitleSchema),
+      body: GitHubPublicationEditSchema.properties.body,
+      draft: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false },
+  ),
+};
 
 function describeGitHubPublishTool(
   automationsAvailable: boolean,
@@ -45,7 +76,7 @@ function describeGitHubPublishTool(
     "inspect_pr: supply pullRequestUrl to read an existing PR authored by your currently verified linked GitHub account. Accepts copied PR tab, query and comment links. Returns the canonical PR URL, author, state, base/head repositories, branches and observed commits. It does not prepare a workspace, bind the PR, publish changes or grant later authority. Private repositories require verified current account access. ";
   const publication = publicationAvailable
     ? `Publish or edit the current session's PR through Gateway-held credentials, for local or cloud repository workspaces.
-- Omitted action: publish accepted workspace changes as an open PR by default; draft: true creates a draft. title/body and draft are used only when creating a PR. Updating an existing PR preserves its state. Finish the turn so changes can be saved. Busy/recovering workspaces wait; the receipt arrives in this conversation without resuming the agent. If authorized review, CI or landing remains, ${continuation}; a receipt does not complete it.
+- publish (default when action is omitted): publish accepted workspace changes as an open PR by default; draft: true creates a draft. title/body and draft are used only when creating a PR. Updating an existing PR preserves its state. Finish the turn so changes can be saved. Busy/recovering workspaces wait; the receipt arrives in this conversation without resuming the agent. If authorized review, CI or landing remains, ${continuation}; a receipt does not complete it.
 - edit: omit title/body to read current metadata. To change either field, send requestId, expectedHeadCommit, and its new value with the observed expectedTitle/expectedBody. Keep attribution, marker and footer unchanged in the full body. Omitted fields stay unchanged. Edit never synchronizes, stages, commits or pushes files or changes PR state. Read with edit after an uncertain response before retrying.
 - ready: mark the current session's own draft ready for review, using the requestId and expectedHeadCommit observed with edit. After an uncertain response, read with edit before retrying. This does not merge the PR.
 - request_review: after an explicit re-review request, read the current PR with edit, then send requestId and expectedHeadCommit to post only "@clawsweeper re-review". No comment text, focus or child target is accepted. Posting is not review acceptance or completion. If the response is uncertain, read existing PR comments before any new request; never retry blindly.
@@ -69,9 +100,14 @@ export function createGitHubPublishTool(
   const actionsAvailable = options.actionsAvailable === true;
   const refreshBaseAvailable = canRefreshGitHubPublicationBase(options.sandbox);
   const evidenceAvailable = canUploadGitHubPublicationEvidence(options.sandbox);
+  const workspaceActions = publicationWorkspaceActions.filter(
+    (action) =>
+      (action !== "refresh_base" || refreshBaseAvailable) &&
+      (action !== "upload_evidence" || evidenceAvailable),
+  );
   const tool: AnyAgentTool = {
     label: "GitHub Publish",
-    name: "github_publish",
+    name: githubPublishToolDefinition.name,
     description: describeGitHubPublishTool(
       false,
       publicationAvailable,
@@ -82,39 +118,21 @@ export function createGitHubPublishTool(
     parameters: publicationAvailable
       ? Type.Object(
           {
-            ...(actionsAvailable
-              ? {
-                  ...GitHubPublicationActionSchema.properties,
-                }
-              : {}),
+            ...(actionsAvailable ? GitHubPublicationActionSchema.properties : {}),
             ...(refreshBaseAvailable ? GitHubBaseRefreshSchema.properties : {}),
             pullRequestUrl: Type.Optional(GitHubPullRequestInspectSchema.properties.pullRequestUrl),
             ...GitHubPublicationEditSchema.properties,
             ...(evidenceAvailable
               ? { evidence: Type.Optional(GitHubPublicationEvidenceSchema) }
               : {}),
-            action: actionsAvailable
-              ? Type.Optional(
-                  Type.Union([
-                    Type.Literal("publish"),
-                    Type.Literal("inspect_pr"),
-                    ...(refreshBaseAvailable ? [Type.Literal("refresh_base")] : []),
-                    Type.Literal("edit"),
-                    Type.Literal("request_review"),
-                    ...(evidenceAvailable ? [Type.Literal("upload_evidence")] : []),
-                    ...GitHubPublicationActionSchema.properties.action.anyOf,
-                  ]),
-                )
-              : Type.Optional(
-                  Type.Union([
-                    Type.Literal("inspect_pr"),
-                    ...(refreshBaseAvailable ? [Type.Literal("refresh_base")] : []),
-                    Type.Literal("edit"),
-                    Type.Literal("ready"),
-                    Type.Literal("request_review"),
-                    ...(evidenceAvailable ? [Type.Literal("upload_evidence")] : []),
-                  ]),
-                ),
+            action: Type.Optional(
+              stringEnum([
+                ...new Set([
+                  ...workspaceActions,
+                  ...(actionsAvailable ? publicationOperatorActions : []),
+                ]),
+              ]),
+            ),
             title: Type.Optional(GitHubPublicationTitleSchema),
             body: GitHubPublicationEditSchema.properties.body,
             draft: Type.Optional(Type.Boolean()),
@@ -125,10 +143,7 @@ export function createGitHubPublishTool(
           {
             ...GitHubPublicationActionSchema.properties,
             pullRequestUrl: Type.Optional(GitHubPullRequestInspectSchema.properties.pullRequestUrl),
-            action: Type.Union([
-              Type.Literal("inspect_pr"),
-              ...GitHubPublicationActionSchema.properties.action.anyOf,
-            ]),
+            action: stringEnum(["inspect_pr", ...publicationOperatorActions]),
           },
           { additionalProperties: false },
         ),
@@ -150,6 +165,7 @@ export function createGitHubPublishTool(
           conflictsResolved?: boolean;
           baseCommit?: string;
         };
+      const action = input.action ?? "publish";
       const caller = getGatewayToolCallerIdentity();
       if (!caller?.sessionKey) {
         throw new Error("GitHub publication requires the current Gateway session.");
@@ -266,7 +282,7 @@ export function createGitHubPublishTool(
       if (input.expectedTitle !== undefined || input.expectedBody !== undefined) {
         throw new Error("Use action edit for PR metadata preconditions; publish changes source.");
       }
-      if (input.action === "refresh_base") {
+      if (action === "refresh_base") {
         if (
           input.publishingSessionKey ||
           input.requestId ||
@@ -294,11 +310,11 @@ export function createGitHubPublishTool(
           ),
         );
       }
-      if (input.action && input.action !== "publish") {
+      if (action !== "publish") {
         return jsonResult(
           await callGateway<SessionGitHubActionResult>("sessions.github.action", {
             sessionKey: caller.sessionKey,
-            action: input.action,
+            action,
             ...(input.publishingSessionKey
               ? { publishingSessionKey: input.publishingSessionKey }
               : {}),
