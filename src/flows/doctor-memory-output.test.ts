@@ -23,6 +23,25 @@ const { note, getManager, getBackend } = vi.hoisted(() => ({
   }),
 }));
 
+function memoryPlugin(enabled?: boolean, frequency = "0 */4 * * *", dreaming = true) {
+  return {
+    ...(enabled === undefined ? {} : { enabled }),
+    config: { dreaming: { enabled: dreaming, frequency } },
+  };
+}
+
+function memoryConfig(workspace: string, plugins: OpenClawConfig["plugins"]): OpenClawConfig {
+  return {
+    agents: { defaults: { workspace } },
+    memory: { search: { enabled: false, rememberAcrossConversations: false } },
+    plugins: { ...plugins, entries: { "memory-core": memoryPlugin(true), ...plugins?.entries } },
+  };
+}
+
+function context(cfg: OpenClawConfig) {
+  return createDoctorHealthFlowContext({ cfg, options: { nonInteractive: true } });
+}
+
 vi.mock("../../packages/terminal-core/src/note.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../packages/terminal-core/src/note.js")>();
   return { ...actual, note };
@@ -77,92 +96,49 @@ describe("ordinary Doctor memory output", () => {
   afterEach(async () => {
     await closeOpenClawStateDatabaseAsync();
     vi.unstubAllEnvs();
+    expect(getManager).not.toHaveBeenCalled();
+    expect(getBackend).not.toHaveBeenCalled();
+    expect(fs.existsSync(imported)).toBe(false);
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  it.each<{
-    label: string;
-    plugins: OpenClawConfig["plugins"];
-    enabled: boolean;
-  }>([
-    { label: "default memory plugin", plugins: {}, enabled: true },
-    {
-      label: "disabled dreaming",
-      plugins: {
-        entries: {
-          "memory-core": { config: { dreaming: { enabled: false, frequency: "0 */4 * * *" } } },
-        },
-      },
-      enabled: false,
-    },
-    { label: "globally disabled plugins", plugins: { enabled: false }, enabled: false },
-    {
-      label: "disabled memory plugin",
-      plugins: {
-        entries: {
-          "memory-core": {
-            enabled: false,
-            config: { dreaming: { enabled: true, frequency: "0 */4 * * *" } },
-          },
-        },
-      },
-      enabled: false,
-    },
-    { label: "denied memory plugin", plugins: { deny: ["memory-core"] }, enabled: false },
-    { label: "disabled memory slot", plugins: { slots: { memory: "none" } }, enabled: false },
-    {
-      label: "provider dreaming sidecar with restrictive allowlist",
-      plugins: {
+  it.each<[string, OpenClawConfig["plugins"], boolean]>([
+    ["default memory plugin", {}, true],
+    [
+      "disabled dreaming",
+      { entries: { "memory-core": memoryPlugin(undefined, undefined, false) } },
+      false,
+    ],
+    ["globally disabled plugins", { enabled: false }, false],
+    ["disabled memory plugin", { entries: { "memory-core": memoryPlugin(false) } }, false],
+    ["denied memory plugin", { deny: ["memory-core"] }, false],
+    ["disabled memory slot", { slots: { memory: "none" } }, false],
+    [
+      "provider dreaming sidecar with restrictive allowlist",
+      {
         allow: ["memory-provider"],
         slots: { memory: "memory-provider" },
         entries: {
-          "memory-core": {
-            enabled: true,
-            config: { dreaming: { enabled: false, frequency: "0 */12 * * *" } },
-          },
-          "memory-provider": {
-            enabled: true,
-            config: { dreaming: { enabled: true, frequency: "0 */4 * * *" } },
-          },
+          "memory-core": memoryPlugin(true, "0 */12 * * *", false),
+          "memory-provider": memoryPlugin(true),
         },
       },
-      enabled: true,
-    },
-    {
-      label: "disabled selected provider",
-      plugins: {
+      true,
+    ],
+    [
+      "disabled selected provider",
+      {
         slots: { memory: "memory-provider" },
-        entries: {
-          "memory-provider": {
-            enabled: false,
-            config: { dreaming: { enabled: true, frequency: "0 */4 * * *" } },
-          },
-        },
+        entries: { "memory-provider": memoryPlugin(false) },
       },
-      enabled: false,
-    },
+      false,
+    ],
   ])(
-    "reports effective dreaming for $label without loading plugins",
-    async ({ plugins, enabled }) => {
-      const ctx = createDoctorHealthFlowContext({
-        cfg: {
-          agents: { defaults: { workspace: "/missing-doctor-memory-workspace" } },
-          memory: { search: { enabled: false, rememberAcrossConversations: false } },
-          plugins: {
-            ...plugins,
-            entries: {
-              "memory-core": {
-                enabled: true,
-                config: { dreaming: { enabled: true, frequency: "0 */4 * * *" } },
-              },
-              ...plugins?.entries,
-            },
-          },
-        },
-        options: { nonInteractive: true },
-      });
-
-      await runMemorySearchHealthContribution(ctx);
+    "reports effective dreaming for %s without loading plugins",
+    async (_label, plugins, enabled) => {
+      await runMemorySearchHealthContribution(
+        context(memoryConfig("/missing-doctor-memory-workspace", plugins)),
+      );
 
       expect(note).toHaveBeenCalledWith(
         "Memory search is explicitly disabled (enabled: false).",
@@ -176,9 +152,6 @@ describe("ordinary Doctor memory output", () => {
         ].join("\n"),
         "Memory search",
       );
-      expect(getManager).not.toHaveBeenCalled();
-      expect(getBackend).not.toHaveBeenCalled();
-      expect(fs.existsSync(imported)).toBe(false);
       expect(note).toHaveBeenCalledTimes(2);
       expect(fs.existsSync(resolveOpenClawStateSqlitePath())).toBe(false);
     },
@@ -186,15 +159,9 @@ describe("ordinary Doctor memory output", () => {
 
   it("reads workspace phase history and the owned schedule without initializing memory", async () => {
     const workspace = path.join(root, "workspace");
-    const cfg: OpenClawConfig = {
-      agents: { defaults: { workspace } },
-      memory: { search: { enabled: false, rememberAcrossConversations: false } },
-      plugins: {
-        entries: {
-          "memory-core": { config: { dreaming: { enabled: true, frequency: "15 4 * * *" } } },
-        },
-      },
-    };
+    const cfg = memoryConfig(workspace, {
+      entries: { "memory-core": memoryPlugin(undefined, "15 4 * * *") },
+    });
     await appendMemoryHostEvent(workspace, {
       type: "memory.dream.completed",
       timestamp: "2026-10-07T04:15:00.000Z",
@@ -242,12 +209,7 @@ describe("ordinary Doctor memory output", () => {
 
     for (const cronEnabled of [true, false]) {
       note.mockClear();
-      await runMemorySearchHealthContribution(
-        createDoctorHealthFlowContext({
-          cfg: { ...cfg, cron: { enabled: cronEnabled } },
-          options: { nonInteractive: true },
-        }),
-      );
+      await runMemorySearchHealthContribution(context({ ...cfg, cron: { enabled: cronEnabled } }));
       expect(note).toHaveBeenCalledWith(
         [
           "Dreaming: enabled (cadence 15 4 * * *).",
@@ -257,8 +219,5 @@ describe("ordinary Doctor memory output", () => {
         "Memory search",
       );
     }
-    expect(getManager).not.toHaveBeenCalled();
-    expect(getBackend).not.toHaveBeenCalled();
-    expect(fs.existsSync(imported)).toBe(false);
   });
 });

@@ -5,7 +5,7 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { resolveOpenClawPackageRoot } from "../infra/openclaw-root.js";
 import { resolveInitialDoctorHealthContributions } from "./doctor-health-contributions-initial.js";
 import { createDoctorHealthFlowContext } from "./doctor-health-contributions.test-support.js";
-import type { HealthCheckContext } from "./health-checks.js";
+import type { HealthCheckContext, HealthFinding } from "./health-checks.js";
 
 vi.mock("../infra/openclaw-root.js", () => ({
   resolveOpenClawPackageRoot: vi.fn(),
@@ -35,6 +35,17 @@ function check() {
   return contribution()?.healthChecks[0];
 }
 
+function warningMessage(findings: readonly HealthFinding[] | undefined) {
+  expect(findings).toEqual([
+    expect.objectContaining({ checkId: "core/doctor/update-snapshots", severity: "warning" }),
+  ]);
+  return findings![0]!.message;
+}
+
+function packageRoot(...segments: string[]) {
+  vi.mocked(resolveOpenClawPackageRoot).mockResolvedValue(path.join(globalRoot, ...segments));
+}
+
 beforeEach(async () => {
   globalRoot = path.join(
     dirs.make("doctor-update-snapshots-"),
@@ -43,7 +54,7 @@ beforeEach(async () => {
     "node_modules",
   );
   await fs.mkdir(path.join(globalRoot, "openclaw"), { recursive: true });
-  vi.mocked(resolveOpenClawPackageRoot).mockResolvedValue(path.join(globalRoot, "openclaw"));
+  packageRoot("openclaw");
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -64,13 +75,7 @@ it("reports dotted and retired dashed snapshots with sizes and quoted commands, 
   await fs.symlink(second, path.join(first, "linked-snapshot"), "dir");
   await fs.symlink(second, path.join(globalRoot, ".openclaw.package-backup-link.databases"), "dir");
 
-  const findings = (await check()?.detect({ ...context, mode: "fix" })) ?? [];
-  expect(findings).toHaveLength(1);
-  expect(findings[0]).toMatchObject({
-    checkId: "core/doctor/update-snapshots",
-    severity: "warning",
-  });
-  const message = findings[0]!.message;
+  const message = warningMessage(await check()?.detect({ ...context, mode: "fix" }));
   expect(message).toContain(
     "2 retained pre-migration database snapshot directories: 3072 bytes (3.0 KiB)",
   );
@@ -91,14 +96,10 @@ it("reports dotted and retired dashed snapshots with sizes and quoted commands, 
 
 it("does not report a finding without snapshot directories or outside an npm global layout", async () => {
   expect(await check()?.detect(context)).toEqual([]);
-  vi.mocked(resolveOpenClawPackageRoot).mockResolvedValue(
-    path.join(globalRoot, "missing", "lib", "node_modules", "openclaw"),
-  );
+  packageRoot("missing", "lib", "node_modules", "openclaw");
   expect(await check()?.detect(context)).toEqual([]);
   await snapshot("1-100", 1024);
-  vi.mocked(resolveOpenClawPackageRoot).mockResolvedValue(
-    path.join(globalRoot, "source", "openclaw"),
-  );
+  packageRoot("source", "openclaw");
   expect(await check()?.detect(context)).toEqual([]);
 });
 
@@ -123,19 +124,14 @@ it.each(["budget", "read-error", "size-budget"])(
         return directory;
       });
     }
-    const findings = await check()?.detect(context);
-    expect(findings).toHaveLength(1);
-    expect(findings?.[0]).toMatchObject({
-      checkId: "core/doctor/update-snapshots",
-      severity: "warning",
-    });
+    const message = warningMessage(await check()?.detect(context));
     if (cause === "size-budget") {
-      expect(findings?.[0]?.message).toContain("at least 0 bytes");
-      expect(findings?.[0]?.message).toContain("paths and size may be partial");
+      expect(message).toContain("at least 0 bytes");
+      expect(message).toContain("paths and size may be partial");
     } else {
-      expect(findings?.[0]?.message).toContain("Inspection was incomplete");
-      expect(findings?.[0]?.message).toContain(globalRoot);
-      expect(findings?.[0]?.message).toContain(".openclaw.package-backup-*.databases");
+      expect(message).toContain("Inspection was incomplete");
+      expect(message).toContain(globalRoot);
+      expect(message).toContain(".openclaw.package-backup-*.databases");
     }
   },
 );

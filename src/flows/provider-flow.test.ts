@@ -1,4 +1,3 @@
-// Provider flow tests cover provider setup prompts and config mutations.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 type ResolveProviderInstallCatalogEntries =
@@ -10,26 +9,36 @@ type ResolvePluginProviders =
 type ResolveProviderSetupFlowContributions =
   typeof import("./provider-flow.js").resolveProviderSetupFlowContributions;
 
-const resolveProviderInstallCatalogEntries = vi.hoisted(() =>
-  vi.fn<ResolveProviderInstallCatalogEntries>(() => []),
-);
+const { catalogChoices, manifestChoices, runtimeProviders } = vi.hoisted(() => ({
+  catalogChoices: vi.fn<ResolveProviderInstallCatalogEntries>(() => []),
+  manifestChoices: vi.fn<ResolveManifestProviderAuthChoices>(() => []),
+  runtimeProviders: vi.fn<ResolvePluginProviders>(() => []),
+}));
 vi.mock("../plugins/provider-install-catalog.js", () => ({
-  resolveProviderInstallCatalogEntries,
+  resolveProviderInstallCatalogEntries: catalogChoices,
 }));
-
-const resolveManifestProviderAuthChoices = vi.hoisted(() =>
-  vi.fn<ResolveManifestProviderAuthChoices>(() => []),
-);
 vi.mock("../plugins/provider-auth-choices.js", () => ({
-  resolveManifestProviderAuthChoices,
+  resolveManifestProviderAuthChoices: manifestChoices,
 }));
-
-const resolvePluginProvidersCore = vi.hoisted(() => vi.fn<ResolvePluginProviders>(() => []));
 vi.mock("../plugins/providers.runtime.js", () => ({
-  resolvePluginProvidersCore,
+  resolvePluginProvidersCore: runtimeProviders,
 }));
 
 let resolveProviderSetupFlowContributions: ResolveProviderSetupFlowContributions;
+
+function choice(providerId: string, choiceLabel: string) {
+  return {
+    pluginId: providerId,
+    providerId,
+    methodId: "api-key",
+    choiceId: `${providerId}-api-key`,
+    choiceLabel,
+  };
+}
+
+function catalog(providerId: string, label: string, origin: "bundled" | "global", npmSpec: string) {
+  return { ...choice(providerId, `${label} API key`), label, origin, install: { npmSpec } };
+}
 
 describe("provider flow install catalog contributions", () => {
   beforeAll(async () => {
@@ -38,22 +47,15 @@ describe("provider flow install catalog contributions", () => {
   });
 
   beforeEach(() => {
-    resolveManifestProviderAuthChoices.mockReset();
-    resolveManifestProviderAuthChoices.mockReturnValue([]);
-    resolveProviderInstallCatalogEntries.mockReset();
-    resolveProviderInstallCatalogEntries.mockReturnValue([]);
-    resolvePluginProvidersCore.mockReset();
-    resolvePluginProvidersCore.mockReturnValue([]);
+    manifestChoices.mockReset().mockReturnValue([]);
+    catalogChoices.mockReset().mockReturnValue([]);
+    runtimeProviders.mockReset().mockReturnValue([]);
   });
 
   it("surfaces manifest provider auth choices before setup runtime loads", () => {
-    resolveManifestProviderAuthChoices.mockReturnValue([
+    manifestChoices.mockReturnValue([
       {
-        pluginId: "openai-compatible",
-        providerId: "openai-compatible",
-        methodId: "api-key",
-        choiceId: "openai-compatible-api-key",
-        choiceLabel: "OpenAI-compatible API key",
+        ...choice("openai-compatible", "OpenAI-compatible API key"),
         choiceHint: "Use a compatible endpoint",
         assistantPriority: -5,
         assistantVisibility: "visible",
@@ -81,76 +83,44 @@ describe("provider flow install catalog contributions", () => {
         },
       },
     ]);
-    expect(resolveManifestProviderAuthChoices).toHaveBeenCalledTimes(1);
-    expect(resolveManifestProviderAuthChoices).toHaveBeenCalledWith(
+    expect(manifestChoices).toHaveBeenCalledTimes(1);
+    expect(manifestChoices).toHaveBeenCalledWith(
       expect.objectContaining({ includeUntrustedWorkspacePlugins: false }),
     );
-    expect(resolvePluginProvidersCore).not.toHaveBeenCalled();
+    expect(runtimeProviders).not.toHaveBeenCalled();
   });
 
   it("resolves text and media setup choices in one metadata-only pass", () => {
-    resolveManifestProviderAuthChoices.mockReturnValue([
+    manifestChoices.mockReturnValue([
       {
-        pluginId: "fal",
-        providerId: "fal",
-        methodId: "api-key",
-        choiceId: "fal-api-key",
-        choiceLabel: "fal API key",
+        ...choice("fal", "fal API key"),
         onboardingScopes: ["image-generation", "music-generation"],
       },
-      {
-        pluginId: "openai",
-        providerId: "openai",
-        methodId: "api-key",
-        choiceId: "openai-api-key",
-        choiceLabel: "OpenAI API key",
-      },
+      choice("openai", "OpenAI API key"),
     ]);
-    resolveProviderInstallCatalogEntries.mockReturnValue([
+    catalogChoices.mockReturnValue([
       {
-        pluginId: "vydra",
-        providerId: "vydra",
-        methodId: "api-key",
-        choiceId: "vydra-api-key",
-        choiceLabel: "Vydra API key",
+        ...catalog("vydra", "Vydra", "bundled", "@openclaw/vydra-provider"),
         onboardingScopes: ["image-generation"],
-        label: "Vydra",
-        origin: "bundled",
-        install: { npmSpec: "@openclaw/vydra-provider" },
       },
     ]);
 
     expect(
       resolveProviderSetupFlowContributions({ scope: "all" }).map(({ option }) => option.value),
     ).toEqual(expect.arrayContaining(["fal-api-key", "openai-api-key", "vydra-api-key"]));
-    expect(resolveManifestProviderAuthChoices).toHaveBeenCalledOnce();
-    expect(resolveProviderInstallCatalogEntries).toHaveBeenCalledOnce();
-    expect(resolvePluginProvidersCore).not.toHaveBeenCalled();
+    expect(manifestChoices).toHaveBeenCalledOnce();
+    expect(catalogChoices).toHaveBeenCalledOnce();
+    expect(runtimeProviders).not.toHaveBeenCalled();
   });
 
   it("hides install-catalog choices that cannot be enabled", () => {
-    resolveProviderInstallCatalogEntries.mockReturnValue([
-      {
-        pluginId: "blocked-provider",
-        providerId: "blocked-provider",
-        methodId: "api-key",
-        choiceId: "blocked-provider-api-key",
-        choiceLabel: "Blocked Provider API key",
-        label: "Blocked Provider",
-        origin: "global",
-        install: {
-          npmSpec: "@vendor/blocked-provider",
-        },
-      },
+    catalogChoices.mockReturnValue([
+      catalog("blocked-provider", "Blocked Provider", "global", "@vendor/blocked-provider"),
     ]);
 
     expect(
       resolveProviderSetupFlowContributions({
-        config: {
-          plugins: {
-            enabled: false,
-          },
-        },
+        config: { plugins: { enabled: false } },
       }),
     ).toStrictEqual([]);
   });
