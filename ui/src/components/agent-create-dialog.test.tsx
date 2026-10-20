@@ -7,6 +7,7 @@ import { AgentCreateDialog } from "./agent-create-dialog.tsx";
 
 const picker = vi.hoisted(() => ({ select: null as ((avatar: string) => void) | null }));
 const selectedAvatar = "data:image/webp;base64,Ym90";
+// mock-isolation: exercise the dialog's name and selection contract without mounting the avatar generator.
 vi.mock("../pages/agents/avatar-picker.tsx", () => ({
   AvatarPicker: (props: { onSelect: (avatar: string) => void }) => {
     picker.select = props.onSelect;

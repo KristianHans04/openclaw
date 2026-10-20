@@ -19,6 +19,7 @@ import {
 import type { GatewayRequestHandlerOptions } from "./types.js";
 
 const { sendInternalChat } = vi.hoisted(() => ({ sendInternalChat: vi.fn() }));
+// mock-isolation: inspect the prepared onboarding dispatch without running a second chat owner.
 vi.mock(import("./chat-send-handler.js"), () => ({
   handleTrustedInternalChatSend: sendInternalChat,
 }));

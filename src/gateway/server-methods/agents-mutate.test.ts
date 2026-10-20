@@ -866,9 +866,9 @@ describe("agents.create", () => {
       await onboarding;
     });
 
-    let response!: ReturnType<typeof vi.fn>;
+    let response!: ReturnType<typeof vi.fn<(ok: boolean) => void>>;
     await runWithGatewayRootWorkAdmissionForTest(async () => {
-      response = vi.fn(() => {
+      response = vi.fn((_ok: boolean) => {
         expect(mocks.captureGatewayOperatorRunAuthority).toHaveBeenCalledOnce();
       });
       const handler = expectDefined(agentsHandlers["agents.create"], "agents.create handler");
