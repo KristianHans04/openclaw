@@ -6,16 +6,12 @@ import { i18n } from "../../i18n/index.ts";
 import type { PluginsInspectResult } from "../../lib/plugins/index.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { pageFixture } from "./plugins-page.lifecycle-test-support.ts";
 import {
-  createClient,
-  createContext,
-  createGateway,
   createInspectResult,
   createPlugin,
-  createPluginsRouteData,
   createPluginsRouteLocation,
   createResult,
-  mountPage,
   resetPluginsPageTestState,
 } from "./plugins-page.test-support.ts";
 
@@ -29,38 +25,25 @@ const inspectionWithAuth = (state: "requires-authorization" | "authorized" | "un
   createInspectResult({ mcpAuth: [{ serverName: "workboard-mcp", state }] });
 const connectButton = (page: ParentNode) =>
   page.querySelector<HTMLButtonElement>('[aria-label="Connect workboard-mcp"]');
-const calls = (request: ReturnType<typeof createClient>["request"], method: string) =>
-  request.mock.calls.filter(([name]) => name === method);
-
 async function setup(handlers: Record<string, () => unknown>, advertiseMcpLogin = true) {
-  const { client, request } = createClient(async (method) => {
-    if (!Object.hasOwn(handlers, method)) {
-      throw new Error(`Unexpected method ${method}`);
-    }
-    return handlers[method]!();
-  });
-  const harness = createGateway(client);
+  const fixture = pageFixture(handlers);
+  const { client, gateway, emit } = fixture;
   if (advertiseMcpLogin) {
-    harness.emit(client, true, {
+    emit(client, true, {
       hello: gatewayHelloForMethods([
-        ...(harness.gateway.snapshot.hello?.features?.methods ?? []),
+        ...(gateway.snapshot.hello?.features?.methods ?? []),
         "mcp.authLogin",
       ]),
     });
   }
   const result = createResult(createPlugin({ enabled: true, state: "enabled" }));
-  const route = createPluginsRouteData(
-    harness.gateway,
-    result,
-    createPluginsRouteLocation("/settings/plugins/workboard"),
-  );
-  const context = createContext(harness.gateway);
-  const mounted = await mountPage(context, route, "settings");
+  const route = fixture.route("/settings/plugins/workboard", result);
+  const mounted = await fixture.mount("/settings/plugins/workboard", result);
   await waitForSolid(() =>
     expect(mounted.page.querySelector(".plugin-capabilities")).not.toBeNull(),
   );
   await mounted.page.updateComplete;
-  return { ...mounted, ...harness, client, request, route, context };
+  return { ...fixture, ...mounted, route };
 }
 
 it("shows configured credentials and opens existing Settings", async () => {
@@ -102,7 +85,7 @@ it("shows configured credentials and opens existing Settings", async () => {
 it("starts the server's existing OAuth flow and waits for authoritative status after completion", async () => {
   const refreshed = createDeferred<PluginsInspectResult>();
   let completed = false;
-  const { page, context, request } = await setup({
+  const { page, context, request, calls } = await setup({
     "plugins.inspect": () =>
       completed ? refreshed.promise : inspectionWithAuth("requires-authorization"),
     "mcp.authLogin": () => {
@@ -118,7 +101,7 @@ it("starts the server's existing OAuth flow and waits for authoritative status a
       { timeoutMs: null },
     ),
   );
-  await waitForSolid(() => expect(calls(request, "plugins.inspect")).toHaveLength(2));
+  await waitForSolid(() => expect(calls("plugins.inspect")).toHaveLength(2));
   expect(connectButton(page)).not.toBeNull();
   refreshed.resolve(inspectionWithAuth("authorized"));
   await waitForSolid(() => expect(connectButton(page)).toBeNull());
@@ -128,7 +111,7 @@ it("starts the server's existing OAuth flow and waits for authoritative status a
 });
 
 it("disables Connect and refuses sign-in when the gateway does not advertise MCP OAuth", async () => {
-  const { page, request } = await setup(
+  const { page, calls } = await setup(
     {
       "mcp.authLogin": () => ({ done: true, status: "done" }),
       "plugins.inspect": () => inspectionWithAuth("requires-authorization"),
@@ -139,7 +122,7 @@ it("disables Connect and refuses sign-in when the gateway does not advertise MCP
   expect.soft(button.disabled).toBe(true);
   button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await page.updateComplete;
-  expect(calls(request, "mcp.authLogin")).toHaveLength(0);
+  expect(calls("mcp.authLogin")).toHaveLength(0);
   expect(window.open).not.toHaveBeenCalled();
 });
 
@@ -147,7 +130,7 @@ it.each(["navigation", "reconnect"])(
   "cancels pending sign-in on %s without opening a late authorization URL",
   async (change) => {
     const admission = createDeferred<unknown>();
-    const { page, request, route, emit, client } = await setup({
+    const { page, request, calls, route, emit, client } = await setup({
       "plugins.inspect": () => inspectionWithAuth("unauthenticated"),
       "mcp.authLogin": () => admission.promise,
       "wizard.cancel": () => ({ status: "cancelled" }),
@@ -170,8 +153,8 @@ it.each(["navigation", "reconnect"])(
       ),
     );
     admission.resolve({ done: false, status: "running" });
-    await waitForSolid(() => expect(calls(request, "wizard.cancel")).toHaveLength(2));
-    expect(calls(request, "wizard.next")).toHaveLength(0);
+    await waitForSolid(() => expect(calls("wizard.cancel")).toHaveLength(2));
+    expect(calls("wizard.next")).toHaveLength(0);
     expect(window.open).toHaveBeenCalledTimes(1);
   },
 );

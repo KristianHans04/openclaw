@@ -1,16 +1,12 @@
 import { createSignal, flush } from "solid-js";
-import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { page } from "vitest/browser";
-import type { ApplicationContext } from "../../app/context.ts";
 import { REDACTED_SENTINEL, type JsonSchema } from "../../lib/config-form-utils.ts";
 import { GatewayPageBinding } from "../../lib/gateway-page-binding.ts";
-import { ControlUiPluginRuntime } from "../../plugins/control-ui-runtime.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
-import {
-  createApplicationGateway,
-  createSolidApplicationContextProvider,
-} from "../../test-helpers/solid-application-context.tsx";
-import { createClient, createContext, createGateway } from "./plugins-page.test-support.ts";
+import { createSolidApplicationContextProvider } from "../../test-helpers/solid-application-context.tsx";
+import { pageFixture } from "./plugins-page.lifecycle-test-support.ts";
+import { createClient, createGateway } from "./plugins-page.test-support.ts";
 import { PluginSettingsEditor, type PluginSettingsEditorProps } from "./settings-editor.tsx";
 import type { PluginSettingsEditorModel } from "./settings-model.ts";
 import { renderPluginSettingsInventory as PluginSettingsInventory } from "./settings-view.tsx";
@@ -83,9 +79,7 @@ function makeModel(overrides: Partial<PluginSettingsEditorModel> = {}): PluginSe
 async function mount(overrides: Partial<PluginSettingsEditorModel> = {}) {
   const model = makeModel(overrides);
   const [props, setProps] = createSignal<PluginSettingsEditorProps>({ model });
-  const host = document.createElement("div");
-  document.body.append(host);
-  mountSolid(() => <PluginSettingsEditor {...props()} />, { container: host });
+  const { container: host } = mountSolid(() => <PluginSettingsEditor {...props()} />);
   const editor = findElement(host, "openclaw-plugin-settings-editor");
   const update = async (next: Partial<PluginSettingsEditorProps>) => {
     setProps((current) => ({ ...current, ...next }));
@@ -121,468 +115,447 @@ function editField(
   input.blur();
   expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath(...path), value);
 }
-afterEach(() => {
-  document.body.replaceChildren();
+it("keeps typing and focus in Advanced settings when configuration updates", async () => {
+  const [value, setValue] = createSignal({ plugins: { label: "" } });
+  const schema = objectSchema({ label: textSchema("Label") });
+  const onPatch = vi.fn((_path: Array<string | number>, next: unknown) => {
+    setValue({ plugins: { label: String(next) } });
+  });
+  const { context } = pageFixture({});
+  const provider = createSolidApplicationContextProvider(context);
+  const model = makeModel({ configHints: {} });
+  const mounted = mountSolid(
+    () => (
+      <PluginSettingsInventory
+        {...model}
+        tab="advanced"
+        query=""
+        loading={false}
+        error={null}
+        busy={{}}
+        messages={{}}
+        iconUrls={{}}
+        canMutate
+        mutationBlockedReason={null}
+        configValue={value()}
+        advancedSchema={schema}
+        onConfigPatch={onPatch}
+        onConfigReload={vi.fn()}
+        onRefresh={vi.fn()}
+        onTabChange={vi.fn()}
+        onQueryChange={vi.fn()}
+        onIconError={vi.fn()}
+        onSetEnabled={vi.fn()}
+        onUninstall={vi.fn()}
+        pluginHref={() => "#"}
+        onOpenPlugin={vi.fn()}
+      />
+    ),
+    { wrapper: provider.wrapper },
+  );
+  await settle();
+  const input = getField(mounted.container, "Label");
+  input.focus();
+  for (const text of ["a", "ab"]) {
+    typeInto(input, text);
+    await settle();
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe(text);
+    expect(onPatch).toHaveBeenLastCalledWith(["plugins", "label"], text);
+  }
 });
-describe("grouped plugin settings", () => {
-  it("keeps typing and focus in Advanced settings when configuration updates", async () => {
-    const [value, setValue] = createSignal({ plugins: { label: "" } });
-    const schema = objectSchema({ label: textSchema("Label") });
-    const onPatch = vi.fn((_path: Array<string | number>, next: unknown) => {
-      setValue({ plugins: { label: String(next) } });
-    });
-    const { gateway } = createApplicationGateway();
-    const plugins = new ControlUiPluginRuntime(() => context);
-    onTestFinished(() => plugins.dispose());
-    const context: ApplicationContext = { ...createContext(gateway), plugins };
-    const provider = createSolidApplicationContextProvider(context);
-    const model = makeModel({ configHints: {} });
-    const mounted = mountSolid(
-      () => (
-        <PluginSettingsInventory
-          {...model}
-          tab="advanced"
-          query=""
-          loading={false}
-          error={null}
-          busy={{}}
-          messages={{}}
-          iconUrls={{}}
-          canMutate
-          mutationBlockedReason={null}
-          configValue={value()}
-          advancedSchema={schema}
-          onConfigPatch={onPatch}
-          onConfigReload={vi.fn()}
-          onRefresh={vi.fn()}
-          onTabChange={vi.fn()}
-          onQueryChange={vi.fn()}
-          onIconError={vi.fn()}
-          onSetEnabled={vi.fn()}
-          onUninstall={vi.fn()}
-          pluginHref={() => "#"}
-          onOpenPlugin={vi.fn()}
-        />
-      ),
-      { wrapper: provider.wrapper },
-    );
-    await settle();
-    const input = getField(mounted.container, "Label");
-    input.focus();
-    for (const text of ["a", "ab"]) {
-      typeInto(input, text);
-      await settle();
-      expect(document.activeElement).toBe(input);
-      expect(input.value).toBe(text);
-      expect(onPatch).toHaveBeenLastCalledWith(["plugins", "label"], text);
-    }
+it("retains an optional config draft across refreshes and a rejected atomic save", async () => {
+  const onConfigPatch = vi.fn(() => false);
+  const { editor, model, update } = await mount({
+    configValue: { plugins: { entries: { fixture: {} } } },
+    configHints: {},
+    configSchema: {
+      ...objectSchema({
+        host: { type: "string", title: "Host", minLength: 1 },
+        port: { type: "integer", title: "Port", minimum: 1 },
+      }),
+      required: ["host", "port"],
+    },
+    onConfigPatch,
   });
-  it("retains an optional config draft across refreshes and a rejected atomic save", async () => {
-    const onConfigPatch = vi.fn(() => false);
-    const { editor, model, update } = await mount({
-      configValue: { plugins: { entries: { fixture: {} } } },
-      configHints: {},
-      configSchema: {
-        ...objectSchema({
-          host: { type: "string", title: "Host", minLength: 1 },
-          port: { type: "integer", title: "Port", minimum: 1 },
-        }),
-        required: ["host", "port"],
-      },
-      onConfigPatch,
-    });
-    const host = getField(editor, "Host");
-    host.focus();
-    typeInto(host, "gateway.local");
-    host.blur();
-    await settle();
-    expect(onConfigPatch).not.toHaveBeenCalled();
+  const host = getField(editor, "Host");
+  host.focus();
+  typeInto(host, "gateway.local");
+  host.blur();
+  await settle();
+  expect(onConfigPatch).not.toHaveBeenCalled();
 
-    await update({ model: { ...model } });
-    expect(getField(editor, "Host").value).toBe("gateway.local");
-    const port = getField(editor, "Port");
-    port.focus();
-    typeInto(port, "18789");
-    port.blur();
-    await settle();
-    expect(onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath(), {
-      host: "gateway.local",
-      port: 18789,
-    });
-    expect(
-      editor.querySelector('.cfg-structured-draft__error [role="alert"]')?.textContent,
-    ).toContain("draft is still here");
-    expect(getField(editor, "Host").value).toBe("gateway.local");
+  await update({ model: { ...model } });
+  expect(getField(editor, "Host").value).toBe("gateway.local");
+  const port = getField(editor, "Port");
+  port.focus();
+  typeInto(port, "18789");
+  port.blur();
+  await settle();
+  expect(onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath(), {
+    host: "gateway.local",
+    port: 18789,
   });
-  it("navigates authored sections without hiding settings and omits the rail for flat schemas", async () => {
-    const { editor, model, update } = await mount();
-    const links = [...editor.querySelectorAll<HTMLAnchorElement>(".plugin-editor__nav a")];
-    expect(links.map((link) => link.textContent?.trim())).toEqual([
-      "Data storage",
-      "Capture",
-      "Other",
-    ]);
-    const target = findElement(editor, links[1]!.getAttribute("href")!);
-    const scroll = vi.spyOn(target, "scrollIntoView");
-    links[1]!.click();
-    expect(scroll).toHaveBeenCalledOnce();
-    expect(document.activeElement).toBe(target);
-    expect(editor.querySelectorAll("[data-setting]")).toHaveLength(4);
-    expect(editor.querySelector("h1")).toBeNull();
-    expect(textContents(editor, "h2")).toEqual(["Data storage", "Capture", "Other"]);
-    const back = findElement<HTMLAnchorElement>(editor, ".plugins-settings-breadcrumb__parent");
-    expect(back.getAttribute("href")).toBe("/settings/plugins/fixture");
-    back.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    expect(model.onBack).toHaveBeenCalledOnce();
-    expect(editor.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe("Settings");
-    expect(editor.textContent).not.toContain(prefix);
-    expect(editor.textContent).not.toMatch(/\d+ settings/);
-    await update({ model: { ...model, configHints: {} } });
-    expect(editor.querySelector(".plugin-editor__nav")).toBeNull();
+  expect(
+    editor.querySelector('.cfg-structured-draft__error [role="alert"]')?.textContent,
+  ).toContain("draft is still here");
+  expect(getField(editor, "Host").value).toBe("gateway.local");
+});
+it("navigates authored sections without hiding settings and omits the rail for flat schemas", async () => {
+  const { editor, model, update } = await mount();
+  const links = [...editor.querySelectorAll<HTMLAnchorElement>(".plugin-editor__nav a")];
+  expect(links.map((link) => link.textContent?.trim())).toEqual([
+    "Data storage",
+    "Capture",
+    "Other",
+  ]);
+  const target = findElement(editor, links[1]!.getAttribute("href")!);
+  const scroll = vi.spyOn(target, "scrollIntoView");
+  links[1]!.click();
+  expect(scroll).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(target);
+  expect(editor.querySelectorAll("[data-setting]")).toHaveLength(4);
+  expect(editor.querySelector("h1")).toBeNull();
+  expect(textContents(editor, "h2")).toEqual(["Data storage", "Capture", "Other"]);
+  const back = findElement<HTMLAnchorElement>(editor, ".plugins-settings-breadcrumb__parent");
+  expect(back.getAttribute("href")).toBe("/settings/plugins/fixture");
+  back.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  expect(model.onBack).toHaveBeenCalledOnce();
+  expect(editor.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe("Settings");
+  expect(editor.textContent).not.toContain(prefix);
+  expect(editor.textContent).not.toMatch(/\d+ settings/);
+  await update({ model: { ...model, configHints: {} } });
+  expect(editor.querySelector(".plugin-editor__nav")).toBeNull();
+});
+it("does not persist an automatic numeric placeholder on blur", async () => {
+  const { editor, model } = await mount({
+    configHints: { [`${prefix}.timeout`]: { placeholder: "Automatic" } },
+    configSchema: {
+      type: "object",
+      properties: { timeout: { type: "integer", title: "Timeout" } },
+    },
   });
-  it("does not persist an automatic numeric placeholder on blur", async () => {
-    const { editor, model } = await mount({
-      configHints: { [`${prefix}.timeout`]: { placeholder: "Automatic" } },
-      configSchema: {
-        type: "object",
-        properties: { timeout: { type: "integer", title: "Timeout" } },
-      },
-    });
-    const input = getField(editor, "Timeout");
-    expect(input).toMatchObject({ value: "", placeholder: "Automatic" });
+  const input = getField(editor, "Timeout");
+  expect(input).toMatchObject({ value: "", placeholder: "Automatic" });
+  input.focus();
+  input.blur();
+  expect(model.onConfigPatch).not.toHaveBeenCalled();
+});
+it("persists inherited defaults only after editing, without losing siblings", async () => {
+  const { editor, model } = await mount();
+  for (const [label, value] of [
+    ["Storage: Path", "original"],
+    ["Timeout", "30"],
+  ]) {
+    const input = getField(editor, label!);
+    expect(input.value).toBe(value);
     input.focus();
     input.blur();
-    expect(model.onConfigPatch).not.toHaveBeenCalled();
+  }
+  expect(model.onConfigPatch).not.toHaveBeenCalled();
+  editField(model, getField(editor, "Storage: Path"), "original", "changed", ["storage"], {
+    path: "changed",
+    mode: "keep",
   });
-  it("persists inherited defaults only after editing, without losing siblings", async () => {
-    const { editor, model } = await mount();
-    for (const [label, value] of [
-      ["Storage: Path", "original"],
-      ["Timeout", "30"],
-    ]) {
-      const input = getField(editor, label!);
-      expect(input.value).toBe(value);
-      input.focus();
-      input.blur();
-    }
-    expect(model.onConfigPatch).not.toHaveBeenCalled();
-    editField(model, getField(editor, "Storage: Path"), "original", "changed", ["storage"], {
-      path: "changed",
-      mode: "keep",
-    });
-  });
-  it("edits a searched descendant inside a retained object on blur", async () => {
-    const { editor, model } = await mountConfig(
-      { storage: { path: "original" } },
-      {
-        storage: {
-          type: "object",
-          title: "Storage",
-          properties: { path: textSchema("Directory") },
-        },
-      },
-    );
-    await searchSettings(editor, "directory");
-    const input = getField(editor, "Directory");
-    editField(model, input, "original", "changed", ["storage", "path"], "changed");
-  });
-  it("edits inherited array items on blur without losing siblings", async () => {
-    const { editor, model } = await mountConfig(
-      {},
-      {
-        tags: {
-          type: "array",
-          title: "Tags",
-          default: ["alpha", "beta"],
-          items: { type: "string" },
-        },
-      },
-    );
-    const row = findElement(editor, '[data-setting="tags"]');
-    const inputs = row.querySelectorAll<HTMLInputElement>("input");
-    expect([...inputs].map((input) => input.value)).toEqual(["alpha", "beta"]);
-    expect(row.textContent).not.toContain("2 items");
-    editField(model, inputs[1]!, "beta", "edited", ["tags"], ["alpha", "edited"]);
-  });
-  it("edits a literal dotted property on blur without splitting its identity", async () => {
-    const { editor, model } = await mountConfig(
-      { "model.name": "first" },
-      {
-        "model.name": textSchema("Model name"),
-        empty: { type: "integer" },
-      },
-    );
-    expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
-    expect(editor.querySelectorAll("h2")).toHaveLength(0);
-    editField(model, getField(editor, "Model name"), "first", "second", ["model.name"], "second");
-  });
-  it("keeps object array inputs aligned beside removal and finds their descendants", async () => {
-    const { editor, model } = await mountConfig(
-      { targets: [{ path: "first", mode: "keep" }] },
-      {
-        targets: {
-          type: "array",
-          items: objectSchema({
-            path: textSchema("Directory"),
-            mode: textSchema("Mode"),
-          }),
-        },
-      },
-    );
-    editor.style.width = "1000px";
-    const inputs = [...editor.querySelectorAll<HTMLInputElement>(".cfg-array__item input")];
-    expect(inputs).toHaveLength(2);
-    const bounds = inputs.map((input) => input.getBoundingClientRect());
-    const remove = findElement<HTMLButtonElement>(editor, 'button[aria-label="Remove item"]');
-    const removeBounds = remove.getBoundingClientRect();
-    expect(bounds[0]!.left).toBe(bounds[1]!.left);
-    expect(bounds[1]!.top).toBeGreaterThan(bounds[0]!.bottom);
-    expect(removeBounds.left).toBeGreaterThanOrEqual(bounds[0]!.right);
-    expect(removeBounds.top).toBeLessThan(bounds[0]!.bottom);
-    await searchSettings(editor, "directory");
-    expect(editor.querySelectorAll(".cfg-array__item input")).toHaveLength(2);
-    remove.click();
-    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("targets"), []);
-  });
-  it.each([
-    { schema: { type: "string" }, value: REDACTED_SENTINEL, replacement: "replacement-key" },
+});
+it("edits a searched descendant inside a retained object on blur", async () => {
+  const { editor, model } = await mountConfig(
+    { storage: { path: "original" } },
     {
-      schema: objectSchema({
-        source: { type: "string" },
-        provider: { type: "string" },
-        id: { type: "string" },
-      }),
-      value: { source: "env", provider: "default", id: "SEARCH_API_KEY" },
-      replacement: { source: "file", provider: "team", id: "/key" },
+      storage: {
+        type: "object",
+        title: "Storage",
+        properties: { path: textSchema("Directory") },
+      },
     },
-  ])(
-    "keeps a configured nested $schema.type credential as one specialized editor",
-    async ({ schema, value, replacement }) => {
-      const { editor, model, update } = await mount({
-        configHints: { [`${prefix}.search.apiKey`]: { sensitive: true } },
-        configValue: configValue({ search: { apiKey: value, mode: "web" } }),
-        configSchema: objectSchema({
-          search: objectSchema({
-            apiKey: { ...schema, title: "API key" },
-            mode: { type: "string", title: "Mode" },
-          }),
+  );
+  await searchSettings(editor, "directory");
+  const input = getField(editor, "Directory");
+  editField(model, input, "original", "changed", ["storage", "path"], "changed");
+});
+it("edits inherited array items on blur without losing siblings", async () => {
+  const { editor, model } = await mountConfig(
+    {},
+    {
+      tags: {
+        type: "array",
+        title: "Tags",
+        default: ["alpha", "beta"],
+        items: { type: "string" },
+      },
+    },
+  );
+  const row = findElement(editor, '[data-setting="tags"]');
+  const inputs = row.querySelectorAll<HTMLInputElement>("input");
+  expect([...inputs].map((input) => input.value)).toEqual(["alpha", "beta"]);
+  expect(row.textContent).not.toContain("2 items");
+  editField(model, inputs[1]!, "beta", "edited", ["tags"], ["alpha", "edited"]);
+});
+it("keeps dotted and empty-object fields intact while editing on blur", async () => {
+  const { editor, model } = await mountConfig(
+    { "model.name": "first" },
+    {
+      "model.name": textSchema("Model name"),
+      empty: { ...objectSchema({}), title: "Empty object" },
+    },
+  );
+  expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
+  expect(editor.querySelectorAll("h2")).toHaveLength(0);
+  expect(editor.textContent).toContain("Empty object");
+  editField(model, getField(editor, "Model name"), "first", "second", ["model.name"], "second");
+});
+it("keeps object array inputs aligned beside removal and finds their descendants", async () => {
+  const { editor, model } = await mountConfig(
+    { targets: [{ path: "first", mode: "keep" }] },
+    {
+      targets: {
+        type: "array",
+        items: objectSchema({
+          path: textSchema("Directory"),
+          mode: textSchema("Mode"),
         }),
-      });
-      const { client } = createClient(async () => ({
-        baseHash: "revision",
-        credential:
-          typeof value === "string"
-            ? { kind: "literal" }
-            : { kind: "reference", ref: value, unresolved: false },
-      }));
-      const application = createGateway(client).gateway;
-      const gateway = new GatewayPageBinding(vi.fn(), { getGateway: () => application });
-      gateway.connect();
-      onTestFinished(() => gateway.dispose());
-      await update({
-        resolveCredential: (field) =>
-          field.path.at(-1) === "apiKey"
-            ? {
-                field,
-                descriptor: { path: field.path, label: field.label, envVars: [] },
-                context: {
-                  pluginId: "fixture",
-                  baseHash: "revision",
-                  gateway,
-                  canInspect: true,
-                  onCommit: async (path, next) => {
-                    field.onPatch(path, next);
-                    return true;
-                  },
-                  onDiscard: async () => true,
+      },
+    },
+  );
+  editor.style.width = "1000px";
+  const inputs = [...editor.querySelectorAll<HTMLInputElement>(".cfg-array__item input")];
+  expect(inputs).toHaveLength(2);
+  const bounds = inputs.map((input) => input.getBoundingClientRect());
+  const remove = findElement<HTMLButtonElement>(editor, 'button[aria-label="Remove item"]');
+  const removeBounds = remove.getBoundingClientRect();
+  expect(bounds[0]!.left).toBe(bounds[1]!.left);
+  expect(bounds[1]!.top).toBeGreaterThan(bounds[0]!.bottom);
+  expect(removeBounds.left).toBeGreaterThanOrEqual(bounds[0]!.right);
+  expect(removeBounds.top).toBeLessThan(bounds[0]!.bottom);
+  await searchSettings(editor, "directory");
+  expect(editor.querySelectorAll(".cfg-array__item input")).toHaveLength(2);
+  remove.click();
+  expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("targets"), []);
+});
+it.each([
+  { schema: { type: "string" }, value: REDACTED_SENTINEL, replacement: "replacement-key" },
+  {
+    schema: objectSchema({
+      source: { type: "string" },
+      provider: { type: "string" },
+      id: { type: "string" },
+    }),
+    value: { source: "env", provider: "default", id: "SEARCH_API_KEY" },
+    replacement: { source: "file", provider: "team", id: "/key" },
+  },
+])(
+  "keeps a configured nested $schema.type credential as one specialized editor",
+  async ({ schema, value, replacement }) => {
+    const { editor, model, update } = await mount({
+      configHints: { [`${prefix}.search.apiKey`]: { sensitive: true } },
+      configValue: configValue({ search: { apiKey: value, mode: "web" } }),
+      configSchema: objectSchema({
+        search: objectSchema({
+          apiKey: { ...schema, title: "API key" },
+          mode: { type: "string", title: "Mode" },
+        }),
+      }),
+    });
+    const { client } = createClient(async () => ({
+      baseHash: "revision",
+      credential:
+        typeof value === "string"
+          ? { kind: "literal" }
+          : { kind: "reference", ref: value, unresolved: false },
+    }));
+    const application = createGateway(client).gateway;
+    const gateway = new GatewayPageBinding(vi.fn(), { getGateway: () => application });
+    gateway.connect();
+    onTestFinished(() => gateway.dispose());
+    await update({
+      resolveCredential: (field) =>
+        field.path.at(-1) === "apiKey"
+          ? {
+              field,
+              descriptor: { path: field.path, label: field.label, envVars: [] },
+              context: {
+                pluginId: "fixture",
+                baseHash: "revision",
+                gateway,
+                canInspect: true,
+                onCommit: async (path, next) => {
+                  field.onPatch(path, next);
+                  return true;
                 },
-              }
-            : undefined,
-      });
-      await vi.waitFor(() => expect(editor.textContent).not.toContain("Loading"));
-      const credential = findElement(editor, "openclaw-plugin-credential-editor");
-      expect(credential).not.toBeNull();
-      expect(editor.textContent).not.toContain(REDACTED_SENTINEL);
-      expect(editor.querySelector('input[aria-label="Search: Mode"]')).not.toBeNull();
-      if (typeof replacement === "string") {
-        const input = findElement<HTMLInputElement>(credential, "input");
-        typeInto(input, replacement);
-        flush();
-        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      } else {
-        findElement<HTMLButtonElement>(credential, "button").click();
-        await settle();
-        const select = findElement<HTMLSelectElement>(credential, "select");
-        select.value = replacement.source;
-        select.dispatchEvent(new Event("change", { bubbles: true }));
-        flush();
-        const inputs = credential.querySelectorAll<HTMLInputElement>(
-          ".plugin-credential__dialog input",
-        );
-        for (const [index, next] of [replacement.provider, replacement.id].entries()) {
-          typeInto(inputs[index]!, next);
-          flush();
-        }
-        [...credential.querySelectorAll("button")]
-          .find((button) => button.textContent?.trim() === "Save")!
-          .click();
-      }
-      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
-        configPath("search", "apiKey"),
-        replacement,
-      );
-    },
-  );
-  it.each(["row", "input"])(
-    "toggles from the checkbox %s once and ignores non-editing clicks",
-    async (target) => {
-      const { editor, model, update } = await mount();
-      const row = findElement(editor, '[data-setting="enabled"]');
-      const input = findElement<HTMLInputElement>(row, 'input[type="checkbox"]');
-      expect(row).not.toBeNull();
-      expect(input).not.toBeNull();
-      const range = document.createRange();
-      range.selectNodeContents(row.querySelector(".plugin-editor__title")!);
-      getSelection()!.removeAllRanges();
-      getSelection()!.addRange(range);
-      expect(getSelection()!.toString()).toBe("Enabled");
-      row.click();
-      expect(model.onConfigPatch).not.toHaveBeenCalled();
-      getSelection()!.removeAllRanges();
-      findElement<HTMLButtonElement>(row, 'button[aria-haspopup="menu"]').click();
-      expect(model.onConfigPatch).not.toHaveBeenCalled();
-      await settle();
-      const menu = findElement(row, '[role="menu"]');
-      expect(menu.matches(":popover-open")).toBe(true);
-      menu.click();
-      expect(model.onConfigPatch).not.toHaveBeenCalled();
-      (target === "row" ? row : input).click();
-      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("enabled"), false);
-      vi.mocked(model.onConfigPatch).mockClear();
-      await update({ model: { ...model, canEditConfig: false } });
-      row.click();
-      expect(model.onConfigPatch).not.toHaveBeenCalled();
-    },
-  );
-  it("retains empty object fields instead of silently dropping them", async () => {
-    const { editor } = await mount({
-      configHints: {},
-      configSchema: objectSchema({ empty: { ...objectSchema({}), title: "Empty object" } }),
+                onDiscard: async () => true,
+              },
+            }
+          : undefined,
     });
-    expect(editor.querySelectorAll("[data-setting]")).toHaveLength(1);
-    expect(editor.textContent).toContain("Empty object");
-  });
-});
-
-describe("grouped editor field discovery", () => {
-  it("associates visible field instructions with native controls", async () => {
-    const { editor } = await mount({
-      configHints: {
-        [`${prefix}.enabled`]: { help: "Capture messages for this plugin." },
-        [`${prefix}.timeout`]: { help: "Wait this many seconds." },
-        [`${prefix}.storage.path`]: { help: "Choose a local directory." },
-      },
-    });
-    for (const name of ["Enabled", "Timeout", "Storage: Path"]) {
-      const input = getField(editor, name);
-      const ids = input.getAttribute("aria-describedby")?.trim().split(/\s+/u) ?? [];
-      const instructions = input
-        .closest(".plugin-editor__row")
-        ?.querySelector(".plugin-editor__copy p");
-      expect(instructions?.textContent?.trim()).toBeTruthy();
-      expect(ids).toContain(instructions?.id);
-      const descriptions = ids.map((id) => document.getElementById(id));
-      expect(descriptions).toContain(instructions);
-      expect(descriptions).not.toContain(null);
-    }
-  });
-
-  it.each<{
-    name: string;
-    overrides: Partial<PluginSettingsEditorModel>;
-    query: string;
-  }>([
-    { name: "authored groups", overrides: {}, query: "data storage" },
-    {
-      name: "dynamic root",
-      overrides: {
-        configSchema: { type: "object", properties: {}, additionalProperties: { type: "string" } },
-        configHints: {},
-        configValue: configValue({ alpha: "first", beta: "second" }),
-      },
-      query: "alpha",
-    },
-  ])("filters $name settings and shows unmatched searches", async ({ name, overrides, query }) => {
-    const { editor } = await mount(overrides);
-    await searchSettings(editor, query);
-    if (name === "authored groups") {
-      expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
-      expect(editor.textContent).toContain("Storage: Path");
-      expect(editor.textContent).not.toContain("Timeout");
+    await vi.waitFor(() => expect(editor.textContent).not.toContain("Loading"));
+    const credential = findElement(editor, "openclaw-plugin-credential-editor");
+    expect(credential).not.toBeNull();
+    expect(editor.textContent).not.toContain(REDACTED_SENTINEL);
+    expect(editor.querySelector('input[aria-label="Search: Mode"]')).not.toBeNull();
+    if (typeof replacement === "string") {
+      const input = findElement<HTMLInputElement>(credential, "input");
+      typeInto(input, replacement);
+      flush();
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     } else {
-      expect(
-        editor.querySelector(".cfg-map > .settings-row .settings-row__title")?.textContent?.trim(),
-      ).toBe("Custom entries");
-      expect(editor.querySelector('input[aria-label="Key: alpha"]')).not.toBeNull();
-      expect(editor.querySelector('input[aria-label="Key: beta"]')).toBeNull();
+      findElement<HTMLButtonElement>(credential, "button").click();
+      await settle();
+      const select = findElement<HTMLSelectElement>(credential, "select");
+      select.value = replacement.source;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      flush();
+      const inputs = credential.querySelectorAll<HTMLInputElement>(
+        ".plugin-credential__dialog input",
+      );
+      for (const [index, next] of [replacement.provider, replacement.id].entries()) {
+        typeInto(inputs[index]!, next);
+        flush();
+      }
+      [...credential.querySelectorAll("button")]
+        .find((button) => button.textContent?.trim() === "Save")!
+        .click();
     }
-    await searchSettings(editor, "does-not-match");
-    expect(editor.querySelector(".cfg-map")).toBeNull();
-    expect(editor.querySelector(".plugin-editor__empty")?.textContent).toContain(
-      "No matching settings.",
+    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(
+      configPath("search", "apiKey"),
+      replacement,
     );
+  },
+);
+it.each(["row", "input"])(
+  "toggles from the checkbox %s once and ignores non-editing clicks",
+  async (target) => {
+    const { editor, model, update } = await mount();
+    const row = findElement(editor, '[data-setting="enabled"]');
+    const input = findElement<HTMLInputElement>(row, 'input[type="checkbox"]');
+    expect(row).not.toBeNull();
+    expect(input).not.toBeNull();
+    const range = document.createRange();
+    range.selectNodeContents(row.querySelector(".plugin-editor__title")!);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(range);
+    expect(getSelection()!.toString()).toBe("Enabled");
+    row.click();
+    expect(model.onConfigPatch).not.toHaveBeenCalled();
+    getSelection()!.removeAllRanges();
+    findElement<HTMLButtonElement>(row, 'button[aria-haspopup="menu"]').click();
+    expect(model.onConfigPatch).not.toHaveBeenCalled();
+    await settle();
+    const menu = findElement(row, '[role="menu"]');
+    expect(menu.matches(":popover-open")).toBe(true);
+    menu.click();
+    expect(model.onConfigPatch).not.toHaveBeenCalled();
+    (target === "row" ? row : input).click();
+    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("enabled"), false);
+    vi.mocked(model.onConfigPatch).mockClear();
+    await update({ model: { ...model, canEditConfig: false } });
+    row.click();
+    expect(model.onConfigPatch).not.toHaveBeenCalled();
+  },
+);
+it("associates visible field instructions with native controls", async () => {
+  const { editor } = await mount({
+    configHints: {
+      [`${prefix}.enabled`]: { help: "Capture messages for this plugin." },
+      [`${prefix}.timeout`]: { help: "Wait this many seconds." },
+      [`${prefix}.storage.path`]: { help: "Choose a local directory." },
+    },
   });
+  for (const name of ["Enabled", "Timeout", "Storage: Path"]) {
+    const input = getField(editor, name);
+    const ids = input.getAttribute("aria-describedby")?.trim().split(/\s+/u) ?? [];
+    const instructions = input
+      .closest(".plugin-editor__row")
+      ?.querySelector(".plugin-editor__copy p");
+    expect(instructions?.textContent?.trim()).toBeTruthy();
+    expect(ids).toContain(instructions?.id);
+    const descriptions = ids.map((id) => document.getElementById(id));
+    expect(descriptions).toContain(instructions);
+    expect(descriptions).not.toContain(null);
+  }
 });
 
-describe("plugin map layout", () => {
-  it.each([1728, 390])("keeps map labels, keys, and values usable at %s pixels", async (width) => {
-    await page.viewport(width, 913);
-    const { editor, model } = await mountConfig(
-      { populated: { first: 15 } },
-      {
-        empty: {
-          type: "object",
-          title: "Empty overrides",
-          additionalProperties: { type: "number" },
-        },
-        populated: {
-          type: "object",
-          title: "Populated overrides",
-          additionalProperties: { type: "number" },
-        },
+it.each<{
+  name: string;
+  overrides: Partial<PluginSettingsEditorModel>;
+  query: string;
+}>([
+  { name: "authored groups", overrides: {}, query: "data storage" },
+  {
+    name: "dynamic root",
+    overrides: {
+      configSchema: { type: "object", properties: {}, additionalProperties: { type: "string" } },
+      configHints: {},
+      configValue: configValue({ alpha: "first", beta: "second" }),
+    },
+    query: "alpha",
+  },
+])("filters $name settings and shows unmatched searches", async ({ name, overrides, query }) => {
+  const { editor } = await mount(overrides);
+  await searchSettings(editor, query);
+  if (name === "authored groups") {
+    expect(editor.querySelectorAll("[data-setting]")).toHaveLength(2);
+    expect(editor.textContent).toContain("Storage: Path");
+    expect(editor.textContent).not.toContain("Timeout");
+  } else {
+    expect(
+      editor.querySelector(".cfg-map > .settings-row .settings-row__title")?.textContent?.trim(),
+    ).toBe("Custom entries");
+    expect(editor.querySelector('input[aria-label="Key: alpha"]')).not.toBeNull();
+    expect(editor.querySelector('input[aria-label="Key: beta"]')).toBeNull();
+  }
+  await searchSettings(editor, "does-not-match");
+  expect(editor.querySelector(".cfg-map")).toBeNull();
+  expect(editor.querySelector(".plugin-editor__empty")?.textContent).toContain(
+    "No matching settings.",
+  );
+});
+it.each([1728, 390])("keeps map labels, keys, and values usable at %s pixels", async (width) => {
+  await page.viewport(width, 913);
+  const { editor, model } = await mountConfig(
+    { populated: { first: 15 } },
+    {
+      empty: {
+        type: "object",
+        title: "Empty overrides",
+        additionalProperties: { type: "number" },
       },
-    );
-    editor.style.width = width > 768 ? "880px" : "100%";
-    try {
-      expect(textContents(editor, ".plugin-editor__title")).toEqual([
-        "Empty overrides",
-        "Populated overrides",
-      ]);
-      expect(editor.querySelector(".cfg-map > .settings-row .settings-row__title")).toBeNull();
-      for (const add of editor.querySelectorAll<HTMLButtonElement>(
-        ".cfg-map > .settings-row button",
-      )) {
-        const bounds = add.getBoundingClientRect();
-        const mapBounds = add.closest(".cfg-map")!.getBoundingClientRect();
-        expect(bounds.width).toBeGreaterThan(60);
-        expect(bounds.height).toBeLessThan(48);
-        expect(bounds.right).toBeLessThanOrEqual(mapBounds.right);
-      }
-      const key = getField(editor, "Key: first");
-      expect(key.getBoundingClientRect().width).toBeGreaterThan(100);
-      const value = findElement<HTMLInputElement>(
-        editor,
-        '[data-setting="populated"] input[type="number"]',
-      );
-      expect(value.getBoundingClientRect().width).toBeGreaterThan(100);
-      expect(editor.scrollWidth).toBeLessThanOrEqual(editor.clientWidth);
-      findElement<HTMLButtonElement>(
-        editor,
-        '[data-setting="populated"] button[aria-label="Remove entry"]',
-      ).click();
-      expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("populated"), {});
-    } finally {
-      await page.viewport(800, 600);
+      populated: {
+        type: "object",
+        title: "Populated overrides",
+        additionalProperties: { type: "number" },
+      },
+    },
+  );
+  editor.style.width = width > 768 ? "880px" : "100%";
+  try {
+    expect(textContents(editor, ".plugin-editor__title")).toEqual([
+      "Empty overrides",
+      "Populated overrides",
+    ]);
+    expect(editor.querySelector(".cfg-map > .settings-row .settings-row__title")).toBeNull();
+    for (const add of editor.querySelectorAll<HTMLButtonElement>(
+      ".cfg-map > .settings-row button",
+    )) {
+      const bounds = add.getBoundingClientRect();
+      const mapBounds = add.closest(".cfg-map")!.getBoundingClientRect();
+      expect(bounds.width).toBeGreaterThan(60);
+      expect(bounds.height).toBeLessThan(48);
+      expect(bounds.right).toBeLessThanOrEqual(mapBounds.right);
     }
-  });
+    const key = getField(editor, "Key: first");
+    expect(key.getBoundingClientRect().width).toBeGreaterThan(100);
+    const value = findElement<HTMLInputElement>(
+      editor,
+      '[data-setting="populated"] input[type="number"]',
+    );
+    expect(value.getBoundingClientRect().width).toBeGreaterThan(100);
+    expect(editor.scrollWidth).toBeLessThanOrEqual(editor.clientWidth);
+    findElement<HTMLButtonElement>(
+      editor,
+      '[data-setting="populated"] button[aria-label="Remove entry"]',
+    ).click();
+    expect(model.onConfigPatch).toHaveBeenCalledExactlyOnceWith(configPath("populated"), {});
+  } finally {
+    await page.viewport(800, 600);
+  }
 });
