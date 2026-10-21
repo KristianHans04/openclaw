@@ -292,46 +292,65 @@ describe("heartbeat scratch task cron migration", () => {
     ).not.toContain("tasks:");
   });
 
-  it("converts stored tasks for owners without heartbeat enrollment without enabling ambient checks", async () => {
-    const root = tempDirs.make("openclaw-task-only-owner-");
-    process.env.HOME = root;
-    process.env.OPENCLAW_STATE_DIR = root;
-    const cfg: OpenClawConfig = {
-      agents: { ownership: "explicit", entries: { main: {}, ops: {} } },
-    };
-    const storePath = resolveCronJobsStorePathFromConfig(cfg);
-    const legacy: CronJob = {
-      id: "task-only",
-      agentId: "ops",
-      name: "inbox",
-      enabled: false,
-      createdAtMs: 10,
-      updatedAtMs: 20,
-      declarationKey: heartbeatTaskDeclarationKey("ops", "inbox"),
-      payload: { kind: "systemEvent", text: "Keep the existing task prompt", toolsAllow: ["read"] },
-      sessionTarget: "main",
-      wakeMode: "next-heartbeat",
-      schedule: { kind: "every", everyMs: 50000, anchorMs: 12 },
-      state: { nextRunAtMs: 12345, queuedAtMs: 12345, lastRunAtMs: 9999 },
-    };
-    await saveCronJobsStore(storePath, { version: 1, jobs: [legacy] });
-    expect(await migrateStoredHeartbeatTaskJobs(cfg)).toBe(1);
-    const jobs = (await loadCronJobsStore(storePath)).jobs;
-    expect(jobs.find((job) => job.id === legacy.id)).toMatchObject({
-      id: legacy.id,
-      enabled: false,
-      schedule: legacy.schedule,
-      state: legacy.state,
-      payload: {
-        kind: "agentTurn",
-        message: "Keep the existing task prompt",
-        toolsAllow: ["read"],
-      },
-    });
-    expect(jobs.every((job) => !job.enabled)).toBe(true);
-    expect(await migrateStoredHeartbeatTaskJobs(cfg)).toBe(0);
-    expect((await loadCronJobsStore(storePath)).jobs).toEqual(jobs);
-  });
+  it.each([
+    ["sole", true, true],
+    ["sole", false, false],
+    ["system", true, true],
+    ["none", true, false],
+    ["none", false, false],
+  ] as const)(
+    "preserves stored task enablement for %s owner (enabled=%s)",
+    async (owner, enabled, expected) => {
+      const root = tempDirs.make("openclaw-task-only-owner-");
+      process.env.HOME = root;
+      process.env.OPENCLAW_STATE_DIR = root;
+      const cfg: OpenClawConfig = {
+        agents: {
+          ownership: "explicit",
+          entries: owner === "sole" ? { ops: {} } : { main: {}, ops: {} },
+          ...(owner === "system" ? { defaults: { systemAgent: { agentId: "ops" } } } : {}),
+        },
+      };
+      const storePath = resolveCronJobsStorePathFromConfig(cfg);
+      // An implicit cadence alone must not provision a new automation.
+      expect((await ensureHeartbeatMonitorJobs(cfg, storePath)).size).toBe(0);
+      const legacy: CronJob = {
+        id: "task-only",
+        agentId: "ops",
+        name: "inbox",
+        enabled,
+        createdAtMs: 10,
+        updatedAtMs: 20,
+        declarationKey: heartbeatTaskDeclarationKey("ops", "inbox"),
+        payload: {
+          kind: "systemEvent",
+          text: "Keep the existing task prompt",
+          toolsAllow: ["read"],
+        },
+        sessionTarget: "main",
+        wakeMode: "next-heartbeat",
+        schedule: { kind: "every", everyMs: 50000, anchorMs: 12 },
+        state: { nextRunAtMs: 12345, queuedAtMs: 12345, lastRunAtMs: 9999 },
+      };
+      await saveCronJobsStore(storePath, { version: 1, jobs: [legacy] });
+      expect(await migrateStoredHeartbeatTaskJobs(cfg)).toBe(1);
+      const jobs = (await loadCronJobsStore(storePath)).jobs;
+      expect(jobs.find((job) => job.id === legacy.id)).toMatchObject({
+        id: legacy.id,
+        enabled: expected,
+        schedule: legacy.schedule,
+        state: legacy.state,
+        payload: {
+          kind: "agentTurn",
+          message: "Keep the existing task prompt",
+          toolsAllow: ["read"],
+        },
+      });
+      expect(jobs.find((job) => job.id !== legacy.id)?.enabled).toBe(owner !== "none");
+      expect(await migrateStoredHeartbeatTaskJobs(cfg)).toBe(0);
+      expect((await loadCronJobsStore(storePath)).jobs).toEqual(jobs);
+    },
+  );
 
   it("does not create shared state while detecting heartbeat tasks", async () => {
     const root = tempDirs.make("openclaw-heartbeat-task-detect-");
