@@ -2,10 +2,13 @@ import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Page } from "playwright";
 import { expect, it } from "vitest";
+import type { GatewayClient } from "../../../src/gateway/client.ts";
+import { acquireGatewayTestClient } from "../../../test/helpers/gateway-client.ts";
 import {
   createOpenClawTestInstance,
   type OpenClawTestInstance,
 } from "../../../test/helpers/openclaw-test-instance.ts";
+import { runQaGatewayFixture } from "../../../test/helpers/qa-gateway-cleanup.ts";
 import type { ModelCatalogResult, SessionsListResult } from "../api/types.ts";
 import { waitForControlUiGatewayReady } from "../test-helpers/control-ui-e2e-readiness.ts";
 import { enterControlUiSession } from "../test-helpers/control-ui-session-entry.ts";
@@ -19,17 +22,10 @@ const pageOptions = {
   viewport: { width: 1280, height: 900 },
 };
 
-async function call(method: string, params: Record<string, unknown>) {
-  const result = await instance.cli([
-    "gateway",
-    "call",
-    method,
-    "--json",
-    "--params",
-    JSON.stringify(params),
-  ]);
-  expect(result.code, result.stderr).toBe(0);
-  return result.stdout;
+async function call<T>(method: string, params: Record<string, unknown>) {
+  const result = fixtureClient.request<T>(method, params);
+  await expect(result, method).resolves.toBeDefined();
+  return result;
 }
 
 async function chatUrl(slug: string) {
@@ -82,6 +78,7 @@ async function expectUnselectedUltraChoice(page: Page, currentValue: "" | "off")
 }
 
 let instance: OpenClawTestInstance;
+let fixtureClient: GatewayClient;
 const suite = createControlUiE2eSuite({
   name: "Model picker public thinking metadata",
   startServerBeforeBrowser: true,
@@ -132,7 +129,34 @@ const suite = createControlUiE2eSuite({
     });
     try {
       await instance.startGateway();
-      return { baseUrl: `http://127.0.0.1:${instance.port}/`, close: () => instance.cleanup() };
+      fixtureClient = await acquireGatewayTestClient(
+        {
+          url: instance.url,
+          token: instance.gatewayToken,
+          env: instance.env,
+          clientName: "cli",
+          mode: "cli",
+          caps: ["ultrafast"],
+          scopes: ["operator.read", "operator.write"],
+          deviceIdentity: null,
+          deviceAuthScope: instance.url,
+          sharedStateMode: "read-only",
+          requestTimeoutMs: 10_000,
+        },
+        {
+          timeoutMs: 10_000,
+          timeoutMessage: "Thinking metadata fixture client did not connect",
+          closeMessage: "Thinking metadata fixture client closed during connect",
+        },
+      );
+      return {
+        baseUrl: `http://127.0.0.1:${instance.port}/`,
+        close: () =>
+          runQaGatewayFixture(
+            () => fixtureClient.stopAndWait(),
+            () => instance.cleanup(),
+          ),
+      };
     } catch (error) {
       await instance.cleanup();
       throw error;
@@ -151,9 +175,7 @@ suite.define(() => {
       model: "with-effort",
     });
     await call("sessions.patch", { key, thinkingLevel: "off" });
-    const before: SessionsListResult = JSON.parse(
-      await call("sessions.list", { agentId: "main", limit: 50 }),
-    );
+    const before = await call<SessionsListResult>("sessions.list", { agentId: "main", limit: 50 });
     const beforeRow = before.sessions.find((row) => row.key === key);
     expect(beforeRow).toMatchObject({
       sessionId: expect.any(String),
@@ -185,9 +207,10 @@ suite.define(() => {
       await composer.press("Enter");
       await expect
         .poll(async () => {
-          const listed: SessionsListResult = JSON.parse(
-            await call("sessions.list", { agentId: "main", limit: 50 }),
-          );
+          const listed = await call<SessionsListResult>("sessions.list", {
+            agentId: "main",
+            limit: 50,
+          });
           return listed.sessions.find((row) => row.key === key);
         })
         .toMatchObject({
@@ -212,9 +235,7 @@ suite.define(() => {
       await expect
         .poll(() => page.getByRole("log").textContent())
         .toContain('Unsupported thinking level "high" for this model.');
-      const after: SessionsListResult = JSON.parse(
-        await call("sessions.list", { agentId: "main", limit: 50 }),
-      );
+      const after = await call<SessionsListResult>("sessions.list", { agentId: "main", limit: 50 });
       expect(after.sessions.find((row) => row.key === key)).toMatchObject({
         modelProvider: "thinking-fixture",
         model: "no-effort",
@@ -262,16 +283,15 @@ suite.define(() => {
       label: "Thinking status",
       model: "thinking-fixture/no-effort",
     });
-    const catalog: ModelCatalogResult = JSON.parse(
-      await call("models.list", { agentId: "main", view: "configured" }),
-    );
+    const catalog = await call<ModelCatalogResult>("models.list", {
+      agentId: "main",
+      view: "configured",
+    });
     const model = catalog.models.find((entry) => entry.id === "no-effort");
     expect(model?.thinkingLevels).toEqual(harnessOnlyThinkingLevels);
     expect(model?.thinkingDefault).toBeUndefined();
 
-    const before: SessionsListResult = JSON.parse(
-      await call("sessions.list", { agentId: "main", limit: 50 }),
-    );
+    const before = await call<SessionsListResult>("sessions.list", { agentId: "main", limit: 50 });
     const row = before.sessions.find((entry) => entry.key === sessionKey);
     expect(row?.thinkingLevels).toEqual(harnessOnlyThinkingLevels);
     expect(row?.thinkingDefault).toBeUndefined();
@@ -335,9 +355,7 @@ suite.define(() => {
         await page.screenshot({ path: path.join(suite.artifactDir, "last-page.png") });
       }
     });
-    const after: SessionsListResult = JSON.parse(
-      await call("sessions.list", { agentId: "main", limit: 50 }),
-    );
+    const after = await call<SessionsListResult>("sessions.list", { agentId: "main", limit: 50 });
     const afterRow = after.sessions.find((entry) => entry.key === sessionKey);
     expect(afterRow?.model).toBe(row?.model);
     expect(afterRow?.modelProvider).toBe(row?.modelProvider);
