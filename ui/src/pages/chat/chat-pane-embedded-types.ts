@@ -21,12 +21,26 @@ import type { ChatPageHost } from "./chat-state-host.ts";
 import type { ChatProps } from "./chat-view-frame.ts";
 import type { ChatModelControlsProps } from "./components/chat-model-controls.tsx";
 import type { SessionWorkspaceState } from "./components/chat-session-workspace-types.ts";
-import type { SidebarSelection } from "./components/chat-sidebar-content-types.ts";
-import type { SessionWorkspaceProps } from "./components/chat-sidebar-view-types.ts";
+import type {
+  SessionDiffProps,
+  SidebarSelection,
+} from "./components/chat-sidebar-content-types.ts";
+import type {
+  ChatDetailPanelProps,
+  SessionWorkspaceProps,
+} from "./components/chat-sidebar-view-types.ts";
 import type { SessionDiscussionPanelConfig } from "./components/session-discussion-panel.tsx";
 import type { SidebarSlotId } from "./sidebar-layout-types.ts";
 
 export type ChatDetailSlotProps = {
+  active?: boolean;
+  presentation?: "desktop" | "mobile";
+  fileBack?: ChatDetailPanelProps["fileBack"];
+  fileWorkspace?: ChatDetailPanelProps["fileWorkspace"];
+  onOpenMobilePage?: SessionDiffProps["onOpenMobilePage"];
+  filePresentation?: ChatDetailPanelProps["filePresentation"];
+  onFileInteraction?: ChatDetailPanelProps["onFileInteraction"];
+  onFileDraftChange?: ChatDetailPanelProps["onFileDraftChange"];
   chat: ChatProps;
   content: SidebarSelection;
   host: ChatPageHost;
@@ -34,7 +48,10 @@ export type ChatDetailSlotProps = {
 };
 
 export type SidebarPanelDefinitionParams = {
+  onScrollPortRef?: ChatProps["onScrollPortRef"];
+  presentation?: "desktop" | "mobile";
   panePresentation?: PresentationValue;
+  detailPresented?: PresentationValue;
   state: ChatPageHost;
   paneId: string;
   panePresentationId: string;
@@ -61,6 +78,8 @@ export type SidebarPanelDefinitionParams = {
   preferredBrowserTab?: BrowserTabSelection;
   sessionBrowserTabs?: BrowserTabTarget[];
   desktopPresented: PresentationValue;
+  desktopExpanded?: boolean;
+  onToggleDesktopExpanded?: () => void;
   desktopRefreshOnPresentation: boolean;
   desktopAvailable: boolean;
   desktopSource: string | null;
@@ -85,7 +104,7 @@ export type SidebarPanelDefinitionParams = {
   onCompanionDraftChange: (draft: string) => void;
   onCompanionAttachmentsChange?: (attachments: ChatAttachment[]) => boolean | void;
   connected: boolean;
-  onClearCompanion: () => void;
+  onClearCompanion: () => Promise<boolean>;
   onCreateClaw?: () => void;
   discussion: SessionDiscussionPanelConfig | null;
   discussionAvailable: boolean;
