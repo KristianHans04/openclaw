@@ -423,11 +423,13 @@ it("publishes a new revision for plugin-owned navigation mutations before notify
     },
     configForRuntime(),
   );
-  vi.mocked(initializeControlUiPlugin).mockImplementation(async (getContext, runtime, owner) => {
-    const host = createControlUiPluginHost(getContext, runtime, owner);
-    host.ui.registerNavigation(navigation);
-    return Object.assign(owner, { host });
-  });
+  vi.mocked(controlUiLoader.initializeControlUiPlugin).mockImplementation(
+    async (getContext, runtime, owner) => {
+      const host = createControlUiPluginHost(getContext, runtime, owner);
+      host.ui.registerNavigation(navigation);
+      return Object.assign(owner, { host });
+    },
+  );
   const runtime = runtimeFor(context);
   expect(runtime.revision).toBe(0);
   runtime.subscribe(() => {
