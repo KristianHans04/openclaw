@@ -12,10 +12,13 @@ packaging or publish gate: npm preflight, prepack, `release-check`, and
 `release:prep` never consult live npm dist-tags, so another release moving
 `latest` or `beta` cannot invalidate a validated candidate. Refresh it on
 `main` (stable closeout or a normal PR) from every release in the supported
-upgrade window. Verify each downloaded npm tarball against its published
-`dist.integrity` before extraction, then run
-`pnpm update:compat:gen --release '<unpacked-dir>=<verified-integrity>'`, repeating
-`--release` for every supported version. Generation replaces the recorded set:
+upgrade window with `pnpm update:compat:gen --registry-release <version>`,
+repeating `--registry-release` for every supported version. This mode downloads
+the exact registry tarball URL, verifies its published `dist.integrity`, and
+unpacks it without npm installation or freshness policy. For an already
+downloaded and verified artifact, use
+`--release '<unpacked-dir>=<verified-integrity>'`; both input modes may be mixed.
+Generation replaces the recorded set:
 keep empty entries, drop expired versions and their historical corrections, and
 never hand-edit recorded origins. `pnpm update:compat:check` remains a manual
 maintainer report of npm `latest`/`beta`/`extended-stable` coverage. Repeat the generation
