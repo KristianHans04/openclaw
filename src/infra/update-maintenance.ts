@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { quoteCliArg, quotePowerShellArg } from "../cli/quote-cli-arg.js";
 import { hasCommandProcessCleanupError } from "../process/exec-result.js";
 import { ABSOLUTE_DEADLINE_EXPIRED, awaitWithinDeadline } from "../utils/absolute-deadline.js";
+import { formatErrorMessage } from "./errors.js";
 import type { UpdateRunStep } from "./update-run-record.js";
 import type { UpdateStepResult } from "./update-step-result.js";
 
@@ -61,6 +62,7 @@ export async function cleanupUpdateTemporaryDirectory(params: {
   let expired = false;
   const hasExpired = () => expired || performance.now() >= monotonicDeadline;
   let failure: string | undefined;
+  let stderrTail: string | undefined;
   try {
     await recordProgress(
       `waiting for ${params.canRemove ? "directory custody verification" : "filesystem removal"}`,
@@ -102,6 +104,7 @@ export async function cleanupUpdateTemporaryDirectory(params: {
   } catch (error) {
     await warnOnUpdateCleanupFailure(error, params.directory, (message) => {
       failure = message;
+      stderrTail = formatErrorMessage(error);
     });
   }
   // Unverified paths may be absent or replaced; never recommend deleting them.
@@ -118,7 +121,7 @@ export async function cleanupUpdateTemporaryDirectory(params: {
         durationMs: Date.now() - started,
         exitCode: expired ? null : 1,
         ...(expired ? { termination: "timeout" as const } : {}),
-        stderrTail: reason,
+        stderrTail: expired ? reason : (stderrTail ?? reason),
         advisory: {
           kind: "recoverable-maintenance",
           message: canRemove
