@@ -610,32 +610,19 @@ export async function runGitCandidatePreflight(params: {
         });
   } finally {
     if (!cleanupUncertain) {
-      const cleanup = async () => {
-        let removed = false;
-        await warnOnUpdateCleanupFailure({
-          directory: preflightRoot,
-          root: params.gitRoot,
-          name: "preflight-cleanup",
-          cleanup: async () => {
-            removed = await cleanupGitPreflight(params, worktreeDir, preflightRoot);
-          },
-          onWarning: async (warning) => {
-            const recorded = params.steps.findLast((entry) => entry.name === warning.name);
-            if (recorded) {
-              recorded.advisory = warning.advisory;
-            } else {
-              params.steps.push(warning);
+      const cleanup = () =>
+        cleanupGitPreflight(params, worktreeDir, preflightRoot).catch(async (error: unknown) => {
+          await warnOnUpdateCleanupFailure(error, preflightRoot, async (message) => {
+            const warning = params.steps.findLast((entry) => entry.name === "preflight-cleanup");
+            if (!warning) {
+              return console.warn(message);
             }
-            const options = params.step(warning.name, [], params.gitRoot);
-            await options.progress?.onStepComplete?.({
-              ...warning,
-              index: options.stepIndex,
-              total: options.totalSteps,
-            });
-          },
+            warning.advisory = { kind: "recoverable-maintenance", message };
+            const { progress, stepIndex: index, totalSteps: total } = step(warning.name);
+            await progress?.onStepComplete?.({ ...warning, index, total });
+          });
+          return false;
         });
-        return removed;
-      };
       if (tested?.status !== "ok" || !params.retainCleanup?.(cleanup)) {
         await cleanup();
       }

@@ -23,8 +23,8 @@ function cleanupReporting(start?: Error, complete?: Error) {
 const removals = (fixture: ReturnType<typeof createGitAdmissionFixture>) =>
   fixture.calls.filter((args) => args.includes("worktree") && args.includes("remove"));
 
-it.each(["result", "exception"] as const)(
-  "preserves the candidate %s when worktree cleanup cannot launch",
+it.each(["result", "exception", "uncertain-warning"] as const)(
+  "settles a failed candidate and throwing cleanup (%s)",
   async (failure) => {
     const fixture = createGitAdmissionFixture();
     const before = fixture.git(fixture.install, "rev-parse", "HEAD");
@@ -40,6 +40,7 @@ it.each(["result", "exception"] as const)(
       fs.writeFileSync(path.join(dist, name), content);
     }
     const original = new TypeError("synthetic candidate validation failure");
+    const uncertain = new CommandProcessCleanupError();
     const observed: Omit<UpdateStepResult, "cwd">[] = [];
     let candidateRoot: string | undefined;
     try {
@@ -47,11 +48,18 @@ it.each(["result", "exception"] as const)(
         {
           validateCandidate: async (root) => {
             candidateRoot = root;
-            if (failure === "exception") {
+            if (failure !== "result") {
               throw original;
             }
           },
-          progress: { onStepComplete: (step) => void observed.push(step) },
+          progress: {
+            onStepComplete: (step) => {
+              observed.push(step);
+              if (failure === "uncertain-warning" && step.advisory) {
+                throw uncertain;
+              }
+            },
+          },
         },
         async (argv, options) => {
           if (argv.includes("worktree") && argv.includes("remove")) {
@@ -63,8 +71,8 @@ it.each(["result", "exception"] as const)(
           return fixture.runCommand(argv, options);
         },
       );
-      if (failure === "exception") {
-        await expect(pending).rejects.toBe(original);
+      if (failure !== "result") {
+        await expect(pending).rejects.toBe(failure === "exception" ? original : uncertain);
       } else {
         const result = await pending;
         expect(result).toMatchObject({

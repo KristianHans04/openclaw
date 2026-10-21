@@ -11,12 +11,8 @@ import { signalProcessTree } from "../process/kill-tree.js";
 import { resolveRuntimeArgs } from "./runtime-worker-url.js";
 import { UPDATE_CANARY_PROGRESS_PREFIX } from "./update-candidate-canary-progress.js";
 import { createUpdateFailureFact, type UpdateFailureFact } from "./update-failure-facts.js";
-import {
-  cleanupUpdateTemporaryDirectory,
-  warnOnUpdateCleanupFailure,
-} from "./update-maintenance.js";
+import { warnOnUpdateCleanupFailure } from "./update-maintenance.js";
 import { UPDATE_CANDIDATE_STARTUP_FAILURES } from "./update-preflight-details.js";
-import type { UpdateRunStep } from "./update-run-record.js";
 import type { UpdateStepResult } from "./update-step-result.js";
 
 export function launchCanary(params: {
@@ -277,40 +273,6 @@ export async function stopCanary(params: {
         { cause: cleanupError },
       );
     }
-    await warnOnUpdateCleanupFailure({
-      root: params.root,
-      directory: params.root,
-      name: `${params.name}-cleanup`,
-      cleanup: async () => {
-        throw cleanupError;
-      },
-      onWarning: params.recordStep,
-    });
-  }
-}
-
-export async function cleanupCanaryDirectories(params: {
-  root: string;
-  stateDir: string;
-  directories: readonly string[];
-  onProgress?: (step: UpdateRunStep) => void | Promise<void>;
-  recordStep: (step: UpdateStepResult) => Promise<void>;
-}): Promise<void> {
-  for (const directory of params.directories) {
-    const cleanup = {
-      directory,
-      root: params.root,
-      name:
-        directory === params.stateDir
-          ? "candidate-state-cleanup"
-          : "candidate-plugin-inventory-cleanup",
-      onProgress: params.onProgress,
-      onWarning: params.recordStep,
-      onRemoved: params.recordStep,
-    };
-    await warnOnUpdateCleanupFailure({
-      ...cleanup,
-      cleanup: () => cleanupUpdateTemporaryDirectory(cleanup),
-    });
+    await warnOnUpdateCleanupFailure(cleanupError, params.root, console.warn);
   }
 }

@@ -327,6 +327,27 @@ describe("canary teardown evidence", () => {
     },
   );
 
+  it.each([false, true])(
+    "retains uncertain warning delivery (aggregate: %s)",
+    async (aggregate) => {
+      const uncertain = new CommandProcessCleanupError();
+      const error = aggregate ? new AggregateError([uncertain], "uncertain cleanup") : uncertain;
+      await expect(
+        cleanupUpdateTemporaryDirectory({
+          root,
+          directory: path.join(root, "owned-cleanup-copy"),
+          name: "candidate-state-cleanup",
+          onProgress: () => {
+            throw new RangeError("cleanup progress unavailable");
+          },
+          onWarning: () => {
+            throw error;
+          },
+        }),
+      ).rejects.toBe(error);
+    },
+  );
+
   it("preserves uncertain startup when recording its stop warning also fails", async () => {
     const response = createDeferredCore<Response>();
     const fetching = createDeferredCore();

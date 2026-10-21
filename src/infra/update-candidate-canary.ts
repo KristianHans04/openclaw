@@ -16,7 +16,7 @@ import { readPackageVersion } from "./package-json.js";
 import { runtimeProcessEntrypoints } from "./runtime-process-entrypoints.js";
 import { resolveSqliteInspectionBudget } from "./sqlite-readonly-worker.js";
 import * as canaryCmd from "./update-candidate-canary-commands.js";
-import * as canaryProcess from "./update-candidate-canary-process.js";
+import { launchCanary, stopCanary, waitBounded } from "./update-candidate-canary-process.js";
 import { UPDATE_CANARY_PROGRESS_ARGS } from "./update-candidate-canary-progress.js";
 import * as readiness from "./update-candidate-canary-readiness.js";
 import type { UpdateCandidateBundledSource } from "./update-candidate-plugins.js";
@@ -40,6 +40,7 @@ import {
   parseConfigFailureFacts,
   type UpdateFailureFact,
 } from "./update-failure-facts.js";
+import { cleanupUpdateTemporaryDirectory } from "./update-maintenance.js";
 import type { UpdateRunStep } from "./update-run-record.js";
 import { resolveUpdateDoctorExecutionPolicy } from "./update-runner-doctor.js";
 import { UpdateSnapshotCapacityError } from "./update-snapshot-capacity.js";
@@ -109,11 +110,8 @@ export async function validateUpdateCandidateCanary(params: {
   };
   const recordStep = async (step: UpdateStepResult) => {
     steps.push(step);
-    await reportReceipt(onStep, step);
-  };
-  const recordCleanupStep = async (step: UpdateStepResult) => {
-    steps.push(step);
-    await onStep?.(step);
+    // Cleanup receipts report completed work; they cannot revoke the candidate result.
+    await (step.name.endsWith("-cleanup") ? onStep?.(step) : reportReceipt(onStep, step));
   };
   let candidateSchemaVersions: schemaVersions.OpenClawSchemaVersions | undefined;
   let gatewayRestartCompletion = false;
@@ -153,13 +151,10 @@ export async function validateUpdateCandidateCanary(params: {
   const launch = (
     entry: string,
     args: string[],
-    observers: Pick<
-      Parameters<typeof canaryProcess.launchCanary>[0],
-      "onLine" | "hidesLine" | "onStdout"
-    > = {},
+    observers: Pick<Parameters<typeof launchCanary>[0], "onLine" | "hidesLine" | "onStdout"> = {},
   ) => {
     params.signal?.throwIfAborted();
-    return canaryProcess.launchCanary({
+    return launchCanary({
       ...observers,
       entry,
       args,
@@ -342,7 +337,7 @@ export async function validateUpdateCandidateCanary(params: {
       let timeoutMessage: string | undefined;
       let exitWarning: string | undefined;
       try {
-        const outcome = await canaryProcess.waitBounded(running.result, remaining(), params.signal);
+        const outcome = await waitBounded(running.result, remaining(), params.signal);
         // Freeze the winning outcome before teardown can make a killed child
         // emit a successful close event.
         code = outcome.status === "completed" ? outcome.value : 1;
@@ -369,12 +364,12 @@ export async function validateUpdateCandidateCanary(params: {
           }
         }
       } finally {
-        await canaryProcess.stopCanary({
+        await stopCanary({
           running,
           name: command.name,
           root: params.root,
           deadline,
-          recordStep: recordCleanupStep,
+          recordStep,
         });
         if (doctorResultPath) {
           doctorReceipt = await consumeUpdatePostInstallDoctorResult(
@@ -627,12 +622,12 @@ export async function validateUpdateCandidateCanary(params: {
       };
       throw error;
     } finally {
-      await canaryProcess.stopCanary({
+      await stopCanary({
         running,
         name: "candidate-gateway-startup",
         root: params.root,
         deadline: Math.max(deadline, Date.now() + Math.min(2_000, Math.floor(budget / 10))),
-        recordStep: recordCleanupStep,
+        recordStep,
         primaryFailure: startupFailure,
       });
       if (startupFailure && activeCheckStep && running.failureFacts.length) {
@@ -706,14 +701,20 @@ export async function validateUpdateCandidateCanary(params: {
       phase,
     );
   } finally {
-    if (!cleanupUncertain && rehearsal) {
-      await canaryProcess.cleanupCanaryDirectories({
-        root: params.root,
-        stateDir: rehearsal.stateDir,
-        directories: rehearsal.cleanupDirectories,
-        onProgress: params.onProgress,
-        recordStep: recordCleanupStep,
-      });
+    if (!cleanupUncertain) {
+      for (const directory of rehearsal?.cleanupDirectories ?? []) {
+        await cleanupUpdateTemporaryDirectory({
+          directory,
+          root: params.root,
+          name:
+            directory === rehearsal?.stateDir
+              ? "candidate-state-cleanup"
+              : "candidate-plugin-inventory-cleanup",
+          onProgress: params.onProgress,
+          onWarning: recordStep,
+          onRemoved: recordStep,
+        });
+      }
     }
   }
 }

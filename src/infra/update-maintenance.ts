@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import { quoteCliArg, quotePowerShellArg } from "../cli/quote-cli-arg.js";
 import { hasCommandProcessCleanupError } from "../process/exec-result.js";
 import { ABSOLUTE_DEADLINE_EXPIRED, awaitWithinDeadline } from "../utils/absolute-deadline.js";
-import { formatErrorMessage } from "./errors.js";
 import type { UpdateRunStep } from "./update-run-record.js";
 import type { UpdateStepResult } from "./update-step-result.js";
 
@@ -14,40 +13,19 @@ export function formatUpdateCleanupCommand(directory: string): string {
     : `rm -rf -- ${quoteCliArg(directory)}`;
 }
 
-/** Disposable-copy cleanup must not replace the candidate's result or exception. */
-export async function warnOnUpdateCleanupFailure(params: {
-  directory: string;
-  root: string;
-  name: string;
-  cleanup: () => Promise<unknown>;
-  onWarning: (step: UpdateStepResult) => void | Promise<void>;
-}): Promise<void> {
-  const started = Date.now();
+export async function warnOnUpdateCleanupFailure(
+  error: unknown,
+  directory: string,
+  onWarning: (message: string) => void | Promise<void>,
+) {
+  if (hasCommandProcessCleanupError(error)) {
+    throw error;
+  }
   try {
-    await params.cleanup();
-  } catch (error) {
-    if (hasCommandProcessCleanupError(error)) {
-      throw error;
-    }
-    const reason = `${error instanceof Error ? error.name : typeof error}: ${formatErrorMessage(error)}`;
-    const message = `Skipped ${params.name} for ${params.directory}. ${reason}`;
-    try {
-      await params.onWarning({
-        name: params.name,
-        command: "",
-        cwd: params.root,
-        durationMs: Date.now() - started,
-        exitCode: 1,
-        stderrTail: reason,
-        advisory: { kind: "recoverable-maintenance", message },
-      });
-    } catch (reportingError) {
-      if (hasCommandProcessCleanupError(reportingError)) {
-        throw reportingError;
-      }
-      console.warn(
-        `[update] ${message}; warning reporting failed: ${formatErrorMessage(reportingError)}`,
-      );
+    await onWarning(`Cleanup failed at ${directory}: ${String(error)}`);
+  } catch (reportingError) {
+    if (hasCommandProcessCleanupError(reportingError)) {
+      throw reportingError;
     }
   }
 }
@@ -79,14 +57,14 @@ export async function cleanupUpdateTemporaryDirectory(params: {
     );
     return pendingProgress;
   };
-  await recordProgress(
-    `waiting for ${params.canRemove ? "directory custody verification" : "filesystem removal"}`,
-  );
   let canRemove = false;
   let expired = false;
   const hasExpired = () => expired || performance.now() >= monotonicDeadline;
   let failure: string | undefined;
   try {
+    await recordProgress(
+      `waiting for ${params.canRemove ? "directory custody verification" : "filesystem removal"}`,
+    );
     expired =
       (await awaitWithinDeadline(
         async () => {
@@ -108,53 +86,49 @@ export async function cleanupUpdateTemporaryDirectory(params: {
         monotonicDeadline,
         () => performance.now(),
       )) === ABSOLUTE_DEADLINE_EXPIRED;
-  } catch (error) {
-    if (hasCommandProcessCleanupError(error)) {
-      throw error;
-    }
-    failure = formatErrorMessage(error);
-  }
-  // Filesystem removal may outlive its budget; an accepted progress write may not.
-  try {
+    // Filesystem removal may outlive its budget; an accepted progress write may not.
     await pendingProgress;
-  } catch (error) {
-    if (hasCommandProcessCleanupError(error)) {
-      throw error;
+    if (canRemove && !expired) {
+      await recordProgress("removed disposable temporary copy", true);
+      await params.onRemoved?.({
+        name: params.name,
+        command: formatUpdateCleanupCommand(params.directory),
+        cwd: params.root,
+        durationMs: Date.now() - started,
+        exitCode: 0,
+      });
+      return;
     }
-    failure ??= formatErrorMessage(error);
-  }
-  if (canRemove && failure === undefined && !expired) {
-    await recordProgress("removed disposable temporary copy", true);
-    await params.onRemoved?.({
-      name: params.name,
-      command: formatUpdateCleanupCommand(params.directory),
-      cwd: params.root,
-      durationMs: Date.now() - started,
-      exitCode: 0,
+  } catch (error) {
+    await warnOnUpdateCleanupFailure(error, params.directory, (message) => {
+      failure = message;
     });
-    return;
   }
   // Unverified paths may be absent or replaced; never recommend deleting them.
   const command = canRemove ? formatUpdateCleanupCommand(params.directory) : "";
   const reason = expired
     ? `Temporary-copy cleanup budget expired after ${UPDATE_CLEANUP_BUDGET_MS}ms.`
     : (failure ?? "Directory ownership could not be verified.");
-  await params.onWarning({
-    name: params.name,
-    command,
-    cwd: params.root,
-    durationMs: Date.now() - started,
-    exitCode: expired ? null : 1,
-    ...(expired ? { termination: "timeout" as const } : {}),
-    stderrTail: reason,
-    advisory: {
-      kind: "recoverable-maintenance",
-      message: canRemove
-        ? expired
-          ? // fs.rm cannot be cancelled; only this invocation's disposable copy remains in flight.
-            `Stopped waiting for ${params.name}. Temporary-copy removal may still be finishing. If ${params.directory} remains after the updater exits, remove it with: ${command}. Reason: ${reason}`
-          : `Skipped ${params.name}. Remove the retained temporary copy with: ${command}. Reason: ${reason}`
-        : `Skipped ${params.name}: ownership could not be verified for ${params.directory}. Inspect that path before removing any files.${failure !== undefined || expired ? ` Reason: ${reason}` : ""}`,
-    },
-  });
+  await Promise.resolve()
+    .then(() =>
+      params.onWarning({
+        name: params.name,
+        command,
+        cwd: params.root,
+        durationMs: Date.now() - started,
+        exitCode: expired ? null : 1,
+        ...(expired ? { termination: "timeout" as const } : {}),
+        stderrTail: reason,
+        advisory: {
+          kind: "recoverable-maintenance",
+          message: canRemove
+            ? expired
+              ? // fs.rm cannot be cancelled; only this invocation's disposable copy remains in flight.
+                `Stopped waiting for ${params.name}. Temporary-copy removal may still be finishing. If ${params.directory} remains after the updater exits, remove it with: ${command}. Reason: ${reason}`
+              : `Skipped ${params.name}. Remove the retained temporary copy with: ${command}. Reason: ${reason}`
+            : `Skipped ${params.name}: ownership could not be verified for ${params.directory}. Inspect that path before removing any files.${failure !== undefined || expired ? ` Reason: ${reason}` : ""}`,
+        },
+      }),
+    )
+    .catch((error: unknown) => warnOnUpdateCleanupFailure(error, params.directory, console.warn));
 }
