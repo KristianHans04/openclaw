@@ -13,7 +13,7 @@ import {
   resolveCliRuntimeCanonicalProvider,
   resolveCliRuntimeModelBackendBinding,
 } from "./cli-backends.js";
-import { selectCliExecutionAuthProfileId } from "./cli-execution-auth.js";
+import { selectCliExecutionAuthProfile } from "./cli-execution-auth.js";
 import { resolveBundledCliBackendAuthPolicy } from "./cli-runner/cli-backend-auth-policy.js";
 import type {
   ModelAuthAvailabilityEvaluation,
@@ -118,7 +118,7 @@ export function createCliRuntimeModelAuthEvaluator(
         : evaluation;
     }
     if (!selectedProfileId && authPolicy?.strictSelectedProfile) {
-      const profileId = selectCliExecutionAuthProfileId({
+      const profile = selectCliExecutionAuthProfile({
         cliExecutionProvider: runtimeProvider,
         authProfileProvider: provider,
         config: params.cfg,
@@ -126,10 +126,10 @@ export function createCliRuntimeModelAuthEvaluator(
         readinessMode: "read-only",
         metadataSnapshot: params.metadataSnapshot,
       });
-      if (profileId) {
-        return evaluateProviderAuth(params.authStore.profiles[profileId].provider, {
+      if (profile) {
+        return evaluateProviderAuth(profile.provider, {
           modelId: ref.modelId,
-          requiredProfileId: profileId,
+          requiredProfileId: profile.profileId,
         });
       }
     }

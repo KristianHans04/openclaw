@@ -38,7 +38,7 @@ export function cliBackendAcceptsAuthProfileForwarding(params: {
  * Preserve the session account unless the user selects another or it was removed.
  * A user-locked profile must fail closed rather than run as another user.
  */
-export function selectCliExecutionAuthProfileId(params: {
+export function selectCliExecutionAuthProfile(params: {
   cliExecutionProvider: string;
   authProfileProvider: string;
   config: OpenClawConfig;
@@ -47,7 +47,7 @@ export function selectCliExecutionAuthProfileId(params: {
   sessionBinding?: CliSessionBinding;
   readinessMode?: "execution" | "read-only";
   metadataSnapshot?: PluginMetadataSnapshot;
-}): string | undefined {
+}): { profileId: string; provider: string } | undefined {
   const { store } = params;
   const selectedAuthProfileId = params.selected?.authProfileId?.trim();
   const hasExplicitSelection =
@@ -91,7 +91,7 @@ export function selectCliExecutionAuthProfileId(params: {
       );
     }
     if (acceptsCredential(credential, true)) {
-      return retainedProfileId;
+      return { profileId: retainedProfileId, provider: credential.provider };
     }
     throw new CliExecutionAuthProfileError(
       `CLI backend "${params.cliExecutionProvider}" cannot use auth profile "${retainedProfileId}" owned by "${credential.provider}".`,
@@ -116,21 +116,25 @@ export function selectCliExecutionAuthProfileId(params: {
       readinessMode: params.readinessMode,
       authAliasLookupParams: { metadataSnapshot: params.metadataSnapshot },
     });
-    const profileId = order.profileIds.find((id) => {
-      const credential = store.profiles[id];
-      return (
-        credential && acceptsCredential(credential, false) && !nativeAuthProfileIds?.includes(id)
-      );
-    });
-    if (profileId || order.hasExplicitOrder) {
-      return profileId;
+    for (const profileId of order.profileIds) {
+      const credential = store.profiles[profileId];
+      if (
+        credential &&
+        acceptsCredential(credential, false) &&
+        !nativeAuthProfileIds?.includes(profileId)
+      ) {
+        return { profileId, provider: credential.provider };
+      }
+    }
+    if (order.hasExplicitOrder) {
+      return undefined;
     }
   }
   return undefined;
 }
 
 export async function resolveCliExecutionAuthProfileId(
-  params: Omit<Parameters<typeof selectCliExecutionAuthProfileId>[0], "store" | "readinessMode"> & {
+  params: Omit<Parameters<typeof selectCliExecutionAuthProfile>[0], "store" | "readinessMode"> & {
     agentDir: string;
     loadAuthProfileStoreForRuntimeAsync?: typeof loadAuthProfileStoreForRuntimeAsync;
   },
@@ -148,5 +152,5 @@ export async function resolveCliExecutionAuthProfileId(
         ? selected
         : (params.sessionBinding?.authProfileId?.trim() ?? selected),
   });
-  return selectCliExecutionAuthProfileId({ ...params, store });
+  return selectCliExecutionAuthProfile({ ...params, store })?.profileId;
 }

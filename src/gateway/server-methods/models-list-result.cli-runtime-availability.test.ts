@@ -161,7 +161,13 @@ it("keeps every Claude CLI model listed as needing login before the full catalog
   ).toEqual(pinned.map((id) => ({ id, available: false, unavailableReason: "missing-auth" })));
 });
 
-it.each([
+it.each<{
+  name: string;
+  available: boolean;
+  oauth?: boolean;
+  order?: Record<string, string[]>;
+  disabled?: boolean;
+}>([
   { name: "saved setup tokens", available: true },
   { name: "saved OAuth subscription", oauth: true, available: true },
   { name: "empty CLI account order", order: { "claude-cli": [] }, available: false },
