@@ -61,6 +61,20 @@ PY
 /bin/bash "$host_repo/scripts/stage-mac-runtime.sh" "$host_app/Contents/Resources/runtime" "$(uname -m)"
 ln -s "$host_app/Contents/Resources/runtime" "$host_startup_app/Contents/Resources/runtime"
 
+# Match the production bundle's framework search path on this staged debug copy.
+host_startup_executable="$host_startup_app/Contents/MacOS/OpenClaw"
+host_startup_load_commands="$(/usr/bin/otool -l "$host_startup_executable")"
+if ! printf '%s\n' "$host_startup_load_commands" | /usr/bin/awk '
+  $1 == "cmd" { rpath = $2 == "LC_RPATH" }
+  rpath && $1 == "path" && $2 == "@executable_path/../Frameworks" { found = 1 }
+  END { exit !found }
+'; then
+  /usr/bin/codesign --remove-signature "$host_startup_executable"
+  /usr/bin/install_name_tool -add_rpath '@executable_path/../Frameworks' "$host_startup_executable"
+  /usr/bin/codesign --force --sign - --timestamp=none "$host_startup_executable"
+fi
+/usr/bin/codesign --verify --strict "$host_startup_executable"
+
 # The existing resource owner joins each fresh host, then retires its unique service.
 # Retain a failed host's payload beside the native diagnostic output for investigation.
 DYLD_FRAMEWORK_PATH="$host_platform/Library/Frameworks:$host_platform/Library/PrivateFrameworks" \

@@ -117,7 +117,10 @@ describe.skipIf(!connection)("Matrix declared account-root database portability"
       );
       try {
         for (const [index, file] of files.entries()) {
-          const { db } = openOpenClawStateDatabase({ path: file });
+          const { db } = openOpenClawStateDatabase({
+            path: file,
+            env: { ...state.env, OPENCLAW_STATE_DIR: path.dirname(path.dirname(file)) },
+          });
           db.prepare(
             "INSERT INTO plugin_state_entries (plugin_id, namespace, entry_key, value_json, created_at) VALUES ('matrix', 'idb-snapshot', ?, ?, 1)",
           ).run(`chunk-${index}`, cryptoValue);

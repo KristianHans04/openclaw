@@ -11,7 +11,107 @@ import {
   assertNoPendingLegacyExecApprovals,
   ExecApprovalsMigrationRequiredError,
 } from "../infra/exec-approvals-migration-gate.js";
+import type { EngineConnection } from "../infra/sql-connection.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
+
+/** Inspect all required inputs before maintenance can create a store or migrate shared schema. */
+async function prepareRequiredLegacyClientCredentials(env: NodeJS.ProcessEnv) {
+  const [
+    identity,
+    auth,
+    approvals,
+    { resolveClientCredentialLegacyImportClaims },
+    { executeSqliteQuerySync, getNodeSqliteKysely },
+    { tableExists },
+    { readStateSchemaContentVersion },
+    { CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION },
+    {
+      withExistingOpenClawStateDatabaseArtifactPreservingReadOnly,
+      withExistingOpenClawStateDatabaseArtifactPreservingReadOnlyAsync,
+    },
+    { withEngineStoreAdmission },
+    { isStatePostgres },
+    { resolveExecApprovalsPath },
+  ] = await Promise.all([
+    import("../infra/state-migrations.device-identity.js"),
+    import("../infra/state-migrations.device-auth.js"),
+    import("../infra/state-migrations.exec-approvals.js"),
+    import("../infra/client-credential-migration-data.js"),
+    import("../infra/kysely-sync.js"),
+    import("../state/openclaw-state-db-schema-helpers.js"),
+    import("../state/openclaw-state-db-schema-version.js"),
+    import("../state/openclaw-state-db-contract.js"),
+    import("../state/openclaw-state-db-readonly.js"),
+    import("../infra/database-engine/admission-scope.js"),
+    import("../state/openclaw-state-db-engine.js"),
+    import("../infra/exec-approvals-config.js"),
+  ]);
+  type CredentialDatabase = import("../infra/client-credential-schema.js").ClientCredentialDatabase;
+  type CredentialClaims =
+    import("../infra/client-credential-receipt.js").ClientCredentialReceipt["legacyImports"];
+  const readIdentities = (database: EngineConnection) =>
+    tableExists(database, "device_identities")
+      ? executeSqliteQuerySync(
+          database,
+          getNodeSqliteKysely<CredentialDatabase>(database)
+            .selectFrom("device_identities")
+            .selectAll()
+            .where("identity_key", "in", ["primary", "node", "shareExtension"]),
+        ).rows
+      : [];
+  let identities: CredentialDatabase["device_identities"][] = [];
+  let legacyImports: CredentialClaims = {};
+  {
+    using owner = openClientCredentialCustody(env, { readOnly: true, migration: true });
+    if (owner) {
+      identities = readIdentities(owner.database);
+      legacyImports = readClientCredentialReceipt(owner.database)?.receipt.legacyImports ?? {};
+    }
+  }
+  const readSource = ({ db }: { db: EngineConnection }) => {
+    const version = readStateSchemaContentVersion(db);
+    const predecessor = version < CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION;
+    const sourceIdentities = predecessor ? readIdentities(db) : undefined;
+    return {
+      identities: sourceIdentities,
+      legacyImports: sourceIdentities
+        ? resolveClientCredentialLegacyImportClaims(db, {
+            identities: sourceIdentities,
+            nativeBootstrap: version === 0,
+            authTablePresent: version !== 0 || tableExists(db, "device_auth_tokens"),
+          })
+        : {},
+      approvals: approvals.readLegacyExecApprovalsPreparationFacts(
+        db,
+        resolveExecApprovalsPath(env),
+      ),
+    };
+  };
+  // PostgreSQL boot admission is synchronous; SQLite snapshot preparation may await.
+  const source = isStatePostgres()
+    ? withEngineStoreAdmission(() =>
+        withExistingOpenClawStateDatabaseArtifactPreservingReadOnly(readSource, { env }),
+      )
+    : await withExistingOpenClawStateDatabaseArtifactPreservingReadOnlyAsync(readSource, { env });
+  identities = source?.identities ?? identities;
+  legacyImports = { ...source?.legacyImports, ...legacyImports };
+  const stateDir = resolveStateDir(env);
+  let detectedIdentity: Awaited<ReturnType<typeof identity.prepareLegacyDeviceIdentity>>;
+  try {
+    detectedIdentity = await identity.prepareLegacyDeviceIdentity({
+      stateDir,
+      identities,
+      legacyImports,
+    });
+    await auth.prepareLegacyDeviceAuth({ stateDir, legacyImports });
+  } catch (error) {
+    throw new ClientCredentialMigrationRequiredError(
+      `Legacy client credentials require migration: ${String(error)}`,
+    );
+  }
+  await approvals.prepareLegacyExecApprovals({ stateDir, env, facts: source?.approvals });
+  return detectedIdentity;
+}
 
 async function readCredentialPreparationState(
   env: NodeJS.ProcessEnv,
@@ -74,6 +174,9 @@ export async function prepareStartupClientCredentials(
   // Gateway recovery may have validated a backup before its lease-owned application.
   const selection = await resolveDatabaseEngineSelection(config, engineEnv);
   await withDatabaseEngineSelection(selection, async () => {
+    if (preparation === "required") {
+      await prepareRequiredLegacyClientCredentials(env);
+    }
     const { beginDoctorMaintenance } = await import("./doctor-maintenance.js");
     let maintenance: Awaited<ReturnType<typeof beginDoctorMaintenance>>;
     try {
@@ -125,9 +228,14 @@ export async function prepareStartupClientCredentials(
     }
     try {
       await maintenance.run(async () => {
-        if ((await readCredentialPreparationState(env)) === "ready") {
+        const currentPreparation = await readCredentialPreparationState(env);
+        if (currentPreparation === "ready") {
           return;
         }
+        const preparedIdentity =
+          currentPreparation === "required"
+            ? await prepareRequiredLegacyClientCredentials(env)
+            : undefined;
         const { prepareOpenClawStateDatabaseSchema } =
           await import("../state/openclaw-state-db.js");
         const { isStatePostgres } = await import("../state/openclaw-state-db-engine.js");
@@ -145,7 +253,7 @@ export async function prepareStartupClientCredentials(
           import("../infra/state-migrations.exec-approvals.js"),
         ]);
         const context = { env, stateDir: resolveStateDir(env), doctorOnlyStateMigrations: true };
-        const detectedIdentity = identity.detectLegacyDeviceIdentity(context);
+        const detectedIdentity = preparedIdentity ?? identity.detectLegacyDeviceIdentity(context);
         if (detectedIdentity.hasInvalidCanonical) {
           throw new Error(
             "Invalid client identity requires explicit repair; startup preserved it.",

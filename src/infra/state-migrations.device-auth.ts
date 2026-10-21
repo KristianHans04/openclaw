@@ -14,6 +14,7 @@ import {
 import {
   emptyClientCredentialReceipt,
   readClientCredentialFileIdentity,
+  type ClientCredentialReceipt,
 } from "./client-credential-receipt.js";
 import type { ClientCredentialDatabase } from "./client-credential-schema.js";
 import { openClientCredentialCustody } from "./client-credential-store.js";
@@ -103,6 +104,59 @@ function rowIsCanonical(row: { scopes_json: string; updated_at_ms: number }): bo
   }
 }
 
+async function readLegacyDeviceAuthSource(stateDir: string, source: LegacyDeviceAuthSource) {
+  const stateRoot = await root(stateDir, {
+    hardlinks: "reject",
+    maxBytes: MAX_BYTES,
+    symlinks: "reject",
+  });
+  const snapshots = [];
+  for (const sourcePath of sourceCandidates(stateDir, source)) {
+    if (await stateRoot.exists(path.relative(stateDir, sourcePath))) {
+      snapshots.push(
+        await readLegacyMigrationSourceSnapshot({
+          stateRoot,
+          stateDir,
+          sourcePath,
+          maxBytes: MAX_BYTES,
+          label: "device auth",
+        }),
+      );
+    }
+  }
+  const snapshot = snapshots[0];
+  if (!snapshot) {
+    return undefined;
+  }
+  if (snapshots.some((other) => other.sha256 !== snapshot.sha256)) {
+    throw new Error(
+      "Legacy device-auth files disagree; preserve them and resolve the conflict before importing.",
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(snapshot.buffer.toString("utf8"));
+  } catch {
+    throw new Error("Legacy device-auth store is invalid or unsupported.");
+  }
+  return { snapshot, store: parseStore(parsed) };
+}
+
+/** Preparation shares the importer parser and never reopens a consumed JSON input. */
+export async function prepareLegacyDeviceAuth(params: {
+  stateDir: string;
+  legacyImports: ClientCredentialReceipt["legacyImports"];
+}): Promise<void> {
+  for (const source of LEGACY_SOURCES) {
+    if (
+      !params.legacyImports[`auth:${source.profile}`] &&
+      sourceCandidates(params.stateDir, source).some((candidate) => fs.existsSync(candidate))
+    ) {
+      await readLegacyDeviceAuthSource(params.stateDir, source);
+    }
+  }
+}
+
 /** Import retired device-auth JSON while excluding Gateways that can rewrite it. */
 export async function migrateLegacyDeviceAuth(params: {
   detected: LegacyStateDetection["deviceAuth"];
@@ -159,41 +213,11 @@ async function migrateLegacyDeviceAuthSource(params: {
             };
           }
         }
-        const stateRoot = await root(params.stateDir, {
-          hardlinks: "reject",
-          maxBytes: MAX_BYTES,
-          symlinks: "reject",
-        });
-        const snapshots = [];
-        for (const sourcePath of sourceCandidates(params.stateDir, params.source)) {
-          if (await stateRoot.exists(path.relative(params.stateDir, sourcePath))) {
-            snapshots.push(
-              await readLegacyMigrationSourceSnapshot({
-                stateRoot,
-                stateDir: params.stateDir,
-                sourcePath,
-                maxBytes: MAX_BYTES,
-                label: "device auth",
-              }),
-            );
-          }
-        }
-        const source = snapshots[0];
-        if (!source) {
+        const prepared = await readLegacyDeviceAuthSource(params.stateDir, params.source);
+        if (!prepared) {
           return { changes: [], warnings: [] };
         }
-        if (snapshots.some((other) => other.sha256 !== source.sha256)) {
-          throw new Error(
-            "Legacy device-auth files disagree; preserve them and resolve the conflict before importing.",
-          );
-        }
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(source.buffer.toString("utf8"));
-        } catch {
-          throw new Error("Legacy device-auth store is invalid or unsupported.");
-        }
-        const store = parseStore(parsed);
+        const { snapshot: source, store } = prepared;
         counts = owner.transaction(() => {
           const db = owner.database;
           if (!readClientCredentialReceipt(db)) {

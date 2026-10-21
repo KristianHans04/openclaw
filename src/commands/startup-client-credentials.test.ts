@@ -23,6 +23,7 @@ import {
   loadDeviceIdentityIfPresent,
   loadOrCreateDeviceIdentity,
 } from "../infra/device-identity.js";
+import { ExecApprovalsMigrationRequiredError } from "../infra/exec-approvals-migration-gate.js";
 import { readGatewayLockProcessNamespace } from "../infra/gateway-lock-payload.js";
 import {
   acquireGatewayStateOwner,
@@ -123,6 +124,123 @@ describe("automatic client credential preparation", () => {
       writeClientCredentialReceipt(owner.database, stored.receipt, "complete"),
     );
   }
+  function snapshotFiles(root: string) {
+    return Object.fromEntries(
+      fs.readdirSync(root, { recursive: true }).map((entry) => {
+        const relative = String(entry);
+        const pathname = path.join(root, relative);
+        return [relative, fs.statSync(pathname).isDirectory() ? null : fs.readFileSync(pathname)];
+      }),
+    );
+  }
+
+  it.each([
+    { filename: "identity/node-device-auth.json", claim: "auth:node", kind: "auth" },
+    { filename: "exec-approvals.json", claim: undefined, kind: "approvals" },
+  ] as const)(
+    "preserves all files before refusing malformed required $kind",
+    async ({ filename, claim, kind }) => {
+      const fixture = await bootstrap();
+      if (claim) {
+        using owner = openClientCredentialCustody(fixture.env, { migration: true })!;
+        const stored = readClientCredentialReceipt(owner.database)!;
+        delete stored.receipt.legacyImports[claim];
+        owner.transaction(() =>
+          writeClientCredentialReceipt(owner.database, stored.receipt, "complete"),
+        );
+      }
+      const sourcePath = path.join(fixture.root, filename);
+      fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+      fs.writeFileSync(sourcePath, '{"retiredCredential":"preserve for recovery"}');
+      const before = snapshotFiles(fixture.root);
+      await expect(
+        prepareStartupClientCredentials({ env: fixture.env, runtime, config: {} }),
+      ).rejects.toThrow(
+        kind === "approvals"
+          ? ExecApprovalsMigrationRequiredError
+          : ClientCredentialMigrationRequiredError,
+      );
+      expect(snapshotFiles(fixture.root)).toEqual(before);
+    },
+  );
+
+  it("ignores obsolete canonical and consumed JSON while importing required sibling auth", async () => {
+    const fixture = await bootstrap();
+    {
+      using owner = openClientCredentialCustody(fixture.env, { migration: true })!;
+      const stored = readClientCredentialReceipt(owner.database)!;
+      delete stored.receipt.legacyImports["identity:primary"];
+      delete stored.receipt.legacyImports["auth:node"];
+      owner.transaction(() =>
+        writeClientCredentialReceipt(owner.database, stored.receipt, "complete"),
+      );
+    }
+    const directory = path.join(fixture.root, "identity");
+    fs.mkdirSync(directory, { recursive: true });
+    const identityPath = path.join(directory, "device.json");
+    const consumedAuthPath = path.join(directory, "device-auth.json");
+    const obsolete = '{"obsolete":"already canonical or consumed"}';
+    fs.writeFileSync(identityPath, obsolete);
+    fs.writeFileSync(consumedAuthPath, obsolete);
+    const sourcePath = path.join(directory, "node-device-auth.json");
+    const source = JSON.stringify({
+      version: 1,
+      deviceId: fixture.identity.deviceId,
+      tokens: {
+        operator: {
+          token: "synthetic-imported-token",
+          scopes: ["operator.read"],
+          updatedAtMs: 456,
+        },
+      },
+    });
+    fs.writeFileSync(sourcePath, source);
+    await prepareStartupClientCredentials({ env: fixture.env, runtime, config: {} });
+    expect(loadDeviceIdentityIfPresent({ env: fixture.env })).toEqual(fixture.identity);
+    expect(
+      readDeviceAuthTokenForTest({
+        env: fixture.env,
+        deviceId: fixture.identity.deviceId,
+        role: "operator",
+      }),
+    ).toMatchObject({
+      token: "synthetic-imported-token",
+      scopes: ["operator.read"],
+      updatedAtMs: 456,
+    });
+    expect(
+      readDeviceAuthTokenForTest({
+        env: fixture.env,
+        deviceId: fixture.identity.deviceId,
+        role: "node",
+      }),
+    ).toEqual(fixture.token);
+    expect(fs.readFileSync(identityPath, "utf8")).toBe(obsolete);
+    expect(fs.readFileSync(consumedAuthPath, "utf8")).toBe(obsolete);
+    expect(fs.readFileSync(sourcePath, "utf8")).toBe(source);
+    using owner = openClientCredentialCustody(fixture.env, { readOnly: true })!;
+    expect(
+      readClientCredentialReceipt(owner.database)?.receipt.legacyImports["auth:node"],
+    ).toBeDefined();
+  });
+
+  it("recovers an interrupted approvals hardlink claim during automatic preparation", async () => {
+    const fixture = await bootstrap();
+    const sourcePath = path.join(fixture.root, "exec-approvals.json");
+    const claimPath = `${sourcePath}.doctor-importing`;
+    const source = '{"defaults":{},"agents":{}}\n';
+    fs.writeFileSync(sourcePath, source);
+    fs.linkSync(sourcePath, claimPath);
+    await prepareStartupClientCredentials({ env: fixture.env, runtime, config: {} });
+    expect(fs.existsSync(sourcePath)).toBe(false);
+    expect(fs.existsSync(claimPath)).toBe(false);
+    const archives = fs
+      .readdirSync(fixture.root)
+      .filter((name) => name.startsWith("exec-approvals.json.migrated."));
+    expect(archives).toHaveLength(1);
+    expect(fs.readFileSync(path.join(fixture.root, archives[0]!), "utf8")).toBe(source);
+    expect(loadDeviceIdentityIfPresent({ env: fixture.env })).toEqual(fixture.identity);
+  });
 
   it("leaves a fresh profile empty", async () => {
     const fixture = target();
