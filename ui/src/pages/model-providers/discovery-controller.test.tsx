@@ -1,32 +1,17 @@
 /* @vitest-environment jsdom */
 import { createSignal } from "solid-js";
-import { expect, it, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { discoveryModuleGate } from "./discovery-controller.test-support.ts";
 import { createModelProviderDiscovery } from "./discovery-controller.tsx";
 
-const moduleGate = vi.hoisted(() => {
-  let resolve!: () => void;
-  const promise = new Promise<void>((complete) => {
-    resolve = complete;
-  });
-  return { promise, resolve };
-});
-
-// mock-isolation: Hold the module import without starting the setup page's Gateway owners.
-vi.mock("../model-setup/model-setup-page.tsx", async () => {
-  await moduleGate.promise;
-  return {
-    ModelSetupPage: (props: { agentLabel: string; onClose: () => void }) => (
-      <button data-setup onClick={() => props.onClose()}>
-        {props.agentLabel}
-      </button>
-    ),
-  };
-});
+// A redirect supports overlapping imports; an async mock factory bypasses its mock on reentry.
+vi.mock("../model-setup/model-setup-page.tsx");
 
 it("retires a cancelled lazy setup and opens the current agent with live presentation data", async () => {
+  onTestFinished(() => discoveryModuleGate.resolve());
   let agentId = "first";
   const client = createTestGatewayClient(async () => ({}));
   const onClose = vi.fn();
@@ -52,9 +37,11 @@ it("retires a cancelled lazy setup and opens the current agent with live present
   agentId = "second";
   updateLabel("Second agent");
   discovery.open();
-  moduleGate.resolve();
+  discoveryModuleGate.resolve();
   await vi.dynamicImportSettled();
-  expect(onError).not.toHaveBeenCalled();
+  expect(
+    onError.mock.calls.map(([error]) => (error instanceof Error ? error.stack : error)),
+  ).toEqual([]);
   await waitForSolid(() =>
     expect(view.container.querySelector("[data-setup]")?.textContent).toBe("Second agent"),
   );
