@@ -141,7 +141,10 @@ test("sessions.create preserves creation and notices after an unknown signal out
       },
     );
     expect(hinted.ok, JSON.stringify(hinted.error)).toBe(true);
-    expect(hinted.payload?.entry).toMatchObject({ createdVia: "spawn", createdActor: actor });
+    // A delegated spawn exposes its causal agent creator while retaining the
+    // inherited human actor in storage for sandbox isolation.
+    const publicActor = actor.type === "human" ? { type: "agent" } : actor;
+    expect(hinted.payload?.entry).toMatchObject({ createdVia: "spawn", createdActor: publicActor });
     expect(hinted.payload?.entry?.sandbox).toBe(sandbox);
     const hintedKey = expectDefined(hinted.payload?.key, "delegated session key");
     const stored = loadSessionEntry({ sessionKey: hintedKey, storePath });
