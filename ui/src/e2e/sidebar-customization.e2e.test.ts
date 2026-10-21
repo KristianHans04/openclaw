@@ -14,6 +14,7 @@ import {
   waitForControlUiRoute,
   waitForControlUiSettingsTakeover,
 } from "../test-helpers/control-ui-e2e.ts";
+import { navigationDrawerToggle } from "../test-helpers/control-ui-navigation.ts";
 import { workboardUi } from "../test-helpers/control-ui-workboard-fixture.ts";
 import { compactCronJobFixture } from "../test-helpers/cron.ts";
 import { seedChatSettings } from "./chat-layout-fixtures.test-support.ts";
@@ -36,10 +37,6 @@ async function trimmedTextContents(locator: Locator): Promise<string[]> {
 
 async function roundedWidth(locator: Locator): Promise<number> {
   return Math.round((await locator.boundingBox())?.width ?? 0);
-}
-
-function visibleDrawerButton(page: Page) {
-  return page.locator(".topbar-nav-toggle:visible, .chat-pane__nav-toggle:visible").first();
 }
 
 async function captureUiProof(page: Page, fileName: string, surface = page.locator(".shell")) {
@@ -121,7 +118,7 @@ suite.define(() => {
             await page.locator(".workboard-page-title", { hasText: "Operations" }).waitFor();
           }
           if (width < 900) {
-            await visibleDrawerButton(page).click();
+            await navigationDrawerToggle(page).click();
           }
           const sidebar = page.locator("openclaw-app-sidebar");
           const row = sidebar.locator('.sidebar-rail__pin[data-sidebar-entry="' + entry + '"]');
@@ -713,7 +710,7 @@ suite.define(() => {
         .toContain("shell--nav-collapsed");
 
       await page.setViewportSize({ height: 900, width: 900 });
-      const drawerButton = visibleDrawerButton(page);
+      const drawerButton = navigationDrawerToggle(page);
       await expect.poll(() => drawerButton.isVisible()).toBe(true);
       await drawerButton.click();
       await expect
@@ -734,7 +731,7 @@ suite.define(() => {
         )
         .toBe(0);
       // Narrow Chat merges navigation controls into its title bar.
-      await expect.poll(() => page.locator(".chat-pane__header").first().isVisible()).toBe(true);
+      await expect.poll(() => page.locator(".agent-chat__header--mobile").isVisible()).toBe(true);
       await captureUiProof(page, "05-expanded-tablet-drawer.png");
 
       // Widening with the drawer open must not leave its stale state blocking
@@ -759,7 +756,7 @@ suite.define(() => {
         .poll(() => page.locator(".shell").getAttribute("class"))
         .not.toContain("shell--nav-drawer-open");
       await page.setViewportSize({ height: 852, width: 393 });
-      await expect.poll(() => page.locator(".chat-pane__header").first().isVisible()).toBe(true);
+      await expect.poll(() => page.locator(".agent-chat__header--mobile").isVisible()).toBe(true);
       await expect
         .poll(() =>
           page.locator(".shell-nav").evaluate((element) => element.getBoundingClientRect().right),
@@ -948,7 +945,7 @@ suite.define(() => {
           );
         await captureUiProof(page, "09-mobile-attention-closed.png");
 
-        await visibleDrawerButton(page).click();
+        await navigationDrawerToggle(page).click();
         await expect
           .poll(() => page.locator(".shell").getAttribute("class"))
           .toContain("shell--nav-drawer-open");

@@ -19,7 +19,8 @@ import { createComposerQuestions } from "./components/chat-composer-questions.ts
 import { ChatComposer, resetChatComposerState } from "./components/chat-composer.tsx";
 import { ChatImageLightbox } from "./components/chat-image-lightbox-view.tsx";
 import { MessageMarkdown } from "./components/chat-message-text-view.tsx";
-import { ChatPaneHeader, type ChatPaneHeaderProps } from "./components/chat-pane-header.tsx";
+import { ChatPaneHeader } from "./components/chat-pane-header.tsx";
+import type { ChatPaneHeaderProps } from "./components/chat-pane-header.types.ts";
 import { ChatWorkingIndicator } from "./components/chat-working-indicator.tsx";
 import { buildLocalUserMessage } from "./user-message-content.ts";
 
@@ -240,6 +241,7 @@ function PendingSessionCreateContent(
         connected: snapshot.phase === "connected",
         canSend: false,
         sessionAdmitted: false,
+        mobileComposer: props.mergedChrome,
         disabledReason: null,
         sending: submitting,
         messages: [],
@@ -272,7 +274,13 @@ function PendingSessionCreateContent(
                   keyed
                   fallback={<ChatComposer {...view().composer} questions={questions} />}
                 >
-                  {(composer) => <CreationComposer composer={composer} onOpenImage={openImage} />}
+                  {(composer) => (
+                    <CreationComposer
+                      composer={composer}
+                      mobileComposer={props.mergedChrome}
+                      onOpenImage={openImage}
+                    />
+                  )}
                 </Show>
               </div>
             </div>

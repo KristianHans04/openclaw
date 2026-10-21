@@ -5,6 +5,7 @@ import {
   installMockGateway,
   waitForControlUiRoute,
 } from "../test-helpers/control-ui-e2e.ts";
+import { navigationDrawerToggle } from "../test-helpers/control-ui-navigation.ts";
 import type { ControlUiSessionFixture } from "../test-helpers/control-ui-session-fixtures.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 import { expectFocused, pressAndExpectFocus } from "./sidebar-assertions.test-support.ts";
@@ -221,9 +222,7 @@ suite.define(() => {
           });
           await page.goto(`${suite.server.baseUrl}chat`);
           await waitForControlUiRoute(page, { routeId: "chat" });
-          const drawer = page
-            .locator(".topbar-nav-toggle:visible,.chat-pane__nav-toggle:visible")
-            .first();
+          const drawer = navigationDrawerToggle(page);
           if ((await drawer.getAttribute("aria-expanded")) === "false") {
             await drawer.click();
           }
