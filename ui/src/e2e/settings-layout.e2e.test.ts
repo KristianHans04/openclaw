@@ -366,6 +366,25 @@ suite.define(() => {
     await installMockGateway(page, { methodResponses: emptyDeviceResponses });
 
     try {
+      // These rows check route insets. The desktop audit below retains cold CSS coverage.
+      const visitInsetRoute = async (route: RouteId) => {
+        const pathname = pathForRoute(route);
+        if (page.url() === "about:blank") {
+          await page.goto(new URL(pathname, suite.server.baseUrl).toString());
+        } else {
+          await page.evaluate(
+            ({ routeId, pathname }) => {
+              const app = window.openclawControlUi;
+              if (!app) {
+                throw new Error("Control UI readiness hook is unavailable");
+              }
+              app.navigate(routeId, { pathname });
+            },
+            { routeId: route, pathname },
+          );
+        }
+        await waitForControlUiRoute(page, { pathname, routeId: route });
+      };
       const readShellInsets = (route: RouteId) =>
         page.evaluate((activeRoute) => {
           const content = document.querySelector<HTMLElement>("main.content");
@@ -384,18 +403,14 @@ suite.define(() => {
         }, route);
 
       for (const route of mobileSettingsRoutes) {
-        const pathname = pathForRoute(route);
-        await page.goto(new URL(pathname, suite.server.baseUrl).toString());
-        await waitForControlUiRoute(page, { pathname, routeId: route });
+        await visitInsetRoute(route);
         await expect
           .poll(() => readShellInsets(route), { message: `${route} settings shell alignment` })
           .toEqual({ contentPaddingInline: 12, topbarPaddingInline: 12 });
       }
 
       for (const route of mobileStandaloneSettingsPageRoutes) {
-        const pathname = pathForRoute(route);
-        await page.goto(new URL(pathname, suite.server.baseUrl).toString());
-        await waitForControlUiRoute(page, { pathname, routeId: route });
+        await visitInsetRoute(route);
         const settingsPage = page.locator(".settings-page").last();
         await settingsPage.waitFor({ state: "attached" });
         expect(
