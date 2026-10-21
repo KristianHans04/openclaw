@@ -3,9 +3,10 @@
  */
 import type { CliSessionBinding } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
 import { resolveAuthProfileOrderWithMetadata } from "./auth-profiles/order.js";
-import { loadAuthProfileStoreForRuntimeAsync } from "./auth-profiles/store-runtime.js";
-import type { AuthProfileCredential } from "./auth-profiles/types.js";
+import type { loadAuthProfileStoreForRuntimeAsync } from "./auth-profiles/store-runtime.js";
+import type { AuthProfileCredential, AuthProfileStore } from "./auth-profiles/types.js";
 import { resolveCliBackendConfig, resolveCliRuntimeCanonicalProvider } from "./cli-backends.js";
 import { resolveBundledCliBackendAuthPolicy } from "./cli-runner/cli-backend-auth-policy.js";
 
@@ -37,29 +38,21 @@ export function cliBackendAcceptsAuthProfileForwarding(params: {
  * Preserve the session account unless the user selects another or it was removed.
  * A user-locked profile must fail closed rather than run as another user.
  */
-export async function resolveCliExecutionAuthProfileId(params: {
+export function selectCliExecutionAuthProfileId(params: {
   cliExecutionProvider: string;
   authProfileProvider: string;
   config: OpenClawConfig;
-  agentDir: string;
+  store: AuthProfileStore;
   selected?: CliExecutionAuthProfileSelection;
   sessionBinding?: CliSessionBinding;
-  loadAuthProfileStoreForRuntimeAsync?: typeof loadAuthProfileStoreForRuntimeAsync;
-}): Promise<string | undefined> {
-  const loadStore =
-    params.loadAuthProfileStoreForRuntimeAsync ?? loadAuthProfileStoreForRuntimeAsync;
+  readinessMode?: "execution" | "read-only";
+  metadataSnapshot?: PluginMetadataSnapshot;
+}): string | undefined {
+  const { store } = params;
   const selectedAuthProfileId = params.selected?.authProfileId?.trim();
   const hasExplicitSelection =
     selectedAuthProfileId && params.selected?.authProfileIdSource !== "auto";
   const sessionAuthProfileId = params.sessionBinding?.authProfileId?.trim();
-  const store = await loadStore(params.agentDir, {
-    readOnly: true,
-    allowKeychainPrompt: false,
-    externalCliProviderIds: [params.cliExecutionProvider],
-    profileId: hasExplicitSelection
-      ? selectedAuthProfileId
-      : (sessionAuthProfileId ?? selectedAuthProfileId),
-  });
   const nativeAuthProfileIds = resolveBundledCliBackendAuthPolicy(
     params.cliExecutionProvider,
   )?.nativeAuthProfileIds;
@@ -81,6 +74,7 @@ export async function resolveCliExecutionAuthProfileId(params: {
     runtime: params.cliExecutionProvider,
     config: params.config,
     includeSetupRegistry: true,
+    metadataSnapshot: params.metadataSnapshot,
   });
   const acceptsCredential = (credential: AuthProfileCredential, explicitSelection: boolean) =>
     credential.provider === params.cliExecutionProvider ||
@@ -119,6 +113,8 @@ export async function resolveCliExecutionAuthProfileId(params: {
       store,
       provider,
       preferredProfile: selectedAuthProfileId,
+      readinessMode: params.readinessMode,
+      authAliasLookupParams: { metadataSnapshot: params.metadataSnapshot },
     });
     const profileId = order.profileIds.find((id) => {
       const credential = store.profiles[id];
@@ -131,4 +127,26 @@ export async function resolveCliExecutionAuthProfileId(params: {
     }
   }
   return undefined;
+}
+
+export async function resolveCliExecutionAuthProfileId(
+  params: Omit<Parameters<typeof selectCliExecutionAuthProfileId>[0], "store" | "readinessMode"> & {
+    agentDir: string;
+    loadAuthProfileStoreForRuntimeAsync?: typeof loadAuthProfileStoreForRuntimeAsync;
+  },
+): Promise<string | undefined> {
+  const loadStore =
+    params.loadAuthProfileStoreForRuntimeAsync ??
+    (await import("./auth-profiles/store-runtime.js")).loadAuthProfileStoreForRuntimeAsync;
+  const selected = params.selected?.authProfileId?.trim();
+  const store = await loadStore(params.agentDir, {
+    readOnly: true,
+    allowKeychainPrompt: false,
+    externalCliProviderIds: [params.cliExecutionProvider],
+    profileId:
+      selected && params.selected?.authProfileIdSource !== "auto"
+        ? selected
+        : (params.sessionBinding?.authProfileId?.trim() ?? selected),
+  });
+  return selectCliExecutionAuthProfileId({ ...params, store });
 }
