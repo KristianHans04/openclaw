@@ -551,6 +551,7 @@ it("keeps status in navigation across web layouts without replacing the content 
 });
 
 it("keeps connection retry in the minimal footer when the Settings renderer is unavailable", async () => {
+  // mock-isolation: reject the lazy import before the real sidebar renderer initializes.
   vi.doMock("../components/settings-sidebar-shell.tsx", () => {
     throw new Error("Settings renderer unavailable");
   });
@@ -585,7 +586,8 @@ it("loads the pending debug frame on demand and retries its rejected module", as
   const loading = createDeferred<Record<string, () => Text>>();
   const retrying = createDeferred<Record<string, () => Text>>();
   const module = { renderPendingDebugOverlay: () => document.createTextNode("Debug frame ready") };
-  const load = vi.fn(() => loading.promise);
+  const load = vi.fn(() => retrying.promise).mockImplementationOnce(() => loading.promise);
+  // mock-isolation: control chunk rejection and recovery without evaluating the real frame.
   vi.doMock("../pages/debug/debug-overlay-frame.ts", load);
   onTestFinished(() => {
     vi.doUnmock("../pages/debug/debug-overlay-frame.ts");
@@ -602,12 +604,12 @@ it("loads the pending debug frame on demand and retries its rejected module", as
   loading.reject(new Error("Debug frame unavailable"));
   await waitForSolid(() => expect(view.container.textContent).toContain("Debug frame unavailable"));
 
-  vi.doUnmock("../pages/debug/debug-overlay-frame.ts");
-  vi.doMock("../pages/debug/debug-overlay-frame.ts", () => retrying.promise);
   view.getByRole("button", { name: "Retry" }).click();
-  await waitForSolid(() => expect(view.container.querySelector(".lazy-view-error")).toBeNull());
+  await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  expect(view.container.textContent).toContain("Debug frame unavailable");
   retrying.resolve(module);
   await waitForSolid(() => expect(view.container.textContent).toContain("Debug frame ready"));
+  expect(view.container.querySelector(".lazy-view-error")).toBeNull();
   expect(owner.lazyCustomElements.visibleState).toBe(pending);
 });
 

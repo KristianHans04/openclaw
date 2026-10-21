@@ -66,8 +66,10 @@ function deferredRenderer(settings: boolean) {
   const load = vi.fn(() => retrying.promise).mockImplementationOnce(() => loading.promise);
   const mock = () => {
     if (settings) {
+      // mock-isolation: delay or reject the chunk before any real sidebar renderer initializes.
       vi.doMock("../components/settings-sidebar-shell.tsx", load);
     } else {
+      // mock-isolation: delay or reject the chunk before any real pairing renderer initializes.
       vi.doMock("../pages/devices/view-pairing.tsx", load);
     }
   };
@@ -93,10 +95,6 @@ function deferredRenderer(settings: boolean) {
     retrying,
     load,
     module,
-    retry: () => {
-      unmock();
-      mock();
-    },
   };
 }
 
@@ -503,7 +501,7 @@ describe("application shell pairing access", () => {
       auth: settings ? { role: "operator" } : admin,
       setupCode: settings ? undefined : "pair-mobile-secret",
     });
-    const { loading, retrying, load, module, retry } = deferredRenderer(settings);
+    const { loading, retrying, load, module } = deferredRenderer(settings);
     if (settings) {
       shell.routeState = {
         routeId: "profile",
@@ -536,9 +534,9 @@ describe("application shell pairing access", () => {
       if (!settings) {
         expect(actions.map((button) => button.textContent?.trim())).toEqual(["Retry", "Close"]);
       }
-      retry();
       actions.find((button) => button.textContent?.trim() === "Retry")?.click();
-      await waitForSolid(() => expect(target()?.getAttribute("aria-busy")).toBe("true"));
+      await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+      expect(target()?.textContent).toContain(message);
     } else {
       expect(target()?.getAttribute("aria-busy")).toBe("true");
       if (settings) {
