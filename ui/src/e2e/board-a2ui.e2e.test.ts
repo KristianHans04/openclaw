@@ -325,6 +325,52 @@ suite.define(() => {
     expect(errors).toEqual([]);
   });
 
+  it("contains a catalog render failure while sibling components keep updating", async () => {
+    const page = await suite.newPage();
+    await page.evaluate((messages) => {
+      Reflect.set(globalThis, "openclawA2UIBoot", { messages });
+      document.body.append(document.createElement("openclaw-a2ui-host"));
+    }, buildInitialMessages("v0.8"));
+    await page.addScriptTag({
+      path: path.join(bundleDirectory, bundleFiles["v0.8"]),
+      type: "module",
+    });
+    await page.getByText("A2UI board widget", { exact: true }).waitFor();
+    await applyMessages(page.mainFrame(), [
+      updateComponents("v0.8", [
+        {
+          id: "root",
+          component: { Column: { children: { explicitList: ["title", "broken"] } } },
+        },
+        {
+          id: "broken",
+          component: { MultipleChoice: { selections: { literalArray: [] }, options: "invalid" } },
+        },
+      ]),
+    ]);
+    await page.getByRole("alert").filter({ hasText: "Unable to render component" }).waitFor();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await page.getByRole("alert").filter({ hasText: "Unable to render component" }).waitFor();
+    await applyMessages(page.mainFrame(), [
+      updateComponents("v0.8", [
+        textComponent("v0.8", "title", "Sibling still updates"),
+        {
+          id: "broken",
+          component: {
+            MultipleChoice: {
+              selections: { literalArray: [] },
+              variant: "chips",
+              options: [{ label: { literalString: "Recovered choice" }, value: "recovered" }],
+            },
+          },
+        },
+      ]),
+    ]);
+    await page.getByText("Sibling still updates", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Recovered choice", exact: true }).waitFor();
+    expect(await page.getByRole("alert").count()).toBe(0);
+  });
+
   it("sends each v0.8 action once after the host reconnects", async () => {
     const page = await suite.newPage();
     await page.addScriptTag({
