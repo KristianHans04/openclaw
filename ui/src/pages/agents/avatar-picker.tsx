@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, onSettled, Show } from "solid-js";
+import { createSignal, For, onCleanup, onSettled, Show } from "solid-js";
 import type { AgentsAvatarGenerateResult } from "../../../../packages/gateway-protocol/src/index.js";
 import { LobsterSvg } from "../../components/lobster-pet-artwork.tsx";
 import { canonicalLobsterLook, lobsterLookStyle } from "../../components/lobster-pet-identity.ts";
@@ -34,6 +34,7 @@ export type AvatarPickerFooterState = {
 export type AvatarPickerActions = {
   generate: () => Promise<void>;
   reset: () => void;
+  footerState: () => AvatarPickerFooterState;
 };
 
 export type AvatarPickerProps = {
@@ -45,7 +46,6 @@ export type AvatarPickerProps = {
   onGenerate: (prompt: string) => Promise<GeneratedAvatar>;
   onBusyChange?: (busy: boolean) => void;
   footerGeneration?: boolean;
-  onFooterStateChange?: (state: AvatarPickerFooterState) => void;
   onActionsReady?: (actions: AvatarPickerActions | null) => void;
   onReset?: () => void;
 };
@@ -70,19 +70,11 @@ export function AvatarPicker(props: AvatarPickerProps) {
   onCleanup(() => {
     operation += 1;
   });
-  createEffect(
-    () => ({
-      listener: props.onFooterStateChange,
-      state: {
-        mode: mode(),
-        canGenerate: Boolean(prompt().trim()),
-        generated: Boolean(candidate()),
-      },
-    }),
-    ({ listener, state }) => {
-      listener?.(state);
-    },
-  );
+  const footerState = (): AvatarPickerFooterState => ({
+    mode: mode(),
+    canGenerate: Boolean(prompt().trim()),
+    generated: Boolean(candidate()),
+  });
 
   const requireImage = (result: AvatarDataUrlResult) => {
     if (!result.ok) {
@@ -172,7 +164,7 @@ export function AvatarPicker(props: AvatarPickerProps) {
     props.onReset?.();
   };
   onSettled(() => {
-    props.onActionsReady?.({ generate, reset });
+    props.onActionsReady?.({ generate, reset, footerState });
     return () => props.onActionsReady?.(null);
   });
 

@@ -33,12 +33,13 @@ export function AgentCreateDialog(props: {
   const [pickerBusy, setPickerBusy] = createSignal(false);
   const [uploadBusy, setUploadBusy] = createSignal(false);
   const [avatarError, setAvatarError] = createSignal<string | null>(null);
-  const [pickerFooter, setPickerFooter] = createSignal<AvatarPickerFooterState>({
+  const initialPickerFooter: AvatarPickerFooterState = {
     mode: "bot",
     canGenerate: false,
     generated: false,
-  });
-  let pickerActions: AvatarPickerActions | null = null;
+  };
+  const [pickerActions, setPickerActions] = createSignal<AvatarPickerActions | null>(null);
+  const pickerFooter = () => pickerActions()?.footerState() ?? initialPickerFooter;
   const draftAgentId = `bot-draft-${createUniqueId()}`;
   const dialogTitle = createMemo(() => t("agentChip.createDialogTitle"));
   const namePlaceholder = createMemo(() => t("agentChip.createDialogName"));
@@ -103,7 +104,7 @@ export function AgentCreateDialog(props: {
   function submit() {
     if (needsGeneration()) {
       if (!pickerBusy() && !uploadBusy() && pickerFooter().canGenerate) {
-        void pickerActions?.generate();
+        void pickerActions()?.generate();
       }
       return;
     }
@@ -176,8 +177,7 @@ export function AgentCreateDialog(props: {
             onGenerate={generateAvatar}
             onBusyChange={setPickerBusy}
             footerGeneration
-            onFooterStateChange={setPickerFooter}
-            onActionsReady={(actions) => (pickerActions = actions)}
+            onActionsReady={setPickerActions}
             onReset={() => {
               setAvatar(null);
               setAvatarError(null);
@@ -200,7 +200,7 @@ export function AgentCreateDialog(props: {
             }
             onClick={() => {
               if (pickerFooter().mode === "generate" && pickerFooter().generated) {
-                pickerActions?.reset();
+                pickerActions()?.reset();
               } else {
                 props.onCancel();
               }

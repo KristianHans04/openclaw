@@ -4640,19 +4640,16 @@ html.openclaw-native-web-chrome
   background: transparent;
   color: var(--muted);
   opacity: 0;
-  pointer-events: none;
 }
 
 .sidebar-agent-menu__agent-switch:hover .sidebar-agent-menu__settings,
 .sidebar-agent-menu__settings:focus-visible {
   opacity: 1;
-  pointer-events: auto;
 }
 
 @media (hover: none) {
   .sidebar-agent-menu__settings {
     opacity: 1;
-    pointer-events: auto;
   }
 }
 

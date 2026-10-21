@@ -1,4 +1,4 @@
-import { flush } from "solid-js";
+import { createSignal, flush } from "solid-js";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ApplicationContext } from "../app/context.ts";
 import { registerSettingsEnglish } from "../i18n/locales/en-settings.ts";
@@ -24,20 +24,32 @@ registerEnglishCatalog(registerSettingsEnglish);
 vi.mock("../pages/agents/avatar-picker.tsx", () => ({
   AvatarPicker: (props: {
     onSelect: (avatar: string) => void;
-    onFooterStateChange?: (state: {
-      mode: "bot" | "generate" | "upload";
-      canGenerate: boolean;
-      generated: boolean;
+    onActionsReady?: (actions: {
+      generate: () => Promise<void>;
+      reset: () => void;
+      footerState: () => {
+        mode: "bot" | "generate" | "upload";
+        canGenerate: boolean;
+        generated: boolean;
+      };
     }) => void;
-    onActionsReady?: (actions: { generate: () => Promise<void>; reset: () => void }) => void;
   }) => {
+    const [footerState, setFooterState] = createSignal({
+      mode: "bot" as const,
+      canGenerate: false,
+      generated: false,
+    });
     return (
       <div
         data-testid="choose-avatar"
         ref={() => {
           picker.select = props.onSelect;
-          picker.footerChange = props.onFooterStateChange ?? null;
-          props.onActionsReady?.({ generate: async () => picker.generate(), reset: () => {} });
+          picker.footerChange = setFooterState;
+          props.onActionsReady?.({
+            generate: async () => picker.generate(),
+            reset: () => {},
+            footerState,
+          });
         }}
       />
     );

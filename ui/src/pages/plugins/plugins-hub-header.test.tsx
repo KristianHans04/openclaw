@@ -6,7 +6,7 @@ import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { PluginsHubHeader } from "./plugins-hub-header.tsx";
 import type { PluginsHubTab } from "./plugins-hub.ts";
 
-it("keeps Plugins hub tabs and actions live in the shared catalog header", () => {
+it("keeps Plugins hub tabs and actions live in the shared hub header", () => {
   const [active, setActive] = createSignal<PluginsHubTab>("plugins");
   const onSelect = vi.fn();
   const onSettings = vi.fn();
@@ -18,9 +18,9 @@ it("keeps Plugins hub tabs and actions live in the shared catalog header", () =>
     />
   ));
 
-  expect(
-    view.container.querySelector(".plugins-hub-header.catalog-page-header h1")?.textContent,
-  ).toBe("Plugins");
+  expect(view.container.querySelector(".plugins-hub-header.hub-page-header h1")?.textContent).toBe(
+    "Plugins",
+  );
   view.getByRole("tab", { name: "Skills" }).click();
   expect(onSelect).toHaveBeenCalledWith("skills");
   view.getByRole("button", { name: "Manage plugins" }).click();
