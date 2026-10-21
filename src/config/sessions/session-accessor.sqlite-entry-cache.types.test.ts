@@ -19,6 +19,7 @@ const tombstone = {
   tombstone: { reason: "recovery exhausted" },
 } satisfies NonNullable<InternalSessionEntry["mainRestartRecovery"]>;
 
+const workspacePending = "workspace is not ready";
 const cases: [string, Partial<InternalSessionEntry>, string?][] = [
   ["allowed session", {}],
   ["provider pause", { providerReview }, "paused as a precaution"],
@@ -30,16 +31,8 @@ const cases: [string, Partial<InternalSessionEntry>, string?][] = [
     { mainRestartRecovery: tombstone, modelSelectionLocked: true },
     "cannot be replaced while model selection is locked",
   ],
-  [
-    "pending project",
-    { pendingProjectGitUrl: "https://github.com/example/project.git" },
-    "workspace is not ready",
-  ],
-  [
-    "pending worktree",
-    { pendingWorktree: { titleSource: "New checkout" } },
-    "workspace is not ready",
-  ],
+  ["pending project", { pendingProjectGitUrl: "https://example.org/repo.git" }, workspacePending],
+  ["pending worktree", { pendingWorktree: { titleSource: "New checkout" } }, workspacePending],
 ];
 
 it.each(cases)(

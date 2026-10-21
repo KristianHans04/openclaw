@@ -42,19 +42,14 @@ it.each([
         { sessionId, updatedAt: 10 },
       );
     }
+    const timestamp = "2026-04-01T05:46:39.000Z";
     const events = [
-      {
-        type: "session",
-        version: 3,
-        id: sessionId,
-        timestamp: "2026-04-01T05:46:39.000Z",
-        cwd: tempDir,
-      },
+      { type: "session", version: 3, id: sessionId, timestamp, cwd: tempDir },
       ...[0, 1].map((index) => ({
         type: "message",
         id: `entry-utf16-${index}`,
         parentId: null,
-        timestamp: `2026-04-01T05:46:4${index}.000Z`,
+        timestamp,
         message: { role: "user", content: payload, timestamp: 1 },
       })),
     ];

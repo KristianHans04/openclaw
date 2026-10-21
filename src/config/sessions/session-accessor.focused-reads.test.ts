@@ -1,24 +1,17 @@
-import path from "node:path";
-import { expectDefined } from "@openclaw/normalization-core/expect";
-import { afterAll, expect, it, vi } from "vitest";
+import { expect, vi } from "vitest";
 import { trackSqliteStatementExecutions } from "../../../test/helpers/sqlite-statement-execution-counter.js";
-import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { requireNativeSqliteDatabase } from "../../test-utils/native-sqlite.js";
-import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { resolveSessionEntryCandidateTarget } from "./session-accessor.entry.js";
 import { loadSessionEntry, upsertSessionEntryCore } from "./session-accessor.sqlite-entry.js";
 import { resolveSessionEntry as resolveSessionEntrySelection } from "./session-accessor.sqlite-exact-read.js";
 import { recordSessionParticipant } from "./session-accessor.sqlite-participants.native.js";
 import { resolveSessionTranscriptReadTarget } from "./session-accessor.transcript-target.js";
 import { listSessionChildEntriesReadOnly } from "./session-entry-children-read.js";
-import { resolveSqliteTargetFromSessionStorePath } from "./session-sqlite-target.js";
+import { test } from "./session-entry-fixture.test-support.js";
 
-const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-session-focused-reads-");
-
-it("does not parse unrelated blobs across focused child, candidate, and transcript reads", async () => {
-  const storePath = path.join(tempDirs.make(), "sessions.json");
-  const sessionKey = "agent:main:focused-session";
-  const scope = { agentId: "main", sessionKey, storePath };
+test("ignores unrelated corrupt blobs in focused reads", async ({ store }) => {
+  const { database, scope, sessionKey } = store;
+  const { storePath } = scope;
   await upsertSessionEntryCore(scope, { sessionId: "focused-session", updatedAt: 42 });
   for (const [childSessionKey, lineage] of [
     ["agent:main:focused-both-child", { spawnedBy: sessionKey }],
@@ -37,11 +30,6 @@ it("does not parse unrelated blobs across focused child, candidate, and transcri
       { identity: { type: "agent", id: childSessionKey }, promptedAt: 43 },
     );
   }
-  const databasePath = expectDefined(
-    resolveSqliteTargetFromSessionStorePath(storePath, { agentId: "main" }).path,
-    "focused session database path",
-  );
-  const database = openOpenClawAgentDatabase({ agentId: "main", path: databasePath });
   // Admit the reader before injecting an unrelated corrupt row.
   expect(loadSessionEntry(scope)?.sessionId).toBe("focused-session");
   const unrelatedEntryJson = "{ unrelated, intentionally invalid JSON";
@@ -86,12 +74,11 @@ it("does not parse unrelated blobs across focused child, candidate, and transcri
         cfg: { session: { store: storePath } },
       }),
     ).toMatchObject({ sessionKey, entry: { sessionId: "focused-session" }, persisted: true });
-    expect(
-      resolveSessionTranscriptReadTarget({
-        ...scope,
-        sessionId: "focused-session",
-      }),
-    ).toMatchObject({ agentId: "main", sessionId: "focused-session", sessionKey });
+    const transcript = resolveSessionTranscriptReadTarget({
+      ...scope,
+      sessionId: "focused-session",
+    });
+    expect(transcript).toMatchObject({ agentId: "main", sessionId: "focused-session", sessionKey });
     expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(0);
   } finally {
     participantReads.restore();
