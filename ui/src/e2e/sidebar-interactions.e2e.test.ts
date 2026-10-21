@@ -26,6 +26,7 @@ import {
   openSidebarCustomizationPage,
   openSidebarPinMenu,
 } from "./sidebar-customization.test-support.ts";
+import { chooseSidebarMenuOption, closeSidebarMenu } from "./sidebar-session-menu.test-support.ts";
 
 const suite = createSidebarCustomizationSuite("Control UI sidebar interactions mocked Gateway E2E");
 const desktop = {
@@ -102,6 +103,8 @@ suite.define(() => {
         controlUiSessionUrl(`${suite.server.baseUrl}operator/`, `agent:${agentId}:main`),
       );
       await waitForControlUiRoute(page, { routeId: "chat" });
+      await chooseSidebarMenuOption(page, "Status", "All");
+      await closeSidebarMenu(page);
       const composer = page.locator(".agent-chat__composer-combobox > textarea");
       const draft = "Keep this unsent conversation draft";
       await composer.fill(draft);

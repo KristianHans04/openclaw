@@ -10,6 +10,7 @@ import {
   sessionsListResponse,
   waitForPatch,
 } from "./session-management.test-support.ts";
+import { chooseSidebarMenuOption, closeSidebarMenu } from "./sidebar-session-menu.test-support.ts";
 
 const suite = createSessionManagementE2eSuite();
 
@@ -60,6 +61,8 @@ suite.define(() => {
 
     try {
       await page.goto(`${suite.server.baseUrl}chat`);
+      await chooseSidebarMenuOption(page, "Status", "All");
+      await closeSidebarMenu(page);
       const done = page.locator('[data-session-section="category:Done"]');
       const groups = page.locator('[data-session-section="groups"]');
       const row = done.locator('[data-session-key="agent:main:done-group"]');
