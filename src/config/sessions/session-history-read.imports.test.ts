@@ -128,6 +128,12 @@ vi.mock("./session-entry-list.worker.js", async (importOriginal) => {
   prewarm.listingRead.mockImplementation(actual.readSessionEntryList);
   return { ...actual, readSessionEntryList: prewarm.listingRead };
 });
+// mock-isolation: The captured handler runs as a worker, including PostgreSQL's execution guard.
+vi.mock("node:worker_threads", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:worker_threads")>()),
+  isMainThread: false,
+  threadId: 1,
+}));
 // mock-isolation: Capture dispatch without installing native worker ports in the test process.
 vi.mock("../../infra/worker-task-server.js", () => ({
   serveOwnedWorkerTasks(handler: (input: SessionTranscriptWorkerRequest) => Promise<unknown>) {
