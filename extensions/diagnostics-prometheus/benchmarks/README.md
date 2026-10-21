@@ -4,7 +4,7 @@ Run on an approved benchmark host from the repository root:
 
 ```sh
 node --expose-gc --import ./scripts/tsx.mjs \
-  extensions/diagnostics-prometheus/benchmarks/metric-store.ts \
+  extensions/diagnostics-prometheus/src/metric-store.benchmark.test-support.ts \
   --iterations 100000 --start-at <future-epoch-ms> --output /path/to/result.json
 ```
 

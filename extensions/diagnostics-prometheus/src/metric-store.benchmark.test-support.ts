@@ -6,8 +6,8 @@ import { Session } from "node:inspector/promises";
 import { PerformanceObserver } from "node:perf_hooks";
 import { setImmediate as immediate, setTimeout as delay } from "node:timers/promises";
 import { parseArgs } from "node:util";
-import { createPrometheusMetricStore } from "../src/prometheus-metric-store.js";
-import { recordWorkerRequest } from "../src/service-worker.js";
+import { createPrometheusMetricStore } from "./prometheus-metric-store.js";
+import { recordWorkerRequest } from "./service-worker.js";
 
 const { values } = parseArgs({
   options: {
