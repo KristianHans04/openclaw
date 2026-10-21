@@ -73,23 +73,50 @@ function expectMenuHit(menu: MenuHandle) {
   expect(item.contains(hit), "the visible caret menu item receives pointer input").toBe(true);
 }
 
-it("positions a native menu at the measured caret and returns focus to the editor", async () => {
-  const { menu, textarea } = mountCaret("hello @person");
-  textarea.focus();
-  await openCaret(menu, textarea);
-  await phase(menu.overlay.surface, "open");
-  expect(menu.overlay.trigger).toBe(textarea);
-  const point = caretPoint(menu.overlay.surface).getBoundingClientRect();
-  const editor = textarea.getBoundingClientRect();
-  expect(point.left).toBeGreaterThan(editor.left);
-  expect(point.left).toBeLessThan(editor.right);
-  expect(point.top).toBeGreaterThanOrEqual(editor.top);
-  expect(point.bottom).toBeLessThanOrEqual(editor.bottom);
-  expect(menu.overlay.surface.style.getPropertyValue("position-anchor")).not.toBe("");
-  expect(menu.overlay.surface.style).toMatchObject({ left: "", top: "" });
-  expectMenuHit(menu);
-  returnFocus(menu, document, textarea);
-});
+it.each(["document", "open", "closed"] as const)(
+  "positions and focuses a caret menu (%s root)",
+  async (mode) => {
+    let root: Document | ShadowRoot = document;
+    let container: HTMLElement | undefined;
+    if (mode !== "document") {
+      const host = document.createElement("section");
+      root = host.attachShadow({ mode });
+      container = document.createElement("div");
+      root.append(container);
+      document.body.append(host);
+      hosts.push(host);
+    }
+    const { menu, textarea } = mountCaret("hello @person", container);
+    const surface = menu.overlay.surface;
+    textarea.focus();
+    const current = await openCaret(menu, textarea);
+    await phase(surface, "open");
+    expect(menu.overlay.trigger).toBe(textarea);
+    const point = caretPoint(surface);
+    const pointBox = point.getBoundingClientRect();
+    if (mode !== "document") {
+      const menuBox = surface.getBoundingClientRect();
+      expect(point.getRootNode()).toBe(root);
+      expect(getComputedStyle(surface).position).toBe("fixed");
+      expect(menuBox.width).toBeGreaterThan(0);
+      expect(menuBox.height).toBeGreaterThan(0);
+      expect(Math.abs(menuBox.left - pointBox.left)).toBeLessThan(1);
+      expect(menuBox.bottom).toBeLessThanOrEqual(pointBox.top);
+    } else {
+      const editor = textarea.getBoundingClientRect();
+      expect(pointBox.left).toBeGreaterThan(editor.left);
+      expect(pointBox.left).toBeLessThan(editor.right);
+      expect(pointBox.top).toBeGreaterThanOrEqual(editor.top);
+      expect(pointBox.bottom).toBeLessThanOrEqual(editor.bottom);
+      expect(surface.style.getPropertyValue("position-anchor")).not.toBe("");
+      expect(surface.style).toMatchObject({ left: "", top: "" });
+    }
+    expectMenuHit(menu);
+    returnFocus(menu, root, textarea);
+    current.close();
+    expect(point.isConnected).toBe(false);
+  },
+);
 
 it("retires the native menu when its token scrolls outside the textarea", async () => {
   const { menu, textarea } = mountCaret(
@@ -133,33 +160,3 @@ it("rebinds to another editor and can reopen after synchronous retirement", asyn
   await expect.poll(() => menu.overlay.open).toBe(true);
   expect(caretPoint(menu.overlay.surface).isConnected).toBe(true);
 });
-
-it.each(["open", "closed"] as const)(
-  "positions caret menus inside a %s shadow root",
-  async (mode) => {
-    const host = document.createElement("section");
-    const root = host.attachShadow({ mode });
-    const container = document.createElement("div");
-    root.append(container);
-    document.body.append(host);
-    hosts.push(host);
-    const { menu, textarea } = mountCaret("hello @person", container);
-    textarea.focus();
-    const current = await openCaret(menu, textarea);
-    await phase(menu.overlay.surface, "open");
-    expect(menu.overlay.trigger).toBe(textarea);
-    const point = caretPoint(menu.overlay.surface);
-    const pointBox = point.getBoundingClientRect();
-    const menuBox = menu.overlay.surface.getBoundingClientRect();
-    expect(point.getRootNode()).toBe(root);
-    expect(getComputedStyle(menu.overlay.surface).position).toBe("fixed");
-    expect(menuBox.width).toBeGreaterThan(0);
-    expect(menuBox.height).toBeGreaterThan(0);
-    expect(Math.abs(menuBox.left - pointBox.left)).toBeLessThan(1);
-    expect(menuBox.bottom).toBeLessThanOrEqual(pointBox.top);
-    expectMenuHit(menu);
-    returnFocus(menu, root, textarea);
-    current.close();
-    expect(point.isConnected).toBe(false);
-  },
-);

@@ -16,17 +16,14 @@ it.each([
   "%s uses the current activation callback synchronously and restores rejected changes",
   (_kind, Toggle) => {
     const calls: [string, boolean][] = [];
+    const record = (name: string) => (checked: boolean) => calls.push([name, checked]);
     const [updated, setUpdated] = createSignal(false);
     const view = render(() => (
       <Toggle
         title="Notifications"
         ariaLabel="Enabled"
         checked={false}
-        onAct={
-          updated()
-            ? (checked) => calls.push(["current", checked])
-            : (checked) => calls.push(["old", checked])
-        }
+        onAct={updated() ? record("current") : record("old")}
         onChange={(checked) => {
           calls.push(["change", checked]);
           return false;
