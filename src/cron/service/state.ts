@@ -349,6 +349,7 @@ export type CronServiceState = {
 export const CRON_HOST_EXECUTION_DISABLED_MESSAGE =
   "Automation jobs that execute on the Gateway host are disabled by OPENCLAW_DISABLE_CRON_HOST_EXECUTION; contact the Gateway deployment administrator to enable them.";
 
+/** Triggers and process-backed schedules can start host work independently of the job payload. */
 export function describeCronHostExecutionRestriction(
   job: CronStoredJob,
   hostExecutionDisabled: boolean | undefined,

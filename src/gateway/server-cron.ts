@@ -418,6 +418,7 @@ export function buildGatewayCronService(params: {
     streamWatcherMutationRevision += 1;
     streamWatcherReconciliations += 1;
     try {
+      // Public event jobs omit the trusted sandbox target; use the stored job for execution routing.
       const job = action === "removed" ? undefined : cron.getJob(jobId);
       if (!job) {
         await watchers.stop(jobId, "removed");
