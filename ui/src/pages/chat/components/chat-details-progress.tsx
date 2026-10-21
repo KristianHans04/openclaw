@@ -1,4 +1,4 @@
-import { createMemo, createSignal, createUniqueId, Show } from "solid-js";
+import { createMemo, createUniqueId, Show } from "solid-js";
 import {
   ProgressDetailsContent,
   ProgressDetailsRefresh,
@@ -14,7 +14,6 @@ import { Icon } from "../../../components/solid/icon.tsx";
 import { Menu, type MenuEntry, type MenuHandle } from "../../../components/solid/menu.tsx";
 import { PanelLoadingSkeleton } from "../../../components/solid/panel-loading-skeleton.tsx";
 import { t } from "../../../lib/reactive/i18n.ts";
-import { createTimeout } from "../../../lib/reactive/timers.ts";
 import type { ChatDetailsProps } from "./chat-details-types.ts";
 
 type Props = {
@@ -101,22 +100,6 @@ export function ChatDetailsProgress(props: Props) {
         />
       </Show>
     </openclaw-chat-details-progress>
-  );
-}
-
-/** An unknown optional card should not reserve a document-sized skeleton. */
-export function ChatDetailsPendingProgress(props: { presented: boolean }) {
-  const [slow, setSlow] = createSignal(false);
-  createTimeout(
-    () => setSlow(true),
-    () => (props.presented && !slow() ? 2_000 : undefined),
-  );
-  return (
-    <Show when={slow() && props.presented}>
-      <div class="chat-details__pending-progress" role="status">
-        {t("sessionProgressCard.widgetLoading")}
-      </div>
-    </Show>
   );
 }
 

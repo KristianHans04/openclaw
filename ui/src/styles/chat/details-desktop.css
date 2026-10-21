@@ -541,11 +541,3 @@
 .chat-details-desktop-context > .chat-details-desktop-section {
   border-top: 1px solid var(--details-separator);
 }
-
-.chat-details__pending-progress {
-  padding-block: var(--details-section-padding);
-  border-top: 1px solid var(--details-separator);
-  color: var(--muted);
-  font-size: var(--details-meta-font-size);
-  line-height: var(--details-meta-line-height);
-}

@@ -17,7 +17,7 @@ import { ChatDetailsDesktopBody } from "./chat-details-desktop-body.tsx";
 import { ChatDetailsDesktopSection } from "./chat-details-desktop-section.tsx";
 import { ChatDetailsContext, ChatDetailsEnvironment } from "./chat-details-environment.tsx";
 import { ChatDetailsPeople, ChatDetailsPeopleSummary } from "./chat-details-people.tsx";
-import { ChatDetailsPendingProgress, ChatDetailsProgress } from "./chat-details-progress.tsx";
+import { ChatDetailsProgress } from "./chat-details-progress.tsx";
 import type {
   ChatDetailsDesktopSectionId,
   ChatDetailsOutputs,
@@ -650,18 +650,6 @@ export function ChatDetailsDesktopComposition(props: ChatDetailsDesktopCompositi
           menuRef={props.progressMenuRef}
           onHideProgress={props.onHideProgress}
         />
-      </Show>
-      <Show
-        when={
-          !props.props?.progressCard &&
-          props.props?.progressCardInitialLoading &&
-          !props.props?.progressCardError
-            ? `${props.props.sessionKey}/${props.props.selectedSession?.sessionId ?? ""}`
-            : undefined
-        }
-        keyed
-      >
-        {(_identity) => <ChatDetailsPendingProgress presented={props.presented} />}
       </Show>
       <Show when={!props.props?.progressCard && props.props?.progressCardError}>
         {(error) => (

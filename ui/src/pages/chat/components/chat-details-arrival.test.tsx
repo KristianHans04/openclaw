@@ -74,7 +74,7 @@ function mountDetails() {
   };
 }
 
-it("keeps unknown and empty desktop Outputs quiet and reserves only a compact status for a slow progress read", async () => {
+it("keeps unknown and empty desktop Outputs and Progress quiet during slow reads", async () => {
   const view = mountDetails();
   expect(view.group("outputs")).toBeNull();
   expect(view.container.querySelector("openclaw-panel-loading-skeleton")).toBeNull();
@@ -84,7 +84,7 @@ it("keeps unknown and empty desktop Outputs quiet and reserves only a compact st
   expect(view.container.querySelector('[role="status"]')).toBeNull();
   view.update({ progressCardInitialLoading: true });
   await vi.advanceTimersByTimeAsync(2_000);
-  expect(view.container.querySelector('[role="status"]')?.textContent).toContain("Loading");
+  expect(view.container.querySelector('[role="status"]')).toBeNull();
   view.update({
     progressCardInitialLoading: false,
     progressCard: null,
