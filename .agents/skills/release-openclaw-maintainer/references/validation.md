@@ -22,7 +22,9 @@ Generation replaces the recorded set:
 keep empty entries, drop expired versions and their historical corrections, and
 never hand-edit recorded origins. `pnpm update:compat:check` remains a manual
 maintainer report of npm `latest`/`beta`/`extended-stable` coverage. Repeat the generation
-arguments with `--check` for an offline regeneration check.
+arguments with `--check` for a regeneration check. It is offline only when every
+input uses local `--release`; `--registry-release` checks fetch and verify the
+registry artifact again.
 
 Run every recorded `update-first-hop-compat*` lane and the upgrade survivor lane
 from the oldest supported release. Native Windows proof must invoke the old
