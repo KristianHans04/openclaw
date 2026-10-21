@@ -8,10 +8,13 @@ import { createModelProviderDiscovery } from "./discovery-controller.tsx";
 
 const moduleGate = vi.hoisted(() => {
   let resolve!: () => void;
-  const promise = new Promise<void>((complete) => (resolve = complete));
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
   return { promise, resolve };
 });
 
+// mock-isolation: Hold the module import without starting the setup page's Gateway owners.
 vi.mock("../model-setup/model-setup-page.tsx", async () => {
   await moduleGate.promise;
   return {
@@ -50,6 +53,8 @@ it("retires a cancelled lazy setup and opens the current agent with live present
   updateLabel("Second agent");
   discovery.open();
   moduleGate.resolve();
+  await vi.dynamicImportSettled();
+  expect(onError).not.toHaveBeenCalled();
   await waitForSolid(() =>
     expect(view.container.querySelector("[data-setup]")?.textContent).toBe("Second agent"),
   );
