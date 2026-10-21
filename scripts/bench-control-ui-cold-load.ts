@@ -753,8 +753,8 @@ try {
   await settle();
   if (values["chat-dashboard-route"] || (face === "dashboard" && values["dashboard-widget"])) {
     // Save the operator's dashboard-first layout through its normal action.
-    await page.locator("button.chat-pane__layout-trigger:not([inert] *)").first().click();
-    const menu = page.locator(".chat-pane__layout-menu");
+    const menu = page.locator(".chat-dashboard-menu").filter({ visible: true }).first();
+    await menu.getByRole("button", { name: "Dashboard options", exact: true }).click();
     await menu
       .getByRole("menuitem", { name: /^Swap / })
       .or(menu.getByRole("menuitemcheckbox", { name: /^Swap / }))
