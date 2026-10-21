@@ -10,6 +10,7 @@ type FailureAlertConfig = NonNullable<CronServiceParams["cronConfig"]>["failureA
 type SendCronFailureAlert = NonNullable<CronServiceParams["sendCronFailureAlert"]>;
 type RunCronFailureRepair = NonNullable<CronServiceParams["runCronFailureRepair"]>;
 type RunScriptJob = NonNullable<CronServiceParams["runScriptJob"]>;
+type EnqueueSessionEvent = NonNullable<CronServiceParams["enqueueSessionEvent"]>;
 
 export function createTelegramDelivery(): NonNullable<CronJobCreate["delivery"]> {
   return { mode: "announce", channel: "telegram", to: "19098680" };
@@ -45,7 +46,7 @@ export function setupFailureAlertSuite() {
     },
     run: (context: {
       cron: CronService;
-      enqueueSystemEvent: ReturnType<typeof vi.fn>;
+      enqueueSessionEvent: Mock<EnqueueSessionEvent>;
       requestHeartbeat: ReturnType<typeof vi.fn>;
       sendCronFailureAlert: ReturnType<typeof vi.fn<SendCronFailureAlert>>;
       runCronFailureRepair: Mock<RunCronFailureRepair>;
@@ -56,7 +57,7 @@ export function setupFailureAlertSuite() {
   ): Promise<void> {
     const store = await makeStorePath();
     const sendCronFailureAlert = vi.fn<SendCronFailureAlert>(async () => undefined);
-    const enqueueSystemEvent = vi.fn();
+    const enqueueSessionEvent = vi.fn<EnqueueSessionEvent>(async () => ({ ok: true }));
     const requestHeartbeat = vi.fn();
     const runCronFailureRepair = vi.fn<RunCronFailureRepair>(async () => undefined);
     const runResult = params.runResult ?? {
@@ -74,7 +75,8 @@ export function setupFailureAlertSuite() {
         ? {}
         : { cronConfig: { failureAlert: params.failureAlert } }),
       log: noopLogger,
-      enqueueSystemEvent,
+      enqueueSystemEvent: vi.fn(),
+      enqueueSessionEvent,
       requestHeartbeat,
       runIsolatedAgentJob,
       runScriptJob,
@@ -86,7 +88,7 @@ export function setupFailureAlertSuite() {
     try {
       await run({
         cron,
-        enqueueSystemEvent,
+        enqueueSessionEvent,
         requestHeartbeat,
         sendCronFailureAlert,
         runCronFailureRepair,

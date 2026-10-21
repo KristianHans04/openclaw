@@ -56,7 +56,7 @@ it.each([
         runIsolatedAgentJob,
         runCronFailureRepair,
         sendCronFailureAlert,
-        enqueueSystemEvent,
+        enqueueSessionEvent,
       }) => {
         runIsolatedAgentJob.mockResolvedValue({ status: "error", error });
         const job = await addJob("completed watcher", { schedule, delivery });
@@ -82,9 +82,9 @@ it.each([
         });
         expect(runCronFailureRepair).not.toHaveBeenCalled();
         expect(sendCronFailureAlert).toHaveBeenCalledTimes(alerts);
-        expect(enqueueSystemEvent).toHaveBeenCalledTimes(notices);
+        expect(enqueueSessionEvent).toHaveBeenCalledTimes(notices);
         if (notices) {
-          expect(enqueueSystemEvent).toHaveBeenCalledWith(
+          expect(enqueueSessionEvent).toHaveBeenCalledWith(
             expect.stringContaining("auto-disabled"),
             expect.objectContaining({ contextKey: `cron:${job.id}:auto-disabled` }),
           );
@@ -105,7 +105,7 @@ it.each([true, false])(
         runIsolatedAgentJob,
         runCronFailureRepair,
         sendCronFailureAlert,
-        enqueueSystemEvent,
+        enqueueSessionEvent,
       }) => {
         runIsolatedAgentJob.mockResolvedValue({
           status: "error",
@@ -120,7 +120,7 @@ it.each([true, false])(
         const stored = await cron.readJob(job.id);
         expect(stored?.enabled).toBe(enabled);
         expect(stored?.state.autoDisabled).toBeUndefined();
-        expect(enqueueSystemEvent).not.toHaveBeenCalled();
+        expect(enqueueSessionEvent).not.toHaveBeenCalled();
         expect(sendCronFailureAlert).not.toHaveBeenCalled();
         expect(runCronFailureRepair).not.toHaveBeenCalled();
       },

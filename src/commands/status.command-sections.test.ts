@@ -39,22 +39,27 @@ it("renders native provider health without legacy index counters", () => {
 const healthRows = (health: Partial<HealthSummary>) =>
   buildStatusHealthRows({ health: createStatusHealth(health) });
 
-it("shows valid configuration examples when heartbeat is waiting for a delivery route", () => {
-  const agent = {
-    agentId: "main",
-    enabled: true,
-    every: "1m",
-    everyMs: 60_000,
-    waitingForRoute: true,
-  };
-  const value = buildStatusHeartbeatValue({
-    summary: { heartbeat: { defaultAgentId: "main", agents: [agent] } },
-  });
-  expect(value).toContain("1m (main; waiting for delivery route");
-  expect(value).toContain('commands.ownerAllowFrom=["telegram:123456789"]');
-  expect(value).toContain('heartbeat.target="telegram"');
-  expect(value).toContain('heartbeat.to="123456789"');
-});
+it.each([
+  { every: "1m", everyMs: 60_000 },
+  { every: "scheduled", everyMs: null },
+])(
+  "shows supported remediation for an enabled $every automation without a route",
+  ({ every, everyMs }) => {
+    const agent = {
+      agentId: "main",
+      enabled: true,
+      every,
+      everyMs,
+      waitingForRoute: true,
+    };
+    const value = buildStatusHeartbeatValue({
+      summary: { heartbeat: { defaultAgentId: "main", agents: [agent] } },
+    });
+    expect(value).toContain(`${every} (main; waiting for delivery route`);
+    expect(value).toContain('commands.ownerAllowFrom=["telegram:123456789"]');
+    expect(value).toContain("edit the automation delivery channel and recipient");
+  },
+);
 
 it("prioritizes critical audit findings, caps warnings, and preserves remediation", () => {
   const lines = buildStatusSecurityAuditLines({

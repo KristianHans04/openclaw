@@ -50,7 +50,6 @@ export function configureLiveGatewayBenchmark(
       model: { primary: LIVE_GATEWAY_MODEL },
       utilityModel: LIVE_GATEWAY_MODEL,
       thinkingDefault: "off",
-      heartbeat: { every: "0m" },
       models: {
         [LIVE_GATEWAY_MODEL]: {
           agentRuntime: { id: "openclaw" },
@@ -143,7 +142,6 @@ export function createLiveGatewayEvidence(agentIds: string[], turnsPerSession: n
               utilityModel?: string;
               maxConcurrent?: number;
               thinkingDefault?: string;
-              heartbeat?: { every?: string };
               models?: Record<string, { params?: { maxTokens?: number } }>;
             };
             entries?: Record<string, { model?: unknown }>;
@@ -161,7 +159,6 @@ export function createLiveGatewayEvidence(agentIds: string[], turnsPerSession: n
           defaults.utilityModel === LIVE_GATEWAY_MODEL &&
           defaults.maxConcurrent === agentIds.length &&
           defaults.thinkingDefault === "off" &&
-          defaults.heartbeat?.every === "0m" &&
           defaults.models?.[LIVE_GATEWAY_MODEL]?.params?.maxTokens === 128 &&
           config.tools?.deny?.length === 1 &&
           config.tools.deny[0] === "*" &&

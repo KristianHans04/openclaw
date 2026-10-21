@@ -23,7 +23,7 @@ import type {
   CronToolsAllowExecTargetRequirement,
 } from "./scheduled-tool-policy.js";
 import type { CronStreamSandboxTarget } from "./stream-sandbox-target.js";
-import type { CronJobBase, CronPacing } from "./types-shared.js";
+import type { CronActiveHours, CronJobBase, CronPacing } from "./types-shared.js";
 
 export type { CronPacing } from "./types-shared.js";
 export type {
@@ -55,6 +55,9 @@ type CronDeliveryMode = "none" | "announce" | "webhook";
 /** Completion delivery configuration for cron job output. */
 export type CronDelivery = {
   mode: CronDeliveryMode;
+  /** Resolve the owner's current direct-message route at execution time. */
+  target?: "owner";
+  directPolicy?: "allow" | "block";
   channel?: CronMessageChannel;
   to?: string;
   /** Explicit thread/topic id for channels that support threaded delivery. */
@@ -89,6 +92,8 @@ type CronFailureDestinationPatch = {
 
 /** Partial delivery update shape; null clears optional delivery destinations or fields. */
 export type CronDeliveryPatch = Partial<Pick<CronDelivery, "mode" | "bestEffort">> & {
+  target?: "owner" | null;
+  directPolicy?: "allow" | "block" | null;
   channel?: CronMessageChannel | null;
   to?: string | null;
   threadId?: string | number | null;
@@ -172,6 +177,9 @@ export type CronRunOutcome = {
   error?: string;
   /** True once agent execution begins; retries after this point can replay side effects. */
   executionStarted?: boolean;
+  /** Admission deferral preserves the unstarted occurrence's scheduled slot. */
+  admissionDeferred?: boolean;
+  admissionDeferredReason?: "busy" | "active-hours";
   /** Lifecycle-owned restart fact; transient input to cron settlement, not a public event. */
   interruptedByRestart?: boolean;
   /** Optional classifier for execution errors to guide fallback behavior. */
@@ -485,11 +493,15 @@ export type CronJobPatch = Partial<
     | "scheduledToolPolicy"
     | "streamExecutionHost"
     | "pacing"
+    | "activeHours"
+    | "idleOnly"
     | "trigger"
   >
 > & {
   displayName?: string | null;
   pacing?: CronPacing | null;
+  activeHours?: CronActiveHours | null;
+  idleOnly?: boolean | null;
   trigger?: CronTrigger | null;
   payload?: CronPayloadPatch;
   delivery?: CronDeliveryPatch;

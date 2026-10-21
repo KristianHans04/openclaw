@@ -6,8 +6,8 @@ import { normalizeCronFormState, validateCronForm } from "./index.ts";
 describe("cron form validation", () => {
   it.each([
     ["payloadKind", "isolated", "systemEvent", "main", "systemEvent"],
-    ["payloadKind", "main", "agentTurn", "isolated", "agentTurn"],
-    ["sessionTarget", "main", "agentTurn", "main", "systemEvent"],
+    ["payloadKind", "main", "agentTurn", "main", "agentTurn"],
+    ["sessionTarget", "main", "agentTurn", "main", "agentTurn"],
     ["sessionTarget", "isolated", "systemEvent", "isolated", "agentTurn"],
   ] as const)(
     "normalizes a changed %s on %s/%s",
@@ -34,6 +34,10 @@ describe("cron form validation", () => {
       triggerScript: "",
       deliveryMode: "webhook",
       deliveryTo: "ftp://bad",
+      activeHoursEnabled: true,
+      activeHoursStart: "24:00",
+      activeHoursEnd: "25:00",
+      activeHoursTimezone: "Invalid/Timezone",
     });
     expect(errors.name).toBe("cron.errors.nameRequired");
     expect(errors.cronExpr).toBe("cron.errors.cronExprRequired");
@@ -41,5 +45,25 @@ describe("cron form validation", () => {
     expect(errors.triggerScript).toBe("cron.errors.triggerScriptRequired");
     expect(errors.timeoutSeconds).toBe("cron.errors.timeoutInvalid");
     expect(errors.deliveryTo).toBe("cron.errors.webhookUrlInvalid");
+    expect(errors.activeHoursStart).toBe("cron.errors.activeHoursTime");
+    expect(errors.activeHoursEnd).toBe("cron.errors.activeHoursTime");
+    expect(errors.activeHoursTimezone).toBe("cron.errors.activeHoursTimezone");
+  });
+
+  it("preserves an explicit direct-message block and a valid overnight window", () => {
+    const form = {
+      ...DEFAULT_CRON_FORM,
+      name: "Daily check",
+      payloadText: "Check notes",
+      deliveryMode: "announce" as const,
+      deliveryTarget: "owner" as const,
+      deliveryDirectPolicy: "block" as const,
+      activeHoursEnabled: true,
+      activeHoursStart: "22:00",
+      activeHoursEnd: "24:00",
+      activeHoursTimezone: "user",
+    };
+    expect(validateCronForm(form)).toEqual({});
+    expect(validateCronForm({ ...form, deliveryDirectPolicy: "allow" })).toEqual({});
   });
 });

@@ -25,6 +25,8 @@ import { resolveSqliteTargetFromSessionStorePath } from "../../config/sessions/s
 import { spyOnSessionStoreSummaries } from "../../config/sessions/session-store-summary.test-support.js";
 import { historyLane } from "../../config/sessions/session-transcript-worker-resources.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { createDefaultProactiveJob } from "../../cron/default-proactive-job.js";
+import { saveProactiveJobsForTest } from "../../cron/proactive-job.test-support.js";
 import { recordAgentDatabaseAdmissions } from "../../state/agent-database-admission.js";
 import { withAgentDatabaseCloseFence } from "../../state/openclaw-agent-db-resources.js";
 import {
@@ -255,11 +257,19 @@ describe("health session store paths", () => {
             ownership: "explicit",
             entries: timing === "only-agent" ? { deleting: {} } : { deleting: {}, survivor: {} },
             ...(timing === "late-health"
-              ? { defaults: { systemAgent: { agentId: "deleting" }, heartbeat: { every: "1m" } } }
+              ? { defaults: { systemAgent: { agentId: "deleting" } } }
               : {}),
           },
           ...(shared ? { session: { store: state.statePath("shared.sqlite") } } : {}),
         };
+        if (timing === "late-health") {
+          await saveProactiveJobsForTest(
+            state.statePath("cron", "jobs.json"),
+            ["deleting", "survivor"].map((agentId) =>
+              createDefaultProactiveJob(cfg, agentId, 1, 60_000),
+            ),
+          );
+        }
         setRuntimeConfigSnapshot(cfg);
         const { ordered } = resolveHealthAgentOrder(cfg);
         for (const { id } of ordered) {
