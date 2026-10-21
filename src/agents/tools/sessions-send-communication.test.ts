@@ -2,7 +2,7 @@ import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as runtimeConfig from "../../config/config.js";
-import { loadSessionEntry } from "../../config/sessions/session-accessor.js";
+import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
 import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.sqlite-entry.js";
 import { runSessionRegistryMaintenanceForStore } from "../../config/sessions/session-registry-maintenance.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
@@ -343,8 +343,8 @@ describe("sessions_send communication boundary", () => {
       };
       state.rows.set(target.sessionKey, target);
       state.config = { tools: { agentToAgent: { enabled: true, allow: ["*"] } } };
-      await upsertSessionEntryCore(parent, parent.entry!);
-      await upsertSessionEntryCore(target, target.entry!);
+      await replaceSessionEntry(parent, parent.entry!);
+      await replaceSessionEntry(target, target.entry!);
       const maintain = (apply: boolean) =>
         runSessionRegistryMaintenanceForStore({
           agentId: "main",
