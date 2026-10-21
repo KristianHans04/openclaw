@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
+import { listenLoopback } from "../../../test/helpers/gateway-integration-fixtures.js";
 import { streamOpenAIResponses } from "../../ai/src/providers/openai-responses.js";
 import { captureAgentLoop, config, model as baseModel, user } from "./agent-loop.test-support.js";
 import type { Model } from "./llm.js";
@@ -61,66 +61,60 @@ function providerEvents(): unknown[] {
 }
 
 function messageUpdateTexts(events: readonly AgentEvent[]): string[] {
-  const texts: string[] = [];
-  for (const event of events) {
-    if (event.type !== "message_update" || !("content" in event.message)) {
-      continue;
+  return events.flatMap((event) => {
+    if (
+      event.type !== "message_update" ||
+      !("content" in event.message) ||
+      typeof event.message.content === "string"
+    ) {
+      return [];
     }
-    const blocks = typeof event.message.content === "string" ? [] : event.message.content;
-    for (const block of blocks) {
-      if (block.type === "text" && block.text.length > 0) {
-        texts.push(block.text);
-      }
-    }
-  }
-  return texts;
+    return event.message.content.flatMap((block) =>
+      block.type === "text" && block.text.length > 0 ? [block.text] : [],
+    );
+  });
 }
 
-describe("agent loop over openai-responses partial snapshots", () => {
-  it("live message updates grow strictly, never doubling the opening", async () => {
-    const server = createServer((_req, res) => {
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      res.end(
-        `${providerEvents()
-          .map((event) => `data: ${JSON.stringify(event)}\n\n`)
-          .join("")}data: [DONE]\n\n`,
-      );
-    });
-    await new Promise<void>((resolve) => {
-      server.listen(0, "127.0.0.1", resolve);
-    });
-    const port = (server.address() as AddressInfo).port;
-    try {
-      const model: Model<"openai-responses"> = {
-        ...baseModel,
-        name: "Test model",
-        provider: "volcengine-plan",
-        api: "openai-responses",
-        baseUrl: `http://127.0.0.1:${port}/v1`,
-        contextWindow: 8192,
-        maxTokens: 256,
-      };
-      const run = captureAgentLoop(
-        [user("Report the night watch log.")],
-        { systemPrompt: "", messages: [], tools: [] },
-        { ...config, model },
-        undefined,
-        (_loopModel, context, options) =>
-          streamOpenAIResponses(model, context, { ...options, apiKey: "test-key" }),
-      );
-      await run.result;
-
-      const updates = messageUpdateTexts(run.events);
-      expect(updates.length).toBeGreaterThan(0);
-      for (const [index, text] of updates.entries()) {
-        expect(WIRE_TEXT.startsWith(text)).toBe(true);
-        if (index > 0) {
-          expect(text.startsWith(updates[index - 1] ?? "")).toBe(true);
-        }
-      }
-      expect(updates.at(-1)).toBe(WIRE_TEXT);
-    } finally {
-      server.close();
-    }
+it("openai-responses live message updates grow strictly, never doubling the opening", async () => {
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      `${providerEvents()
+        .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+        .join("")}data: [DONE]\n\n`,
+    );
   });
+  const baseUrl = await listenLoopback(server);
+  try {
+    const model: Model<"openai-responses"> = {
+      ...baseModel,
+      name: "Test model",
+      provider: "volcengine-plan",
+      api: "openai-responses",
+      baseUrl: `${baseUrl}/v1`,
+      contextWindow: 8192,
+      maxTokens: 256,
+    };
+    const run = captureAgentLoop(
+      [user("Report the night watch log.")],
+      { systemPrompt: "", messages: [], tools: [] },
+      { ...config, model },
+      undefined,
+      (_loopModel, context, options) =>
+        streamOpenAIResponses(model, context, { ...options, apiKey: "test-key" }),
+    );
+    await run.result;
+
+    const updates = messageUpdateTexts(run.events);
+    expect(updates.length).toBeGreaterThan(0);
+    for (const [index, text] of updates.entries()) {
+      expect(WIRE_TEXT.startsWith(text)).toBe(true);
+      if (index > 0) {
+        expect(text.startsWith(updates[index - 1] ?? "")).toBe(true);
+      }
+    }
+    expect(updates.at(-1)).toBe(WIRE_TEXT);
+  } finally {
+    server.close();
+  }
 });

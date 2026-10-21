@@ -44,19 +44,17 @@ const agent = new Agent({
   prepareNextTurnWithContext: (turn, signal) => {
     if (runSignal) {
       assert.equal(signal, runSignal);
-    } else {
-      runSignal = signal;
     }
+    runSignal = signal;
     if (replacements === 4) {
       return undefined;
     }
     replacements += 1;
-    const summary: AgentMessage =
-      replacements < 4 ? history() : { role: "user", content: "compact summary", timestamp: 0 };
+    const summary = replacements < 4 ? history() : user("compact summary", 0);
     const messages = [summary, ...turn.newMessages];
     // The transcript owner must release history too; ordinary compaction runs after the core.
     agent.state.messages = messages;
-    agent.steer({ role: "user", content: "continue", timestamp: replacements });
+    agent.steer(user("continue", replacements));
     return { context: { ...turn.context, messages } };
   },
 });
