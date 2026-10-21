@@ -16,7 +16,7 @@ import {
   type SessionAutomationMobileListProps,
 } from "./chat-automation-mobile.tsx";
 import { getContextNoticeViewModel } from "./chat-composer-context.tsx";
-import { ChatDetailsContextContent, ChatDetailsContextSummary } from "./chat-details-context.tsx";
+import { ChatDetailsContextSummary } from "./chat-details-context.tsx";
 import {
   ChatDetailsEnvironmentMobile,
   type ChatDetailsEnvironmentMobileProps,
@@ -130,7 +130,6 @@ export type ChatDetailsMobilePage =
     }
   | { kind: "versions"; content: ChatSessionVersionsMobileProps }
   | { kind: "outputs" }
-  | { kind: "context" }
   | { kind: "automations"; content: SessionAutomationMobileListProps }
   | { kind: "sharing"; content: ChatSessionSharingMobileAdapter }
   | { kind: "session-access"; content: ChatSessionSharingMobileAdapter }
@@ -320,13 +319,8 @@ function MobileRoot(
             class="chat-details-mobile-root__entry chat-details-mobile-context__summary"
             data-details-destination="context"
             aria-label={props.content.entries.labels.context}
-            disabled={!props.presented}
-            onClick={(event) =>
-              props.content.entries.onNavigate(
-                { kind: "context" },
-                { kind: "details-root", trigger: event.currentTarget },
-              )
-            }
+            disabled={!props.presented || !props.details.onOpenContext}
+            onClick={() => props.details.onOpenContext?.()}
           >
             <ChatDetailsContextSummary details={props.details} />
             <Icon name="chevronRight" class="chat-details-mobile-root__chevron" />
@@ -419,14 +413,6 @@ export function ChatDetailsMobileContent(props: ChatDetailsMobileContentProps) {
       </Match>
       <Match when={props.page.kind === "versions" && props.page}>
         {(page) => <ChatSessionVersionsMobile {...page().content} />}
-      </Match>
-      <Match when={props.page.kind === "context"}>
-        <div class="chat-details-mobile-context">
-          <div class="chat-details-mobile-context__summary">
-            <ChatDetailsContextSummary details={props.details} />
-          </div>
-          <ChatDetailsContextContent details={props.details} presented={props.presented} />
-        </div>
       </Match>
       <Match when={props.page.kind === "outputs"}>
         <Show when={props.details.outputs}>

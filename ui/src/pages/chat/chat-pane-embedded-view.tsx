@@ -288,6 +288,19 @@ function SubagentsPanel(props: Props) {
   );
 }
 
+function ContextPanel(props: Props) {
+  const presented = usePanePresentation(() => props.contextPresented ?? false);
+  return (
+    <openclaw-chat-context-panel
+      data-sidebar-panel-host
+      ref={[elementRef(props.registerPanelHost)]}
+      prop:details={props.contextDetails}
+      prop:presented={presented()}
+      prop:onScrollPortRef={props.onScrollPortRef}
+    />
+  );
+}
+
 function ProcessesPanel(props: Props) {
   const presented = usePanePresentation(() => props.processesPresented ?? false);
   return (
@@ -405,6 +418,7 @@ const embeddedPanels: Partial<
   portal: PortalPanel,
   subagents: SubagentsPanel,
   processes: ProcessesPanel,
+  context: ContextPanel,
   "link-reader": LinkReaderPanel,
   workspace: WorkspacePanel,
   detail: DetailPanel,
@@ -473,6 +487,9 @@ declare module "@solidjs/web" {
       >;
       "openclaw-chat-subagents-panel": EmbeddedAttributes<
         HTMLElementTagNameMap["openclaw-chat-subagents-panel"]
+      >;
+      "openclaw-chat-context-panel": EmbeddedAttributes<
+        HTMLElementTagNameMap["openclaw-chat-context-panel"]
       >;
       "openclaw-chat-processes-panel": EmbeddedAttributes<
         HTMLElementTagNameMap["openclaw-chat-processes-panel"]

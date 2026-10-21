@@ -60,6 +60,7 @@ const LAZY_SIDEBAR_ELEMENTS: Partial<Record<LazyElementKey, LazyElement>> = {
   desktop: ["openclaw-desktop-panel", () => import("../../components/desktop/desktop-panel.ts")],
   portal: ["openclaw-portals-page", () => import("../portals/portals-page.tsx")],
   companion: ["openclaw-chat-session-rail", () => import("./components/chat-session-rail.tsx")],
+  context: ["openclaw-chat-context-panel", () => import("./components/chat-context-panel.tsx")],
   processes: [
     "openclaw-chat-processes-panel",
     () => import("./components/chat-processes-panel.tsx"),
@@ -125,7 +126,7 @@ export function renderSidebarRegion(params: SidebarRegionParams) {
   for (const panel of params.layout.columns[0]?.panels ?? []) {
     // Saved heavy views stay cold until their pane actually presents them.
     if (
-      (panel.slot === "dashboard" || panel.slot === "workspace") &&
+      (panel.slot === "dashboard" || panel.slot === "workspace" || panel.slot === "context") &&
       !isSidebarSlotVisible(params.layout, panel.slot)
     ) {
       continue;

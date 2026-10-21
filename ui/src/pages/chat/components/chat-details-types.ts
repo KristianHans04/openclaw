@@ -115,6 +115,7 @@ export type ChatDetailsProps = ChatSessionProgressProps &
     /** Opens this pane's Processes panel; absent where the pane has none. */
     onOpenProcesses?: () => void;
     onCompact?: () => void | Promise<unknown>;
+    onOpenContext?: () => void;
     onDismissPullRequest?: (pullRequest: ControlUiSessionPullRequest) => void;
     onDismissPullRequestsBranch?: (branch: ControlUiSessionBranch) => void;
     githubPublication?: GitHubPublicationView;

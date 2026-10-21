@@ -1,5 +1,4 @@
-import type { JSX } from "@solidjs/web";
-import { For, Loading, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { For, Loading, Show, createMemo, createSignal, onCleanup, type Element } from "solid-js";
 import type { SessionSystemPromptReport } from "../../../../../src/config/sessions/session-system-prompt-report.js";
 import type { GatewaySessionRow } from "../../../api/types.ts";
 import type { ApplicationGateway } from "../../../app/gateway.ts";
@@ -7,6 +6,7 @@ import { Icon } from "../../../components/solid/icon.tsx";
 import { formatCompactTokenCount } from "../../../lib/format.ts";
 import { projectGateway } from "../../../lib/reactive/application.ts";
 import { t } from "../../../lib/reactive/i18n.ts";
+import { createParkedProjection } from "../../../lib/reactive/parked-projection.ts";
 import {
   areUiSessionKeysEquivalent,
   scopedSessionArtifactKey,
@@ -20,7 +20,6 @@ import {
   type ContextCategory,
 } from "./chat-context-breakdown-model.ts";
 import "../../../styles/chat/context-breakdown.css";
-import { createDetailsDesktopReveal } from "./chat-details-desktop-section.tsx";
 
 const labelKeys = {
   messages: "contextMessages",
@@ -85,12 +84,7 @@ function ContextGroups(props: { groups: ContextGroup[] }) {
   );
 }
 
-function ContextRow(props: { category: ContextCategory; limit: number; desktop?: boolean }) {
-  const tokens = () => props.category.tokens;
-  const value = () => (tokens() === null ? "—" : "~" + formatCompactTokenCount(tokens()!));
-  const percent = () =>
-    tokens() === null ? "—" : "~" + ((tokens()! / props.limit) * 100).toFixed(1) + "%";
-  const label = () => t("chat.sessionDetails." + labelKeys[props.category.id]);
+function ContextRow(props: { category: ContextCategory; onOpen?: () => void }) {
   const content = () => (
     <>
       <span
@@ -98,91 +92,83 @@ function ContextRow(props: { category: ContextCategory; limit: number; desktop?:
         aria-hidden="true"
       />
       <span class="chat-context__label">
-        <span>{label()}</span>
+        {t("chat.sessionDetails." + labelKeys[props.category.id])}
         <Show when={props.category.entries.length > 0}>
-          <small>{props.category.entries.length}</small>
+          <small> {props.category.entries.length}</small>
         </Show>
       </span>
-      <span class="chat-context__tokens">{value()}</span>
-      <span class="chat-context__percent">{percent()}</span>
+      <span class="chat-context__tokens">
+        {props.category.tokens === null
+          ? "—"
+          : "~" + formatCompactTokenCount(props.category.tokens)}
+      </span>
     </>
-  );
-  const entries = () => (
-    <div class="chat-context__entries">
-      <Show
-        when={props.category.groups}
-        fallback={<ContextEntries entries={props.category.entries} />}
-      >
-        {(groups) => <ContextGroups groups={groups()} />}
-      </Show>
-    </div>
   );
   return (
     <Show
-      when={props.category.entries.length > 0}
+      when={props.onOpen && props.category.entries.length > 0}
       fallback={
         <div class="chat-context__row" data-context-category={props.category.id}>
           {content()}
         </div>
       }
     >
-      <Show
-        when={props.desktop}
-        fallback={
-          <details class="chat-context__details" data-context-details={props.category.id}>
-            <summary class="chat-context__row" data-context-category={props.category.id}>
-              {content()}
-              <Icon name="chevronDown" />
-            </summary>
-            {entries()}
-          </details>
-        }
+      <button
+        class="chat-context__row"
+        type="button"
+        data-context-category={props.category.id}
+        onClick={() => props.onOpen?.()}
       >
-        <DesktopContextDisclosure category={props.category.id} heading={content()}>
-          {entries()}
-        </DesktopContextDisclosure>
-      </Show>
+        {content()}
+        <Icon name="chevronRight" />
+      </button>
     </Show>
   );
 }
 
-/** Same category rows and entries, with desktop-only disclosure motion. */
-function DesktopContextDisclosure(props: {
-  category: ContextCategory["id"];
-  heading: JSX.Element;
-  children: JSX.Element;
-}) {
-  const [expanded, setExpanded] = createSignal(false);
-  // The Context content owner mounts this only while its page/section is presented.
-  const reveal = createDetailsDesktopReveal(() => [expanded(), true]);
+function ContextSections(props: { categories: ContextCategory[] }) {
   return (
-    <details
-      ref={reveal.details}
-      class="chat-context__details"
-      data-context-details={props.category}
+    <For
+      each={props.categories.filter((category) => category.entries.length > 0)}
+      keyed={(category) => category.id}
     >
-      <summary
-        class="chat-context__row"
-        data-context-category={props.category}
-        aria-expanded={expanded() ? "true" : "false"}
-        onClick={(event) => {
-          event.preventDefault();
-          reveal.prepareClick(event);
-          setExpanded(!expanded());
-        }}
+      {(category) => (
+        <section class="chat-context__section" data-context-section={category().id}>
+          <h3>{t("chat.sessionDetails." + labelKeys[category().id])}</h3>
+          <div class="chat-context__entries">
+            <Show
+              when={category().groups}
+              fallback={<ContextEntries entries={category().entries} />}
+            >
+              {(groups) => <ContextGroups groups={groups()} />}
+            </Show>
+          </div>
+        </section>
+      )}
+    </For>
+  );
+}
+
+function ContextActions(props: { onOpen?: () => void; onRefresh: () => void }) {
+  return (
+    <div class="chat-context__actions">
+      <Show when={props.onOpen}>
+        <button type="button" class="chat-context__open" onClick={() => props.onOpen?.()}>
+          {t("chat.sessionDetails.contextOpen")}
+          <Icon name="panelRightOpen" />
+        </button>
+      </Show>
+      <button
+        type="button"
+        class="chat-context__refresh"
+        aria-label={t("common.refresh")}
+        title={t("common.refresh")}
+        onClick={() => props.onRefresh()}
       >
-        {props.heading}
-        <Icon name="chevronDown" />
-      </summary>
-      <div
-        ref={reveal.body}
-        class="chat-details-desktop-section__body"
-        inert={!expanded()}
-        aria-hidden={expanded() ? "false" : "true"}
-      >
-        <div ref={reveal.content}>{props.children}</div>
-      </div>
-    </details>
+        <Icon name="refresh" />
+        <Show when={!props.onOpen}>{t("common.refresh")}</Show>
+      </button>
+    </div>
   );
 }
 
@@ -193,16 +179,20 @@ export function ChatContextBreakdown(props: {
   used: number;
   limit: number;
   approximate?: boolean;
-  desktop?: boolean;
+  presented?: boolean;
+  expanded?: boolean;
+  onOpen?: () => void;
+  children?: Element;
 }) {
   const gateway = createMemo(() => projectGateway(props.gateway));
   const [revision, setRevision] = createSignal(0);
-  const target = createMemo(
+  const liveTarget = createMemo(
     () => {
       const connection = gateway().read();
       return {
         client: connection.snapshot.phase === "connected" ? connection.snapshot.client : null,
         connectionRevision: connection.connectionRevision,
+        agentId: props.agentId,
         key: scopedSessionArtifactKey(props.session.key, props.agentId),
         sessionId: props.session.sessionId,
         model: props.session.activeModel || props.session.model,
@@ -215,6 +205,7 @@ export function ChatContextBreakdown(props: {
       equals: (a, b) =>
         a.client === b.client &&
         a.connectionRevision === b.connectionRevision &&
+        a.agentId === b.agentId &&
         a.key === b.key &&
         a.sessionId === b.sessionId &&
         a.model === b.model &&
@@ -223,6 +214,8 @@ export function ChatContextBreakdown(props: {
         a.used === b.used,
     },
   );
+  // Resuming the same report must keep its content and scroll position intact.
+  const target = createMemo(createParkedProjection(liveTarget, () => props.presented !== false));
   const result = createMemo(
     async (): Promise<{
       report: SessionSystemPromptReport | null;
@@ -246,7 +239,7 @@ export function ChatContextBreakdown(props: {
             endDate: today,
             timeZone: "utc",
             scope: "instance",
-            agentId: props.agentId,
+            agentId: current.agentId,
           },
           { key: current.key, includeContextWeight: true, signal: controller.signal },
         );
@@ -271,27 +264,36 @@ export function ChatContextBreakdown(props: {
     },
   );
   return (
-    <div class="chat-context">
+    <div class={["chat-context", { "chat-context--expanded": props.expanded }]}>
+      <Show when={props.expanded}>
+        <ContextActions onRefresh={() => setRevision((value) => value + 1)} />
+      </Show>
       <Loading
         on={target()}
         fallback={
-          <p class="chat-context__note" role="status">
-            {t("chat.sessionDetails.contextLoading")}
-          </p>
+          <>
+            <p class="chat-context__note" role="status">
+              {t("chat.sessionDetails.contextLoading")}
+            </p>
+            {props.children}
+          </>
         }
       >
         <Show
           when={result().report}
           fallback={
-            <p class="chat-context__note" role="status">
-              {t(
-                result().offline
-                  ? "chat.sessionDetails.contextOffline"
-                  : result().failed
-                    ? "chat.sessionDetails.contextError"
-                    : "chat.sessionDetails.contextUnavailable",
-              )}
-            </p>
+            <>
+              <p class="chat-context__note" role="status">
+                {t(
+                  result().offline
+                    ? "chat.sessionDetails.contextOffline"
+                    : result().failed
+                      ? "chat.sessionDetails.contextError"
+                      : "chat.sessionDetails.contextUnavailable",
+                )}
+              </p>
+              {props.children}
+            </>
           }
         >
           {(report) => {
@@ -317,32 +319,37 @@ export function ChatContextBreakdown(props: {
                     {(category) => (
                       <ContextRow
                         category={category()}
-                        limit={props.limit}
-                        desktop={props.desktop}
+                        onOpen={props.expanded ? undefined : props.onOpen}
                       />
                     )}
                   </For>
-                  <div class="chat-context__row" data-context-category="free">
-                    <span class="chat-context__swatch chat-context__free" aria-hidden="true" />
-                    <span class="chat-context__label">{t("chat.sessionDetails.contextFree")}</span>
-                    <span class="chat-context__tokens">
-                      {props.approximate ? "~" : ""}
-                      {formatCompactTokenCount(Math.max(0, props.limit - props.used))}
-                    </span>
-                    <span class="chat-context__percent">
-                      {props.approximate ? "~" : ""}
-                      {((Math.max(0, props.limit - props.used) / props.limit) * 100).toFixed(1)}%
-                    </span>
-                  </div>
+                  <Show when={props.expanded}>
+                    <div class="chat-context__row" data-context-category="free">
+                      <span class="chat-context__swatch chat-context__free" aria-hidden="true" />
+                      <span class="chat-context__label">
+                        {t("chat.sessionDetails.contextFree")}
+                      </span>
+                      <span class="chat-context__tokens">
+                        {props.approximate ? "~" : ""}
+                        {formatCompactTokenCount(Math.max(0, props.limit - props.used))}
+                      </span>
+                    </div>
+                  </Show>
                 </div>
-                <Show when={deferred().length > 0}>
+                {props.children}
+                <Show when={props.expanded}>
+                  <ContextSections categories={categories()} />
+                </Show>
+                <Show when={props.expanded && deferred().length > 0}>
                   <details
                     class="chat-context__details chat-context__deferred"
                     data-context-details="deferred"
                   >
                     <summary class="chat-context__source-heading">
                       <span>{t("chat.sessionDetails.contextAvailableOnDemand")}</span>
-                      <small>{t("chat.sessionDetails.contextNotLoaded")}</small>
+                      <small>
+                        {deferred().reduce((sum, group) => sum + group.entries.length, 0)}
+                      </small>
                       <Icon name="chevronDown" />
                     </summary>
                     <p class="chat-context__note">
@@ -353,20 +360,14 @@ export function ChatContextBreakdown(props: {
                     </div>
                   </details>
                 </Show>
-                <p class="chat-context__note">{t("chat.sessionDetails.contextEstimate")}</p>
               </>
             );
           }}
         </Show>
       </Loading>
-      <button
-        type="button"
-        class="chat-context__refresh"
-        onClick={() => setRevision((value) => value + 1)}
-      >
-        <Icon name="refresh" />
-        {t("common.refresh")}
-      </button>
+      <Show when={!props.expanded}>
+        <ContextActions onOpen={props.onOpen} onRefresh={() => setRevision((value) => value + 1)} />
+      </Show>
     </div>
   );
 }

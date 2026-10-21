@@ -14,12 +14,17 @@ const ChatContextBreakdown = lazy(() => import("./chat-context-breakdown.tsx"), 
 export type ChatDetailsContextContentProps = {
   details: Pick<
     ChatDetailsProps,
-    "selectedSession" | "currentAgentId" | "pullRequestsGateway" | "runActive" | "onCompact"
+    | "selectedSession"
+    | "currentAgentId"
+    | "pullRequestsGateway"
+    | "runActive"
+    | "onCompact"
+    | "onOpenContext"
   >;
   /** True only while the host and this section/page are presented. */
   presented: boolean;
-  /** Opt in only from the desktop composition; mobile retains native disclosures. */
-  desktop?: boolean;
+  /** The native Context panel shows complete lists and management actions. */
+  expanded?: boolean;
 };
 
 /** Native usage metadata; the caller supplies its platform's heading/chrome. */
@@ -88,7 +93,9 @@ export function ChatDetailsContextContent(props: ChatDetailsContextContentProps)
           </div>
           <Show
             when={
-              props.presented && props.details.pullRequestsGateway && props.details.selectedSession
+              (props.presented || props.expanded) &&
+              props.details.pullRequestsGateway &&
+              props.details.selectedSession
             }
           >
             <Loading
@@ -101,58 +108,61 @@ export function ChatDetailsContextContent(props: ChatDetailsContextContentProps)
               }
             >
               <ChatContextBreakdown
-                desktop={props.desktop}
+                expanded={props.expanded}
+                presented={props.presented}
+                onOpen={props.details.onOpenContext}
                 gateway={props.details.pullRequestsGateway!}
                 session={props.details.selectedSession!}
                 agentId={props.details.currentAgentId ?? undefined}
                 used={usage().used}
                 limit={usage().limit}
                 approximate={usage().approximate}
-              />
+              >
+                <Show when={props.expanded && budget() && !usage().approximate}>
+                  <p class="chat-context__note">
+                    {t("chat.sessionDetails.contextReserve", {
+                      tokens: formatCompactTokenCount(budget()!.effectiveReserveTokens),
+                    })}
+                  </p>
+                </Show>
+                <Show when={props.expanded && props.details.onCompact}>
+                  <div class="chat-context__compaction">
+                    <p class="chat-context__note">
+                      {t("chat.sessionDetails.contextCompactDescription")}
+                    </p>
+                    <button
+                      class="chat-context__compact"
+                      type="button"
+                      disabled={!props.presented || compacting() || props.details.runActive}
+                      onClick={() => void compact()}
+                    >
+                      {t(
+                        compacting()
+                          ? "chat.sessionDetails.contextCompacting"
+                          : "chat.sessionDetails.contextCompact",
+                      )}
+                    </button>
+                  </div>
+                </Show>
+                <Show when={props.expanded && (usage().input !== null || usage().output !== null)}>
+                  <div class="chat-details__context-budget">
+                    <span>{t("chat.composer.contextUsage.latestRunTokens")}</span>
+                  </div>
+                  <dl class="chat-details__stats">
+                    <For each={["input", "output"] as const}>
+                      {(kind) => (
+                        <Show when={usage()[kind] !== null}>
+                          <div>
+                            <dt>{t(`usage.breakdown.${kind}`)}</dt>
+                            <dd>{formatCompactTokenCount(usage()[kind]!)}</dd>
+                          </div>
+                        </Show>
+                      )}
+                    </For>
+                  </dl>
+                </Show>
+              </ChatContextBreakdown>
             </Loading>
-          </Show>
-          <Show when={budget() && !usage().approximate}>
-            <p class="chat-context__note">
-              {t("chat.sessionDetails.contextHeadroom", {
-                tokens: formatCompactTokenCount(Math.max(0, usage().limit - usage().used)),
-              })}
-            </p>
-            <p class="chat-context__note">
-              {t("chat.sessionDetails.contextReserve", {
-                tokens: formatCompactTokenCount(budget()!.effectiveReserveTokens),
-              })}
-            </p>
-          </Show>
-          <Show when={props.details.onCompact}>
-            <button
-              class="chat-context__compact"
-              type="button"
-              disabled={!props.presented || compacting() || props.details.runActive}
-              onClick={() => void compact()}
-            >
-              {t(
-                compacting()
-                  ? "chat.sessionDetails.contextCompacting"
-                  : "chat.sessionDetails.contextCompact",
-              )}
-            </button>
-          </Show>
-          <Show when={usage().input !== null || usage().output !== null}>
-            <div class="chat-details__context-budget">
-              <span>{t("chat.composer.contextUsage.latestRunTokens")}</span>
-            </div>
-            <dl class="chat-details__stats">
-              <For each={["input", "output"] as const}>
-                {(kind) => (
-                  <Show when={usage()[kind] !== null}>
-                    <div>
-                      <dt>{t(`usage.breakdown.${kind}`)}</dt>
-                      <dd>{formatCompactTokenCount(usage()[kind]!)}</dd>
-                    </div>
-                  </Show>
-                )}
-              </For>
-            </dl>
           </Show>
         </>
       )}

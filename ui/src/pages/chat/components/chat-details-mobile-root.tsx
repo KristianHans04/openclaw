@@ -39,7 +39,6 @@ type ChatDetailsMobileCollection<T> = {
 
 type ChatDetailsMobileRootDestination =
   | { kind: "people" }
-  | { kind: "context" }
   | { kind: "task-progress" }
   | { kind: "subagents" }
   | { kind: "subagent"; sessionKey: ChatSubagentActivity["key"] }

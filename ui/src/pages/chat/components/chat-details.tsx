@@ -6,6 +6,7 @@ import {
   createMemo,
   createSignal,
   lazy,
+  merge,
   onCleanup,
   onSettled,
   type Element,
@@ -302,6 +303,18 @@ export function ChatDetails(props: ChatDetailsViewProps) {
       focusSource(props.mobile, props.externalTrigger ?? false)?.focus({ preventScroll: true });
     }
   };
+  const openContext = () => {
+    close(false, true);
+    props.chat?.onOpenContext?.();
+  };
+  const details = createMemo(() => {
+    const chat = props.chat;
+    if (!chat) {
+      return undefined;
+    }
+    const scoped = merge(chat, { onOpenContext: chat.onOpenContext ? openContext : undefined });
+    return scoped;
+  });
   const toggle = (event: MouseEvent) => {
     panel.toggleAttribute("data-instant", event.detail === 0);
     if (opened()) {
@@ -591,7 +604,7 @@ export function ChatDetails(props: ChatDetailsViewProps) {
                             }
                           >
                             <ChatDetailsSession
-                              props={props.chat}
+                              props={details()}
                               presented={isPresented() && opened()}
                               dismissed={
                                 props.mobileHost ? !props.mobileHost.open : intent() === "closed"
@@ -632,7 +645,7 @@ export function ChatDetails(props: ChatDetailsViewProps) {
                             }
                           >
                             <ChatDetailsMobileHostContent
-                              details={props.chat!}
+                              details={details()!}
                               host={props.mobileHost!}
                               bindings={props.mobileBindings}
                               presented={isPresented() && opened()}
@@ -655,7 +668,7 @@ export function ChatDetails(props: ChatDetailsViewProps) {
                     }
                   >
                     <ChatDetailsDesktopComposition
-                      props={props.chat}
+                      props={details()}
                       presented={isPresented() && opened()}
                       dismissed={intent() === "closed"}
                       progressMenuRef={(menu) => {

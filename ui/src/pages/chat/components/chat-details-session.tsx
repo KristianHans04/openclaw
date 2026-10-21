@@ -436,7 +436,6 @@ export const ChatDetailsSession = defineSolidBridge<Props>(
                       }
                     >
                       <ChatDetailsContextContent
-                        desktop
                         details={props.props!}
                         presented={active() && sectionExpanded("context")}
                       />

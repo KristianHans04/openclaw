@@ -309,6 +309,7 @@ export abstract class ChatPaneHeaderLayout extends ChatPaneBrowserAnnotationRend
               subagentsWorkingLabel: t("chat.subagentsPanel.desktopWorking"),
             },
             onSessionSelect: (key) => this.onPaneSessionChange?.(this.paneId, key),
+            onOpenContext: this.openContextPanel,
             onOpenSubagent: (key) => {
               this.showSubagents(key);
               this.navigateMobileHost({
