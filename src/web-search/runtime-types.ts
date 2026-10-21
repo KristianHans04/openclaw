@@ -21,6 +21,8 @@ export type ResolveWebSearchDefinitionParams = {
 
 export type RunWebSearchParams = ResolveWebSearchDefinitionParams & {
   args: Record<string, unknown>;
+  /** Selected model account, shared only with a web provider declaring the same auth owner. */
+  modelAuth?: { provider: string; profileId: string; baseUrl?: string };
   signal?: AbortSignal;
   /** Caller-owned synchronous authority check, repeated immediately before external requests. */
   assertCurrent?: () => void;

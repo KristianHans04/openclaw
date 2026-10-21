@@ -83,6 +83,9 @@ export function createWebSearchTool(options?: {
   sandboxed?: boolean;
   runtimeWebSearch?: RuntimeWebSearchMetadata;
   lateBindRuntimeConfig?: boolean;
+  modelProvider?: string;
+  modelAuthProfileId?: string;
+  modelBaseUrl?: string;
 }): AnyAgentTool | null {
   if (options?.enabled === false || isWebSearchDisabled(options?.config)) {
     return null;
@@ -125,6 +128,14 @@ export function createWebSearchTool(options?: {
         agentDir: options?.agentDir,
         sandboxed: options?.sandboxed,
         runtimeWebSearch,
+        modelAuth:
+          options?.modelProvider && options.modelAuthProfileId
+            ? {
+                provider: options.modelProvider,
+                profileId: options.modelAuthProfileId,
+                baseUrl: options.modelBaseUrl,
+              }
+            : undefined,
         preferRuntimeProviders,
         args: toolArgs,
         signal,

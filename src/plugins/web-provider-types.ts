@@ -31,6 +31,8 @@ type WebSearchProviderContext = {
   searchConfig?: Record<string, unknown>;
   runtimeMetadata?: RuntimeWebSearchMetadata;
   agentDir?: string;
+  /** Selected account for this provider's authProviderId; no credential material or fallback authority. */
+  authProfile?: { profileId: string; baseUrl?: string };
 };
 
 export type WebSearchProviderToolExecutionContext = {

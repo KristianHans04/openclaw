@@ -45,6 +45,7 @@ export function createClawRouterTavilyWebSearchProvider(): WebSearchProviderPlug
         return searchClawRouterTavily({
           config: ctx.config,
           agentDir: ctx.agentDir,
+          authProfile: ctx.authProfile,
           query,
           count,
           ...execution,

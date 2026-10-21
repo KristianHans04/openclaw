@@ -9,6 +9,7 @@ import {
   resolveProviderHttpRequestConfig,
   sanitizeConfiguredModelProviderRequest,
 } from "openclaw/plugin-sdk/provider-http";
+import type { WebSearchProviderPlugin } from "openclaw/plugin-sdk/provider-web-search-contract";
 import { normalizeTavilySearchResponse } from "openclaw/plugin-sdk/provider-web-search-tavily";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { normalizeClawRouterRootUrl } from "./provider-catalog.js";
@@ -50,6 +51,7 @@ function supportsSearch(catalog: Record<string, unknown>): boolean {
 export async function searchClawRouterTavily(params: {
   config?: OpenClawConfig;
   agentDir?: string;
+  authProfile?: Parameters<WebSearchProviderPlugin["createTool"]>[0]["authProfile"];
   query: string;
   count: number;
   signal?: AbortSignal;
@@ -81,8 +83,21 @@ export async function searchClawRouterTavily(params: {
       );
     }
     const baseUrl = root.href.endsWith("/") ? root.href.slice(0, -1) : root.href;
+    // A standing automation account belongs to its selected model route, not a later default.
+    if (
+      params.authProfile?.baseUrl &&
+      normalizeClawRouterRootUrl(params.authProfile.baseUrl) !==
+        normalizeClawRouterRootUrl(provider?.baseUrl)
+    ) {
+      throw new Error(
+        "ClawRouter search endpoint changed for the selected account; explicitly select the account again.",
+      );
+    }
     const auth = await resolveApiKeyForProvider({
       provider: "clawrouter",
+      profileId: params.authProfile?.profileId,
+      lockedProfile: Boolean(params.authProfile),
+      modelBaseUrl: params.authProfile?.baseUrl,
       cfg: params.config,
       agentDir: params.agentDir,
       signal,

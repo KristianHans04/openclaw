@@ -393,3 +393,8 @@ Selection is explicit: this adapter is not an automatic fallback or an
 auto-detection candidate. Grant, authentication, quota, and budget failures are
 reported without trying another vendor, account, or route. Redirects are rejected.
 Private-network endpoints require the existing model-provider request opt-in.
+When a ClawRouter model run has a selected auth profile, native search keeps that
+account instead of selecting the default profile again. Persisted automations
+therefore keep their recorded account even when another profile becomes the
+default. An incompatible endpoint change fails before any search request; it does
+not send the standing credential to a replacement router.

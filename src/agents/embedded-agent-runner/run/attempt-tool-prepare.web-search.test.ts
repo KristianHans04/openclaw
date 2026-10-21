@@ -5,9 +5,15 @@ import { replaceSessionEntry } from "../../../config/sessions/session-accessor.e
 import { SessionWorkStartInvalidatedError } from "../../../config/sessions/work-start-error.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import {
+  createPluginRegistryFixture,
+  registerVirtualTestPlugin,
+} from "../../../plugin-sdk/plugin-test-contracts.js";
+import { withPluginRuntimeRegistryScope } from "../../../plugins/runtime/gateway-request-scope.js";
+import {
   createOpenClawTestState,
   type OpenClawTestState,
 } from "../../../test-utils/openclaw-test-state.js";
+import { createWebSearchTestProvider } from "../../../test-utils/web-provider-runtime.test-helpers.js";
 import {
   createAdmittedRunOperatorAuthority,
   prepareSystemAgentRunAdmission,
@@ -16,6 +22,7 @@ import { wrapToolWithBeforeToolCallHook } from "../../agent-tools.before-tool-ca
 import type { AnyAgentTool } from "../../agent-tools.types.js";
 import { createStubTool } from "../../test-helpers/agent-tool-stubs.js";
 import { makeProviderModelFixture } from "../../test-helpers/provider-model-fixture.js";
+import { createWebSearchTool } from "../../tools/web-search.js";
 import { createAttemptSetupFixture } from "./attempt-setup.test-support.js";
 import { getHoisted, resetEmbeddedAttemptHarness } from "./attempt-spawn-workspace.test-support.js";
 import { prepareEmbeddedAttemptToolBase } from "./attempt-tool-prepare.js";
@@ -249,3 +256,88 @@ it.each([
   expect(result.webSearchUnconfigured).toBe(false);
   expect(codingTools).toHaveBeenCalledTimes(2);
 });
+
+it.each(["clawrouter", "other-provider"])(
+  "shares the attempt account only with its matching auth owner (%s)",
+  async (authProviderId) => {
+    const config: OpenClawConfig = {
+      tools: {
+        codeMode: false,
+        toolSearch: { enabled: false },
+        web: { search: { provider: "clawrouter-tavily" } },
+      },
+      plugins: { entries: { clawrouter: { enabled: true } } },
+    };
+    const registry = createPluginRegistryFixture(config);
+    registerVirtualTestPlugin({
+      ...registry,
+      id: "clawrouter",
+      name: "ClawRouter",
+      contracts: { webSearchProviders: ["clawrouter-tavily"] },
+      register(api) {
+        api.registerWebSearchProvider(
+          createWebSearchTestProvider({
+            id: "clawrouter-tavily",
+            pluginId: "clawrouter",
+            credentialPath: "",
+            requiresCredential: false,
+            authProviderId,
+            createTool: (ctx) => ({
+              description: "Selected account fixture",
+              parameters: {},
+              execute: async () => ({
+                results: [
+                  {
+                    title: ctx.authProfile?.profileId ?? "independent account",
+                    url: ctx.authProfile?.baseUrl ?? "https://independent.example",
+                  },
+                ],
+              }),
+            }),
+          }),
+        );
+      },
+    });
+    // Only unrelated tool construction is isolated; execute the real core web tool and registry.
+    codingTools.mockImplementation((options) => {
+      const tool = createWebSearchTool(options);
+      return tool ? [tool] : [];
+    });
+    await withPluginRuntimeRegistryScope(registry.registry.registry, async () => {
+      await using fixture = await createFixture({
+        config,
+        agentDir: state.agentDir(),
+        provider: "clawrouter",
+        authProfileId: "clawrouter:automation-fixture",
+        authProfileIdSource: "user",
+        model: makeProviderModelFixture({
+          id: "test-model",
+          api: "openai-responses",
+          provider: "clawrouter",
+          baseUrl: "https://selected-router.example/v1",
+        }),
+      });
+      const tool = fixture.result.toolsRaw.find((entry) => entry.name === "web_search");
+      assert(tool);
+      await expect(tool.execute("selected-account", { query: "synthetic" })).resolves.toMatchObject(
+        {
+          details: {
+            results: [
+              {
+                title: expect.stringContaining(
+                  authProviderId === "clawrouter"
+                    ? "clawrouter:automation-fixture"
+                    : "independent account",
+                ),
+                url:
+                  authProviderId === "clawrouter"
+                    ? "https://selected-router.example/v1"
+                    : "https://independent.example/",
+              },
+            ],
+          },
+        },
+      );
+    });
+  },
+);

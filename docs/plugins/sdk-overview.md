@@ -164,3 +164,12 @@ Tavily and router adapters. It bounds and wraps untrusted source content while
 preserving citation URLs, scores, and publication dates. It does not resolve
 credentials, choose endpoints, fetch URLs, or own caches; those remain with the
 calling provider.
+
+## Provider-backed search accounts
+
+A search provider declaring `authProviderId` receives the active model’s selected
+account in `createTool`’s optional `authProfile` context only when that auth owner
+matches. The context carries a profile ID and optional selected model base URL,
+not credential material or permission to fall back to another account. Providers
+resolve the selected profile through the existing auth SDK and keep their own
+endpoint and denial policies.

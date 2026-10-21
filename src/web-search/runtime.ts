@@ -581,6 +581,10 @@ export async function runWebSearch(params: RunWebSearchParams): Promise<RunWebSe
             agentDir: params.agentDir,
             searchConfig: search,
             runtimeMetadata: runtimeWebSearch,
+            authProfile:
+              candidate.authProviderId === params.modelAuth?.provider
+                ? params.modelAuth
+                : undefined,
           });
           if (!definition) {
             if (!allowFallback) {
