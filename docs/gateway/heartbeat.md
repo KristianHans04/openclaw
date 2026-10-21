@@ -218,7 +218,10 @@ remain failures. See [Job scratch and quiet results](/automation/cron-jobs/paylo
 A background process completing, a task becoming blocked, or a restart finishing
 uses ordinary session execution. It does not require an enabled recurring monitor.
 Session admission keeps the follow-up with its original conversation and current
-authority. For a manual event, request immediate processing explicitly:
+authority. An exec completion waits behind the turn that started it, allowing
+that turn to finish and acknowledge its automation reminders without being
+superseded by its own command. For a manual event, request immediate processing
+explicitly:
 
 ```bash
 openclaw system event --text "Check for urgent follow-ups" --mode now
