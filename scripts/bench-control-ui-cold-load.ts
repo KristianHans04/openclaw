@@ -768,6 +768,8 @@ try {
         (deepLink) => history.replaceState(null, "", deepLink),
         controlUiSessionUrl(server.baseUrl, fixture.selectedSessionKey, "chat"),
       );
+      // Preview assets are route-relative; warm the final URL before measuring its reload.
+      await page.reload({ waitUntil: "domcontentloaded" });
     }
     await settle();
   }

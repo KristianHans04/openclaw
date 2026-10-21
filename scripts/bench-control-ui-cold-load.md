@@ -46,7 +46,7 @@ Every reload replays the warm visit's persisted sidebar and trimmed v8 transcrip
 (after unloading the app), local storage and session storage; the HTTP cache stays warm.
 
 `--warm-reload --probe-dir /path/to/probes` adds cache/paint diagnostics. The probe directory supplies `loaf-mutation.init.js` and
-`ws-rpc-census.init.js`. The output records cache reads, cached transcript visibility,
+`ws-rpc-census.init.js`, plus `mutattr.init.js`. The output records cache reads, cached transcript visibility,
 hello, live catch-up, enabled input, layout shifts, mutation batches, and retained
 row elements. Visibility and enabled-input milestones are DOM observations;
 FCP is the browser's paint metric. Diagnostic runs also save filmstrip frames.
@@ -78,7 +78,8 @@ reload its literal `/chat/main/dashboard/<uuid>` URL. The separate
 `--dashboard-widget` mode uses a board HTML document; do not combine these two
 fixture modes. `--full-uuid-route` selects an off-roster short-reference UUID
 link instead. Compare against `--face chat` separately to distinguish the route
-from the saved pane layout.
+from the saved pane layout. The chat-dashboard setup includes an unmeasured
+reload at the final URL so its route-relative assets are warm before sampling.
 `--connect-not-before-ms 350 --method-latency-ms connect=240` exercises a connect
 request dispatched after 350 ms with a 240 ms response delay. Report
 `dashboardStages.helloHandledMs` alongside FCP and transcript paint: moving a
