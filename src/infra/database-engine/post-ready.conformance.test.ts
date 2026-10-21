@@ -1,5 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { GIT_COAUTHOR_PREFERENCE_KEY } from "../../../packages/gateway-protocol/src/schema/user-profile-constants.js";
 import { loadPersistedPluginModelCatalogs } from "../../agents/plugin-model-catalog-execution.js";
 import * as catalogs from "../../agents/plugin-model-catalog.js";
 import type { CronRuntimeAuthority } from "../../cron/runtime-authority.js";
@@ -50,6 +51,12 @@ describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
         ok: false,
         error: { code: "conflict" },
       });
+      await expect(getCanonicalUserPreferences(profile.id)).resolves.toEqual({
+        profileId: profile.id,
+        entries: { accent: "green" },
+      });
+      expect(await set({ [GIT_COAUTHOR_PREFERENCE_KEY]: true })).toMatchObject({ ok: true });
+      expect(await set({ [GIT_COAUTHOR_PREFERENCE_KEY]: null })).toMatchObject({ ok: true });
       await expect(getCanonicalUserPreferences(profile.id)).resolves.toEqual({
         profileId: profile.id,
         entries: { accent: "green" },
