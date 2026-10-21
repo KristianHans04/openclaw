@@ -150,7 +150,7 @@ it("atomically publishes a saved greeting that remains in the agent's conversati
   });
 });
 
-it("asks for one of four roles in plain text without tools", async () => {
+it("starts onboarding with the existing four single-agent roles in Ask User", async () => {
   const release = vi.fn();
   const work = new AsyncWorkScope();
   const options = invocation();
@@ -169,9 +169,10 @@ it("asks for one of four roles in plain text without tools", async () => {
   await work.drain();
 
   const [request, , internalOptions] = sendInternalChat.mock.calls[0]!;
-  expect(request.params.message).toContain("Ask the user in plain text");
-  expect(request.params.message).not.toContain("Ask User");
-  expect(request.params.message).not.toContain("JSON");
+  expect(request.params.message).toContain(
+    "If Ask User is not directly visible, use tool_search to find it, then use dispatch_action to invoke that exact result with the question arguments.",
+  );
+  expect(request.params.message).not.toContain("do not use tool_search/dispatch_action");
   expect(request.params).toMatchObject({
     sessionKey: "agent:bot-stable:home",
     agentId: "bot-stable",
@@ -182,16 +183,19 @@ it("asks for one of four roles in plain text without tools", async () => {
       sourceTool: "agents_create_onboarding",
     },
   });
-  expect(request.params.message).toContain("What role would you like me to take on?");
-  expect(request.params.message).toContain("Chief of staff");
-  expect(request.params.message).toContain("Researcher");
-  expect(request.params.message).toContain("Writer");
-  expect(request.params.message).toContain("Reviewer");
-  expect(request.params.message).toMatch(/do not offer a team/i);
+  expect(request.params.message).toContain(
+    '"header":"Role","question":"What role would you like me to take on?","multiSelect":false',
+  );
+  expect(request.params.message).toContain('"id":"agent_role"');
+  expect(request.params.message).toContain('"label":"Chief of staff"');
+  expect(request.params.message).toContain('"label":"Researcher"');
+  expect(request.params.message).toContain('"label":"Writer"');
+  expect(request.params.message).toContain('"label":"Reviewer"');
+  expect(request.params.message).toContain("do not offer a team");
   expect(request.params.message).toContain("one open-ended follow-up");
   expect(internalOptions).toMatchObject({
     transcript: { display: false },
-    toolsAllow: [],
+    toolsAllow: ["ask_user"],
   });
   expect(sendWorkSignal).toBeUndefined();
   expect(release).toHaveBeenCalledOnce();
