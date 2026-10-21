@@ -25,7 +25,7 @@ suite.define(() => {
     { theme: "dark", viewport: { width: 390, height: 844 } },
     { theme: "light", viewport: { width: 390, height: 844 } },
   ] as const)(
-    "keeps the compression offer at standard size in $theme at $viewport.width",
+    "keeps the compression offer compact and aligned in $theme at $viewport.width",
     ({ theme, viewport }) =>
       suite.withPage({ viewport, colorScheme: theme }, async ({ page }) => {
         await installMockGateway(page, {
@@ -62,9 +62,23 @@ suite.define(() => {
         const offerBox = (await offer.boundingBox())!;
         expect(normalBox.height).toBe(56);
         expect(offerBox.height).toBe(normalBox.height);
-        expect(offerBox.width).toBe(normalBox.width);
+        expect(offerBox.width).toBeLessThan(normalBox.width);
         expect(offerBox.y).toBe(normalBox.y);
-        expect(await offer.locator(".chat-attachment-file__preview").count()).toBe(1);
+        const preview = offer.locator(".chat-attachment-file__preview");
+        const previewBox = (await preview.boundingBox())!;
+        const normalPreviewBox = (await normal
+          .locator(".chat-attachment-file__preview")
+          .boundingBox())!;
+        expect(previewBox.width).toBeLessThan(normalPreviewBox.width);
+        expect(previewBox.height).toBe(previewBox.width);
+        expect(
+          await preview.evaluate((element) => getComputedStyle(element).backgroundColor),
+        ).not.toBe("rgba(0, 0, 0, 0)");
+        const play = preview.locator("svg");
+        expect(await play.evaluate((element) => getComputedStyle(element).fill)).toBe(
+          await play.evaluate((element) => getComputedStyle(element).color),
+        );
+        expect(await play.evaluate((element) => getComputedStyle(element).stroke)).toBe("none");
         const action = button(page, "Compress to fit");
         const icon = (await action.locator("svg").boundingBox())!;
         expect(icon.width).toBeGreaterThanOrEqual(12);
