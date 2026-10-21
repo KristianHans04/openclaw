@@ -1,5 +1,5 @@
 import type { JSX } from "@solidjs/web";
-import { createMemo, For } from "solid-js";
+import { createProjection, Errored, For, isPending, latest, Loading, Reveal } from "solid-js";
 import { isSystemMonitorDeclaration } from "../../../../src/cron/system-owned-declaration.js";
 import type { CronJobsEnabledFilter, CronJob } from "../../api/types.ts";
 import { AgentRowChip } from "../../components/agent-row-chip.tsx";
@@ -52,42 +52,82 @@ export function ListView(props: CronProps) {
   return (
     <section class="cron-page" data-panel-mode="overview">
       <SettingsPage wide>
-        <div class="cron-overview-header">
-          <AdminRequired {...props} />
-          {props.status && !props.status.enabled ? (
-            <div class="cron-error-banner" data-test-id="cron-scheduler-banner">
-              <strong>{t("cron.list.schedulerOff")}</strong>
-              {t("cron.runNotStarted.stopped")}
+        <Errored
+          fallback={(error, reset) => (
+            <div class="cron-error-banner" role="alert">
+              {String(error())}
+              <button
+                class="btn btn--sm"
+                onClick={() => {
+                  props.onRefresh();
+                  reset();
+                }}
+              >
+                {t("common.retry")}
+              </button>
             </div>
-          ) : undefined}
-          <ErrorBanner error={props.listError} /> <ErrorBanner error={props.error} />
-          <Toolbar {...props} hasAdvancedJobsFilters={hasAdvancedJobsFilters()} />
-        </div>
-        <div
-          id="cron-list-panel"
-          class="cron-tab-panel"
-          role="tabpanel"
-          aria-labelledby={`cron-list-tab-${props.listTab === "activity" ? "activity" : props.jobsEnabledFilter}`}
-        >
-          {props.listTab === "activity" ? (
-            <SettingsSection>
-              <div class="cron-activity">
-                <RunsSection {...props} />
-              </div>
-            </SettingsSection>
-          ) : (
-            <>
-              <SettingsSection>
-                <JobsTable {...props} hasAnyJobsFilters={hasAnyJobsFilters()} />
-              </SettingsSection>
-              {showStarterAutomations() ? <Suggestions {...props} /> : undefined}
-            </>
           )}
-        </div>
+        >
+          <Reveal order="together">
+            <div class="cron-overview-header">
+              <AdminRequired {...props} />
+              <Loading on={latest(() => props.reads?.scope())}>
+                <SchedulerStatus {...props} />
+              </Loading>
+              <ErrorBanner error={props.listError} /> <ErrorBanner error={props.error} />
+              <Toolbar {...props} hasAdvancedJobsFilters={hasAdvancedJobsFilters()} />
+            </div>
+            <div
+              id="cron-list-panel"
+              class="cron-tab-panel"
+              role="tabpanel"
+              aria-labelledby={`cron-list-tab-${props.listTab === "activity" ? "activity" : props.jobsEnabledFilter}`}
+            >
+              {props.listTab === "activity" ? (
+                <SettingsSection>
+                  <div class="cron-activity">
+                    <RunsSection {...props} />
+                  </div>
+                </SettingsSection>
+              ) : (
+                <>
+                  <SettingsSection>
+                    <Loading on={latest(() => props.reads?.scope())} fallback={<JobsLoading />}>
+                      <JobsTable {...props} hasAnyJobsFilters={hasAnyJobsFilters()} />
+                    </Loading>
+                  </SettingsSection>
+                  {showStarterAutomations() ? <Suggestions {...props} /> : undefined}
+                </>
+              )}
+            </div>
+          </Reveal>
+        </Errored>
       </SettingsPage>
     </section>
   );
 }
+function SchedulerStatus(props: CronProps) {
+  const status = () => (props.reads ? props.reads.status() : props.status);
+  return (
+    <>
+      {status() && !status()?.enabled ? (
+        <div class="cron-error-banner" data-test-id="cron-scheduler-banner">
+          <strong>{t("cron.list.schedulerOff")}</strong>
+          {t("cron.runNotStarted.stopped")}
+        </div>
+      ) : undefined}
+    </>
+  );
+}
+
+function JobsLoading() {
+  return (
+    <div class="cron-empty-state" role="status" aria-live="polite" data-test-id="cron-jobs-loading">
+      <div class="cron-empty-state__title">{t("cron.list.loading")}</div>
+    </div>
+  );
+}
+
 function ListTabs(props: CronProps) {
   return (
     <HubTabs<CronJobsEnabledFilter | "activity">
@@ -193,11 +233,19 @@ function JobsTable(
   // A snapshot revision is the successful-list fact. Until one exists, show
   // pending or failure, never completed-empty guidance.
   const initialPending = () => props.loading && !props.hasLoaded;
-  const tableBusy = () => props.loading || props.jobsLoadingMore;
-  const jobs = createMemo(() =>
-    props.jobs.toSorted(
-      (left, right) => Number(isCronJobActiveFailure(right)) - Number(isCronJobActiveFailure(left)),
-    ),
+  const tableBusy = () =>
+    (props.reads ? isPending(props.reads.jobs) : props.loading) || props.jobsLoadingMore;
+  const jobs = createProjection(
+    () => {
+      // A pending probe is not a data/error read; consume readiness here too.
+      props.reads?.jobs();
+      return (props.reads ? props.reads.rows() : props.jobs).toSorted(
+        (left, right) =>
+          Number(isCronJobActiveFailure(right)) - Number(isCronJobActiveFailure(left)),
+      );
+    },
+    [],
+    { key: "id" },
   );
   return (
     <div
@@ -211,7 +259,7 @@ function JobsTable(
         <span>{t("cron.jobs.lastRun")}</span>
         {props.canManage ? <span aria-hidden="true" /> : undefined}
       </div>
-      {jobs().length === 0 ? (
+      {jobs.length === 0 ? (
         initialPending() ? (
           <div
             class="cron-empty-state"
@@ -232,7 +280,7 @@ function JobsTable(
           </div>
         ) : undefined
       ) : (
-        <For each={jobs()} keyed={(job) => job.id}>
+        <For each={jobs} keyed={(job) => job.id}>
           {(job) => <JobRow job={job()} {...props} />}
         </For>
       )}

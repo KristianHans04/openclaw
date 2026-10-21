@@ -59,6 +59,12 @@ export function controlUiStableChunkName(id: string): string | undefined {
   const normalized = normalizeModuleId(id);
 
   switch (controlUiBootManifestKey(id)) {
+    case "node_modules/@solidjs/signals/dist/prod/core/verdict.js":
+    case "node_modules/@solidjs/signals/dist/prod/core/action.js":
+    case "node_modules/@solidjs/signals/dist/prod/affects.js":
+      // Solid initializes these through its shared runtime. Keep them apart
+      // from the lazy Markdown modules in the measured shared boot group.
+      return "solid-actions-runtime";
     case "ui/src/lib/device-pair-setup.ts":
       // Pairing loads on interaction; the earlier boot capture must not pull it into either route.
       return "device-pair-setup-runtime";
