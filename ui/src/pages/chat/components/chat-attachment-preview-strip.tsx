@@ -1,4 +1,5 @@
 import { For, Show, onSettled } from "solid-js";
+import { Icon } from "../../../components/solid/icon.tsx";
 import { useScrollState } from "../../../components/solid/scroll-state.ts";
 import "../../../components/tooltip.ts";
 import type { BrowserAnnotationAttachment, ChatAttachment } from "../../../lib/chat/chat-types.ts";
@@ -152,30 +153,42 @@ function AttachmentTile(props: {
               aria-busy={reading() && props.entry.preparation !== "offer" ? "true" : "false"}
             >
               {preparing() ? (
-                <div class="chat-attachment-preparation">
-                  <span class="chat-attachment-file__name" title={att().fileName ?? ""}>
-                    {att().fileName}
-                  </span>
-                  {props.entry.preparation === "offer" ? (
-                    <button
-                      type="button"
-                      class="chat-attachment-compress"
-                      title={t("chat.attachments.compressionHint")}
-                      disabled={props.controls.disabled}
-                      onClick={() => props.entry.read.compress?.()}
-                    >
-                      {t("chat.attachments.compressToFit")}
-                    </button>
-                  ) : (
+                failed() ? (
+                  <div class="chat-attachment-preparation">
+                    <span class="chat-attachment-file__name" title={att().fileName ?? ""}>
+                      {att().fileName}
+                    </span>
                     <span class="chat-attachment-file__meta" role="status">
-                      {failed()
-                        ? failureLabel()
-                        : t("chat.attachments.compressing", {
+                      {failureLabel()}
+                    </span>
+                  </div>
+                ) : (
+                  <CompactAttachmentFile
+                    attachment={att()}
+                    metadata={
+                      props.entry.preparation === "offer" ? (
+                        <span class="chat-attachment-file__type">
+                          <button
+                            type="button"
+                            class="chat-attachment-compress"
+                            title={t("chat.attachments.compressionHint")}
+                            disabled={props.controls.disabled}
+                            onClick={() => props.entry.read.compress?.()}
+                          >
+                            <Icon name="minimize" />
+                            {t("chat.attachments.compressToFit")}
+                          </button>
+                        </span>
+                      ) : (
+                        <span class="chat-attachment-file__type" role="status">
+                          {t("chat.attachments.compressing", {
                             progress: String(Math.floor((props.entry.progress ?? 0) * 100)),
                           })}
-                    </span>
-                  )}
-                </div>
+                        </span>
+                      )
+                    }
+                  />
+                )
               ) : failed() ? (
                 <openclaw-tooltip prop:content={failureLabel()}>
                   <span

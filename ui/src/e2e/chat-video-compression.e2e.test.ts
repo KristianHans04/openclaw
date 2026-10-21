@@ -1,6 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import type { Page } from "playwright";
 import { expect, it } from "vitest";
+import { takeControlUiScreenshotFrame } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 
@@ -17,6 +19,78 @@ const upload = (page: Page, name: string, buffer = oversized) =>
     .setInputFiles({ name, mimeType: "video/mp4", buffer });
 
 suite.define(() => {
+  it.each([
+    { theme: "dark", viewport: { width: 1280, height: 900 } },
+    { theme: "light", viewport: { width: 1280, height: 900 } },
+    { theme: "dark", viewport: { width: 390, height: 844 } },
+    { theme: "light", viewport: { width: 390, height: 844 } },
+  ] as const)(
+    "keeps the compression offer at standard size in $theme at $viewport.width",
+    ({ theme, viewport }) =>
+      suite.withPage({ viewport, colorScheme: theme }, async ({ page }) => {
+        await installMockGateway(page, {
+          attachmentMaxBytes: limit,
+          agentModel: "demo/model",
+          models: [{ id: "model", name: "Demo", provider: "demo" }],
+          historyMessages: [{ role: "assistant", content: "Review these recordings." }],
+        });
+        await page.goto(suite.server.baseUrl + "chat");
+        await page
+          .locator(".agent-chat__composer-combobox textarea")
+          .fill("Compare the two recordings.");
+        await upload(page, "clip.mp4", video);
+        const normal = page
+          .locator(".chat-attachment-thumb")
+          .filter({ has: button(page, "Remove clip.mp4") });
+        await normal.locator(".chat-attachment-file").waitFor();
+        await upload(page, "presentation.mp4");
+        const offer = page
+          .locator(".chat-attachment-thumb")
+          .filter({ has: button(page, "Compress to fit") });
+        await offer.waitFor();
+        if (process.env.OPENCLAW_UI_E2E_ARTIFACT_DIR) {
+          const rail = page.locator(".chat-attachments-preview");
+          const frame = await takeControlUiScreenshotFrame(page, rail, [normal, offer], {
+            elements: [rail],
+            animations: "disabled",
+          });
+          const prefix = path.join(suite.artifactDir, `offer-${theme}-${viewport.width}`);
+          writeFileSync(`${prefix}.png`, frame.png);
+          writeFileSync(`${prefix}-detail.png`, frame.elements[0]!.png);
+        }
+        const normalBox = (await normal.boundingBox())!;
+        const offerBox = (await offer.boundingBox())!;
+        expect(normalBox.height).toBe(56);
+        expect(offerBox.height).toBe(normalBox.height);
+        expect(offerBox.width).toBe(normalBox.width);
+        expect(offerBox.y).toBe(normalBox.y);
+        expect(await offer.locator(".chat-attachment-file__preview").count()).toBe(1);
+        const action = button(page, "Compress to fit");
+        const icon = (await action.locator("svg").boundingBox())!;
+        expect(icon.width).toBeGreaterThanOrEqual(12);
+        expect(icon.width).toBeLessThanOrEqual(14);
+        expect(icon.height).toBe(icon.width);
+        expect(
+          await action.locator("svg").evaluate((element) => getComputedStyle(element).color),
+        ).toBe(await action.evaluate((element) => getComputedStyle(element).color));
+        expect(
+          await action.evaluate((element) => getComputedStyle(element).textDecorationLine),
+        ).toBe("none");
+        expect(await action.evaluate((element) => getComputedStyle(element).color)).toBe(
+          await offer.evaluate((element) => {
+            const probe = document.createElement("span");
+            probe.style.color = "var(--accent)";
+            element.append(probe);
+            const color = getComputedStyle(probe).color;
+            probe.remove();
+            return color;
+          }),
+        );
+        await button(page, "Remove presentation.mp4").click();
+        expect(await normal.count()).toBe(1);
+      }),
+  );
+
   it("loads the encoder only after consent and sends a playable bounded copy", () =>
     suite.withPage({ viewport: { width: 1280, height: 800 } }, async ({ page }) => {
       const requests: string[] = [];
@@ -125,7 +199,9 @@ suite.define(() => {
       await page.goto(suite.server.baseUrl + "new");
       await upload(page, "screen.mp4");
       await button(page, "Compress to fit").click();
-      await page.locator('.chat-attachment-thumb[aria-busy="true"]').waitFor();
+      const preparing = page.locator('.chat-attachment-thumb[aria-busy="true"]');
+      await preparing.waitFor();
+      expect((await preparing.boundingBox())?.height).toBe(56);
       await button(page, "Remove screen.mp4").click();
       await expect.poll(() => page.locator(".chat-attachment-thumb").count()).toBe(0);
     }));
