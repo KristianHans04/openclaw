@@ -168,11 +168,19 @@ export function createPage(options: PageOptions = {}) {
         params && typeof params === "object" && "query" in params
           ? String(params.query).trim().toLowerCase()
           : "";
+      const category =
+        params && typeof params === "object" && "category" in params ? String(params.category) : "";
+      const featured =
+        params && typeof params === "object" && "featured" in params
+          ? Boolean(params.featured)
+          : false;
       return {
         entries:
-          query &&
-          !workflowOperator.displayName.toLowerCase().includes(query) &&
-          !workflowOperator.packageName.toLowerCase().includes(query)
+          featured ||
+          (category && category !== "productivity") ||
+          (query &&
+            !workflowOperator.displayName.toLowerCase().includes(query) &&
+            !workflowOperator.packageName.toLowerCase().includes(query))
             ? []
             : [{ ...workflowOperator, iconUrl: options.clawIconUrl }],
       };

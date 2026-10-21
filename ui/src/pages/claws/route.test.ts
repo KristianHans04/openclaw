@@ -122,7 +122,12 @@ describe("Claws startup routing", () => {
         expect(view.container.querySelector(".plugin-catalog-detail--loading")).toBeNull(),
       );
       if (enabled) {
-        await vi.waitFor(() => expect(request).toHaveBeenCalledWith("claws.catalog.search", {}));
+        await vi.waitFor(() =>
+          expect(request).toHaveBeenCalledWith("claws.catalog.search", {
+            category: "productivity",
+            limit: 8,
+          }),
+        );
         expect(view.container.querySelector("[data-claws-explore]")).not.toBeNull();
       } else {
         expect(view.container.textContent).toContain("Claws is disabled");

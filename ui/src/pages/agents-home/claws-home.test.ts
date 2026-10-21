@@ -131,7 +131,7 @@ describe("Claws discovery", () => {
     const { page, navigate, request } = createPage({ clawsEnabled: true });
     await vi.waitFor(() => expect(page.querySelectorAll("[data-claws-entry]")).toHaveLength(1));
     expect(page.querySelector(".hub-page-header h1.page-title")?.textContent).toBe("Claws");
-    expect(page.querySelector(".hub-page-header [data-claws-search]")).not.toBeNull();
+    expect(page.querySelector(".settings-page [data-claws-search]")).not.toBeNull();
     expect(page.querySelector(".settings-page .hub-page-header")).toBeNull();
     expect(page.querySelector(".agents-home__card")).toBeNull();
     expect(page.textContent).not.toContain("Manage agents");
@@ -141,7 +141,10 @@ describe("Claws discovery", () => {
     expect(navigate).toHaveBeenCalledWith("claws", {
       pathname: "/claws/packages/%40openclaw%2Fworkflow-operator",
     });
-    expect(request).toHaveBeenCalledWith("claws.catalog.search", {});
+    expect(request).toHaveBeenCalledWith("claws.catalog.search", {
+      category: "productivity",
+      limit: 8,
+    });
   });
 
   it("updates Explore results when the search changes", async () => {
