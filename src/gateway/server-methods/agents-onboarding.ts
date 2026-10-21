@@ -169,7 +169,7 @@ export async function startAgentOnboardingConversation(
             agentId,
             message: [
               "A short introduction has already been saved in this agent's conversation. Ask the user in plain text: What role would you like me to take on?",
-              "Offer these four single-agent roles: Chief of staff (coordinates work and priorities), Researcher (finds and summarizes evidence), Writer (turns notes and sources into drafts), and Reviewer (checks work against requirements). Invite the user to describe a different role if they prefer. Do not offer a team. Wait for their reply.",
+              "Offer these four single-agent roles: Chief of staff (coordinates work and priorities), Researcher (finds and summarizes evidence), Writer (turns notes and sources into drafts), and Reviewer (checks work against requirements). Invite the user to describe a different role if they prefer. Do not offer a team. Ask only about the role in this opening turn; do not ask for their goal or mention a later follow-up yet. End the message there and wait for their reply.",
               "After the user replies, ask one open-ended follow-up that invites a little detail about the specific thing they want to achieve. Tailor it to their answer, but do not provide another list or hard-code the follow-up wording. Then continue normally after they answer.",
               "This agent already exists. Do not propose creating an agent or ask the user to approve its creation.",
             ].join("\n\n"),

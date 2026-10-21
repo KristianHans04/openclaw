@@ -188,6 +188,8 @@ it("asks for one of four roles in plain text without tools", async () => {
   expect(request.params.message).toContain("Writer");
   expect(request.params.message).toContain("Reviewer");
   expect(request.params.message).toMatch(/do not offer a team/i);
+  expect(request.params.message).toContain("Ask only about the role in this opening turn");
+  expect(request.params.message).toContain("do not ask for their goal");
   expect(request.params.message).toContain("one open-ended follow-up");
   expect(internalOptions).toMatchObject({
     transcript: { display: false },
