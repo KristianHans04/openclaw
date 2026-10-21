@@ -389,7 +389,12 @@ function ProjectCrumb(props: ChatPaneHeaderProps) {
       placement="bottom-start"
       label={t("chat.sessionHeader.workspaceAria", { workspace: props.workspaceLabel ?? "" })}
       triggerClass={`chat-pane__workspace-chip${!copied() && !props.workspaceIcon ? " chat-pane__workspace-chip--fallback-icon" : ""}`}
-      triggerAttributes={{ title: props.workspaceRoot ?? props.workspaceLabel ?? undefined }}
+      triggerAttributes={{
+        title:
+          props.workspaceLabel === t("sessionHovercard.workspaceLabel")
+            ? props.workspaceLabel
+            : (props.workspaceRoot ?? props.workspaceLabel ?? undefined),
+      }}
       items={items()}
       onSelect={(item) => {
         if (item.id === "reveal" || item.id === "copy-path" || item.id === "copy-branch") {

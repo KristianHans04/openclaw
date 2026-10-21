@@ -63,7 +63,11 @@ export function resolveSessionWorkspace(params: {
       : null;
   const agentId = parseAgentSessionKey(row.key)?.agentId ?? row.agentId;
   // Default agent folders are storage identities, not user-chosen project names.
-  if (root === params.agentWorkspace?.trim() && label === `workspace-${agentId}`) {
+  if (
+    agentId &&
+    root === params.agentWorkspace?.trim() &&
+    (label === `workspace-${agentId}` || label === agentId)
+  ) {
     return { root, label: t("sessionHovercard.workspaceLabel") };
   }
   return { root, label };
