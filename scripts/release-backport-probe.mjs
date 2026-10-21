@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
+import { stripLeadingPackageManagerSeparator } from "./lib/arg-utils.runtime.mjs";
 import { isDirectRunUrl } from "./lib/direct-run.mjs";
 
 const HEADER = [
@@ -126,7 +127,7 @@ export function formatBackportProbes(probes) {
 
 export function runBackportProbe(args = process.argv.slice(2)) {
   const { values } = parseArgs({
-    args,
+    args: stripLeadingPackageManagerSeparator(args),
     options: {
       baseline: { type: "string" },
       candidate: { type: "string", multiple: true },

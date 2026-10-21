@@ -80,7 +80,7 @@ describe("release backport tree probe", () => {
     const f = fixture();
     const result = childProcess.spawnSync(
       process.execPath,
-      [SCRIPT, "--baseline", f.baseline, "--candidate", f.clean, "--candidate", f.conflicted],
+      [SCRIPT, "--", "--baseline", f.baseline, "--candidate", f.clean, "--candidate", f.conflicted],
       { cwd: f.root, encoding: "utf8" },
     );
 
