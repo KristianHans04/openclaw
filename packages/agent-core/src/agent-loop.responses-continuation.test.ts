@@ -5,9 +5,14 @@ import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { streamOpenAICodexResponses } from "../../ai/src/providers/openai-chatgpt-responses.js";
-import { runAgentLoop } from "./agent-loop.js";
-import type { Message, Model } from "./llm.js";
-import type { AgentEvent, AgentTool } from "./types.js";
+import {
+  captureAgentLoop,
+  config,
+  makeTool,
+  model as baseModel,
+  user,
+} from "./agent-loop.test-support.js";
+import type { Model } from "./llm.js";
 
 function textItem(id: string, text: string) {
   return {
@@ -65,14 +70,12 @@ describe("Responses turn continuation", () => {
     await once(server, "listening");
     const port = (server.address() as AddressInfo).port;
     const model: Model<"openai-chatgpt-responses"> = {
-      id: "test-model",
+      ...baseModel,
       name: "Test model",
       provider: "openai",
       api: "openai-chatgpt-responses",
       baseUrl: `http://127.0.0.1:${port}/backend-api`,
       reasoning: true,
-      input: ["text"],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: 8192,
       maxTokens: 256,
     };
@@ -82,25 +85,18 @@ describe("Responses turn continuation", () => {
       content: [{ type: "text" as const, text: "checked" }],
       details: {},
     }));
-    const tool: AgentTool = {
-      name: "check",
+    const tool = {
+      ...makeTool("check"),
       label: "Check",
       description: "Check the result",
       parameters: Type.Object({}),
       execute,
     };
     try {
-      const events: AgentEvent[] = [];
-      const result = await runAgentLoop(
-        [{ role: "user", content: "Check the result and report it.", timestamp: 1 }],
+      const run = captureAgentLoop(
+        [user("Check the result and report it.")],
         { systemPrompt: "", messages: [], tools: [tool] },
-        {
-          model,
-          convertToLlm: (messages) => messages as Message[],
-        },
-        (event) => {
-          events.push(event);
-        },
+        { ...config, model },
         undefined,
         (_model, context, options) =>
           streamOpenAICodexResponses(model, context, {
@@ -109,9 +105,10 @@ describe("Responses turn continuation", () => {
             transport: "websocket",
           }),
       );
+      const result = await run.result;
       expect(requests).toHaveLength(3);
       expect(execute).toHaveBeenCalledTimes(1);
-      expect(events.filter((event) => event.type === "agent_end")).toHaveLength(1);
+      expect(run.events.filter((event) => event.type === "agent_end")).toHaveLength(1);
       const assistants = result
         .filter((message) => message.role === "assistant")
         .filter((message) => message.responseId !== undefined);
@@ -134,25 +131,17 @@ describe("Responses turn continuation", () => {
         role: "assistant",
         content: [expect.objectContaining({ text: "The check passed." })],
       });
-      expect(requests[1]?.input).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            type: "message",
-            role: "assistant",
-            phase: "final_answer",
-            content: [expect.objectContaining({ text: "I am checking the result." })],
-          }),
-        ]),
-      );
-      expect(requests[2]?.input).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            type: "function_call_output",
-            call_id: "call_check",
-            output: "checked",
-          }),
-        ]),
-      );
+      const expectInput = (index: number, item: object) =>
+        expect(requests[index]?.input).toEqual(
+          expect.arrayContaining([expect.objectContaining(item)]),
+        );
+      expectInput(1, {
+        type: "message",
+        role: "assistant",
+        phase: "final_answer",
+        content: [expect.objectContaining({ text: "I am checking the result." })],
+      });
+      expectInput(2, { type: "function_call_output", call_id: "call_check", output: "checked" });
     } finally {
       for (const socket of server.clients) {
         socket.terminate();

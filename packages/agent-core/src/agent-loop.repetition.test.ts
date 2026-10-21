@@ -3,6 +3,7 @@ import { createDeferred } from "../../../test/helpers/promise.js";
 import { runAgentLoop } from "./agent-loop.js";
 import {
   config,
+  captureAgentLoop,
   createTurnSequenceStream,
   makeAssistantMessage,
   makeCall,
@@ -12,7 +13,7 @@ import {
 } from "./agent-loop.test-support.js";
 import { createAssistantMessageEventStream, type AssistantMessage, type Message } from "./llm.js";
 import { distinctRecordOutputs, variedRows } from "./repetition-guard.test-fixtures.js";
-import type { AgentEvent, AgentToolCall, StreamFn } from "./types.js";
+import type { AgentToolCall, StreamFn } from "./types.js";
 
 const loop = "Please provide more input. ".repeat(800);
 const marker = "[Repetitive output stopped]";
@@ -24,18 +25,9 @@ async function runResponse(
   initialText?: string,
   incrementalText = false,
 ) {
-  const events: AgentEvent[] = [];
-  let aborted = false;
   let requests = 0;
-  const streamFn: StreamFn = (_model, _context, options) => {
+  const streamFn: StreamFn = () => {
     requests += 1;
-    options?.signal?.addEventListener(
-      "abort",
-      () => {
-        aborted = true;
-      },
-      { once: true },
-    );
     const response = createAssistantMessageEventStream();
     const message = makeAssistantMessage(content);
     message.providerReplay = {
@@ -92,18 +84,14 @@ async function runResponse(
     });
     return response;
   };
-  const loopConfig = { ...config, repetitionGuard: () => enabled };
-  const result = await runAgentLoop(
+  const run = captureAgentLoop(
     [user()],
     { systemPrompt: "", messages: [], tools: [] },
-    loopConfig,
-    (event) => {
-      events.push(event);
-    },
+    { ...config, repetitionGuard: () => enabled },
     undefined,
     streamFn,
   );
-  return { result, events, aborted, requests };
+  return { result: await run.result, events: run.events, requests };
 }
 
 describe("repetition stop at the stream owner", () => {
