@@ -6,6 +6,7 @@ import {
   defaultControlUiFeatureMethods,
   installMockGateway,
 } from "../test-helpers/control-ui-e2e.ts";
+import { selectFileAction } from "./chat-file-actions.test-support.ts";
 import { chatMessage } from "./chat-flow.test-support.ts";
 import {
   exactButton,
@@ -335,10 +336,14 @@ suite.define(() => {
         path: "README.md",
       });
 
-      await fileView.getByRole("button", { name: "Show in Files" }).click();
-      await expect
-        .poll(async () => (await gateway.getRequests("sessions.files.list")).at(-1)?.params)
-        .toMatchObject({ path: "packages/app" });
+      const beforeReveal = (await gateway.getRequests("sessions.files.list")).length;
+      await selectFileAction(fileView, "Show in Files");
+      await gateway.waitForRequest("sessions.files.list", { after: beforeReveal });
+      expect(
+        (await gateway.getRequests("sessions.files.list"))[beforeReveal]?.params,
+      ).toMatchObject({
+        path: "packages/app",
+      });
       await expect
         .poll(() =>
           page
@@ -375,7 +380,7 @@ suite.define(() => {
         .poll(async () => (await gateway.getRequests("sessions.files.list")).at(-1)?.params)
         .toMatchObject({ search: "README" });
       await browserRow.locator(".chat-workspace-rail__file-open").click();
-      await exactButton(fileView, "Edit file").click();
+      await selectFileAction(fileView, "Edit file");
       await fileView.locator(".cm-content").fill(savedText);
       await gateway.setMethodResponse("sessions.files.list", {
         ...listing,
@@ -477,7 +482,7 @@ suite.define(() => {
       await closePreview("notes.txt");
 
       await openPreview("openclaw.png");
-      const image = page.locator('.chat-tool-card__preview[data-kind="image"] img');
+      const image = page.getByRole("img", { name: "openclaw.png", exact: true });
       await image.waitFor({ state: "visible" });
       expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${pngBase64}`);
       await expect
@@ -491,12 +496,18 @@ suite.define(() => {
       await closePreview("openclaw.png");
 
       await openPreview("unsupported-binary.bmp");
-      const fallback = page.locator(".sidebar-markdown-shell");
-      await fallback.waitFor({ state: "visible" });
-      const fallbackText = await fallback.textContent();
-      expect(fallbackText).toContain("This file is not previewable inline.");
-      expect(fallbackText).toContain("unsupported-binary.bmp");
-      expect(fallbackText).toContain("image/bmp");
+      const fallback = page.locator(".sidebar-file-view");
+      const status = fallback.getByRole("status");
+      await status.waitFor({ state: "visible" });
+      expect(await status.textContent()).toContain("Preview unavailable");
+      expect(await status.textContent()).toContain("Download this file to view it on your device.");
+      expect(await fallback.getByText("unsupported-binary.bmp", { exact: true }).isVisible()).toBe(
+        true,
+      );
+      expect(
+        await status.getByRole("button", { name: "Download file", exact: true }).isVisible(),
+      ).toBe(true);
+      expect(await fallback.locator("img, iframe").count()).toBe(0);
 
       expect(
         (await gateway.getRequests("sessions.files.get")).map((request) => request.params),
@@ -580,8 +591,20 @@ suite.define(() => {
               .evaluate((el) => el === document.activeElement),
           ).toBe(true);
           await card.getByRole("button", { name: "Open full file" }).click();
-          await page.locator(".sidebar-file-view").waitFor();
-          await page.locator(".sidebar-file-view .cm-scroller").hover();
+          const fileView = page.locator(".sidebar-file-view");
+          await fileView.waitFor();
+          const readingMode = fileView
+            .getByRole("button", { name: /^Reading mode:/ })
+            .filter({ visible: true });
+          if (await readingMode.isVisible()) {
+            await readingMode.click();
+            await fileView
+              .getByRole("menuitemradio", { name: "Highlighted source", exact: true })
+              .click();
+          } else {
+            await selectFileAction(fileView, "Highlighted source");
+          }
+          await fileView.locator(".cm-scroller").hover();
           await page.mouse.wheel(0, 30_000);
           await polledText(page.locator(".cm-content")).toContain("End of the full skill.");
           expect((await gateway.getRequests("skills.files.get")).length).toBe(2);
