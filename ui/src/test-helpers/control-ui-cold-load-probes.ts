@@ -348,17 +348,6 @@ function installColdLoadProbes(
         if (typeof data === "string") {
           const frame = JSON.parse(data);
           if (frame.type === "req") {
-            const connectDelay = (input.connectNotBeforeMs ?? 0) - performance.now();
-            if (frame.method === "connect" && connectDelay > 0) {
-              queued++;
-              window.setTimeout(() => {
-                queued--;
-                if (socket.readyState === WebSocket.OPEN) {
-                  socket.send(data);
-                }
-              }, connectDelay);
-              return;
-            }
             pending.set(frame.id, {
               socket,
               method: frame.method,
@@ -385,6 +374,11 @@ function installColdLoadProbes(
         // Per-method delay models a queued RPC without holding unrelated replies.
         const deliverAt = Math.max(
           nextFrameAt,
+          // Delay challenge admission, not send(): initialConnectSent must mean
+          // the request actually left before cached views use the network wait.
+          frame.type === "event" && frame.event === "connect.challenge"
+            ? (input.connectNotBeforeMs ?? 0)
+            : 0,
           queuedRequest
             ? queuedRequest.at + (input.methodLatencyMs?.[queuedRequest.method] ?? 0)
             : 0,
