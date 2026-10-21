@@ -10,6 +10,7 @@ import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, promisify } from "node:util";
+import type { GitCheckoutDiffInput } from "../../src/infra/git-read-operations.js";
 import { parseStrictIntegerOption } from "../lib/strict-integer-option.ts";
 
 const operationChannel = channel("openclaw.git.operation");
@@ -365,7 +366,7 @@ async function measure() {
       import("../../src/infra/git-worker.js"),
       import("../../src/shared/global-singleton.js"),
     ]);
-  const input = {
+  const input: GitCheckoutDiffInput = {
     cwd: repo,
     scope,
     summaryOnly: values.summary === true,
