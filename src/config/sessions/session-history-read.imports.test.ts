@@ -1,5 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { findSourceImportBackedges } from "../../../test/helpers/source-import-closure.js";
+import { withDatabaseEngineSelection } from "../../infra/database-engine/context.js";
+import { resolveDatabaseFamilyEngines } from "../../infra/database-engine/registry.js";
 import type { SessionTranscriptWorkerRequest } from "./session-transcript-worker.types.js";
 
 it("keeps history worker transport independent of host config loading", () => {
@@ -91,6 +93,8 @@ it("keeps lazy readers independent of unrelated runtime barrels", () => {
 
 const prewarm = vi.hoisted(() => ({
   read: vi.fn<(input: SessionTranscriptWorkerRequest) => Promise<unknown>>(),
+  listingLoaded: vi.fn(),
+  listingRead: vi.fn<typeof import("./session-entry-list.worker.js").readSessionEntryList>(),
   historyReader: vi.fn(),
   historyPage: vi.fn(),
   responsePage: vi.fn(),
@@ -117,6 +121,13 @@ vi.mock("../../gateway/session-history-snapshot.js", () => {
   prewarm.historySnapshot();
   return {};
 });
+// mock-isolation: Observe code loading and calls while preserving the real listing implementation.
+vi.mock("./session-entry-list.worker.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./session-entry-list.worker.js")>();
+  prewarm.listingLoaded();
+  prewarm.listingRead.mockImplementation(actual.readSessionEntryList);
+  return { ...actual, readSessionEntryList: prewarm.listingRead };
+});
 // mock-isolation: Capture dispatch without installing native worker ports in the test process.
 vi.mock("../../infra/worker-task-server.js", () => ({
   serveOwnedWorkerTasks(handler: (input: SessionTranscriptWorkerRequest) => Promise<unknown>) {
@@ -124,7 +135,7 @@ vi.mock("../../infra/worker-task-server.js", () => ({
   },
 }));
 
-it("prewarms maintenance without evaluating the foreground history presentation graph", async () => {
+it("prepares listing code before recovery without loading foreground history", async () => {
   await import("./session-transcript.worker.js");
   // Missing stores are allowed by startup prewarm; native admission/reuse has separate real-DB proof.
   const request = {
@@ -142,6 +153,48 @@ it("prewarms maintenance without evaluating the foreground history presentation 
     ok: true,
     value: { kind: "prewarm" },
   });
+  await expect(
+    withDatabaseEngineSelection(
+      {
+        effectiveEngines: resolveDatabaseFamilyEngines({
+          database: { engine: "postgres", families: { agent: { engine: "sqlite" } } },
+        }),
+        postgres: { connection: "postgresql://127.0.0.1:1/synthetic", schemaPrefix: "synthetic" },
+      },
+      () => prewarm.read({ ...request, history: false }),
+    ),
+  ).resolves.toMatchObject({ ok: true, value: { kind: "prewarm" } });
+  expect(prewarm.listingLoaded).not.toHaveBeenCalled();
+  await expect(
+    withDatabaseEngineSelection(
+      {
+        effectiveEngines: resolveDatabaseFamilyEngines({
+          database: { engine: "sqlite", families: { agent: { engine: "postgres" } } },
+        }),
+        postgres: { connection: "postgresql://127.0.0.1:1/synthetic", schemaPrefix: "synthetic" },
+      },
+      () => prewarm.read({ ...request, history: false }),
+    ),
+  ).resolves.toMatchObject({ ok: true, value: { kind: "prewarm" } });
+  expect(prewarm.listingLoaded).toHaveBeenCalledOnce();
+  expect(prewarm.listingRead).not.toHaveBeenCalled();
+  await expect(
+    prewarm.read({
+      kind: "session-entry-list",
+      database: request.database,
+      scope: {
+        agentId: "main",
+        storePath: request.database.path,
+        env: {},
+        pendingInputRecovery: true,
+      },
+    }),
+  ).resolves.toMatchObject({
+    ok: true,
+    value: { kind: "session-entry-list", entries: [] },
+  });
+  expect(prewarm.listingLoaded).toHaveBeenCalledOnce();
+  expect(prewarm.listingRead).toHaveBeenCalledOnce();
   for (const loaded of modules) {
     expect(loaded).not.toHaveBeenCalled();
   }

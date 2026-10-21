@@ -80,6 +80,7 @@ let targets = explicitTargets
       "extensions/memory-core/src/standing-intents.postgres.test.ts",
       "extensions/memory-core/src/memory-forget.postgres.test.ts",
       "src/gateway/server-database-engine.postgres.test.ts",
+      "src/gateway/server-startup-post-ready.test.ts",
       "src/transcripts/meeting-chronology.postgres.test.ts",
     ];
 if (shardCount) {

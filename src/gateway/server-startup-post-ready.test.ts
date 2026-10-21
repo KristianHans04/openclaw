@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { setImmediate as nextTurn } from "node:timers/promises";
+import { getEnvironmentData } from "node:worker_threads";
+import { Client } from "pg";
 import { expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import type { GatewaySchedulerClock } from "../infra/gateway-scheduler.js";
@@ -21,6 +25,122 @@ vi.mock("../infra/gateway-scheduler.js", async (importOriginal) => {
     },
   };
 });
+
+const configured: unknown = getEnvironmentData("openclaw.test.state.conformance.connection");
+const postgresConnection = typeof configured === "string" ? configured : undefined;
+
+for (const engine of ["sqlite", "postgres"] as const) {
+  it.skipIf(engine === "postgres" && !postgresConnection)(
+    `prepares only the PostgreSQL recovery reader before readiness and joins close (${engine})`,
+    async () => {
+      const state = await fixture.createGatewayStartupTestState("gateway-recovery-reader", {
+        OPENCLAW_RECOVERY_TEST_CONNECTION: engine === "postgres" ? postgresConnection : undefined,
+      });
+      state.envVars.OPENCLAW_TEST_MINIMAL_GATEWAY = undefined;
+      const clock = createGatewaySchedulerClock();
+      schedulerClock.current = clock.clock;
+      const port = await getFreePort();
+      const token = "gateway-recovery-reader-token";
+      const prepared = createDeferred();
+      const readers = await import("../config/sessions/session-transcript-worker-runtime.js");
+      const { maintenanceLane } =
+        await import("../config/sessions/session-transcript-worker-resources.js");
+      const prewarm = vi
+        .spyOn(readers, "prewarmSessionHistoryWorker")
+        .mockReturnValue(prepared.promise);
+      const postAttach = await import("./server-startup-post-attach.js");
+      const startPostAttach = postAttach.startGatewayPostAttachRuntime;
+      let prewarmsBeforeReady = 0;
+      const sidecars = vi
+        .spyOn(postAttach, "startGatewayPostAttachRuntime")
+        .mockImplementation((params) =>
+          startPostAttach({
+            ...params,
+            onSidecarsReady: () => {
+              prewarmsBeforeReady = prewarm.mock.calls.filter(
+                ([database, lane]) => database.agentId === "main" && lane === maintenanceLane,
+              ).length;
+              params.onSidecarsReady?.();
+            },
+          }),
+        );
+      const prefix = `pg_gate_${randomUUID().replaceAll("-", "").slice(0, 8)}`;
+      const client =
+        engine === "postgres" ? new Client({ connectionString: postgresConnection }) : undefined;
+      let server: GatewayServer | undefined;
+      let close: Promise<void> | undefined;
+      try {
+        await client?.connect();
+        await state.writeConfig({
+          ...(engine === "postgres"
+            ? {
+                database: {
+                  engine: "sqlite",
+                  families: { agent: { engine: "postgres" } },
+                  postgres: {
+                    connection: {
+                      source: "env",
+                      provider: "default",
+                      id: "OPENCLAW_RECOVERY_TEST_CONNECTION",
+                    },
+                    schemaPrefix: prefix,
+                  },
+                },
+              }
+            : {}),
+          gateway: fixture.gatewayStartupTestConfig(port, token),
+          plugins: { enabled: false },
+          discovery: { mdns: { mode: "off" } },
+        });
+        state.applyEnv();
+        // Resolve the configured engine before the fixture creates its auth-profile store.
+        const { installGatewayDatabaseEngine } = await import("./server-database-engine.js");
+        await installGatewayDatabaseEngine();
+        await state.writeAuthProfiles({ version: 1, profiles: {} });
+        const { startGatewayServerCore } = await import("./server-start.js");
+        server = await startGatewayServerCore(port, fixture.gatewayStartupTestOptions(token));
+        await server.startupSettled;
+        expect(prewarmsBeforeReady).toBe(engine === "postgres" ? 1 : 0);
+        expect(prewarm).toHaveBeenCalledTimes(engine === "postgres" ? 1 : 0);
+        expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(200);
+        let closed = false;
+        close = server.close().then(() => {
+          closed = true;
+        });
+        if (engine === "postgres") {
+          await nextTurn();
+          expect(closed).toBe(false);
+        }
+        prepared.resolve();
+        await close;
+      } finally {
+        prepared.resolve();
+        await close;
+        await server?.close();
+        sidecars.mockRestore();
+        prewarm.mockRestore();
+        schedulerClock.current = undefined;
+        await state.cleanup();
+        const { resetDatabaseEngineSelectionForTest } =
+          await import("../infra/database-engine/context.test-support.js");
+        resetDatabaseEngineSelectionForTest();
+        if (client) {
+          try {
+            const schemas = await client.query<{ schema_name: string }>(
+              "SELECT schema_name FROM information_schema.schemata WHERE starts_with(schema_name, $1)",
+              [`${prefix}_`],
+            );
+            for (const { schema_name } of schemas.rows) {
+              await client.query(`DROP SCHEMA "${schema_name.replaceAll('"', '""')}" CASCADE`);
+            }
+          } finally {
+            await client.end();
+          }
+        }
+      }
+    },
+  );
+}
 
 it.each(["settles", "closes", "repair-closes"] as const)(
   "holds post-ready maintenance until deferred startup %s",
