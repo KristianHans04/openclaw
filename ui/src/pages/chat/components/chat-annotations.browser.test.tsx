@@ -66,12 +66,15 @@ function mountComments(count: number, top: number) {
 async function openComments(trigger: HTMLElement) {
   const tooltip = container.querySelector("openclaw-tooltip")!;
   await tooltip.updateComplete;
+  const body = tooltip.shadowRoot!.querySelector<HTMLElement>(".tooltip-surface")!;
+  // These cases assert settled geometry and interaction, not transition duration.
+  body.style.setProperty("--openclaw-tooltip-popup-show-duration", "0ms");
+  body.style.setProperty("--openclaw-tooltip-popup-hide-duration", "0ms");
   const shown = new Promise<Event>((resolve) => {
     tooltip.addEventListener("overlay-after-show", resolve, { once: true });
   });
   trigger.focus();
   await shown;
-  const body = tooltip.shadowRoot!.querySelector<HTMLElement>(".tooltip-surface")!;
   await expect.poll(() => body.matches(":popover-open")).toBe(true);
   await expect.poll(() => body.getBoundingClientRect().height).toBeGreaterThan(0);
   return { tooltip, body };
