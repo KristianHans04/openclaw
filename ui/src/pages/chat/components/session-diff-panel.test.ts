@@ -435,7 +435,9 @@ describe("SessionDiffPanel", () => {
 
   it("keeps computing responses pending and retains the last diff during refresh", async () => {
     vi.useFakeTimers();
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const computing = { ...result("feature/test"), computing: true };
     const loader = vi
       .fn<NonNullable<SessionDiffProps["loader"]>>()
@@ -469,7 +471,9 @@ describe("SessionDiffPanel", () => {
 
   it("stops computing polls while hidden or inactive and retires them with the request owner", async () => {
     vi.useFakeTimers();
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     const loader = vi.fn().mockResolvedValue({ ...result("feature/test"), computing: true });
     const { panel, update, unmount } = mountPanel();

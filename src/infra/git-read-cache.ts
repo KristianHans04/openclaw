@@ -328,9 +328,6 @@ function createReadCache<Input, Output>(
         releasePoll(key, slot);
       }
       let poll = slot.poll;
-      if (poll?.pending) {
-        return computing();
-      }
       if (!poll) {
         if (pollCount >= maxEntries) {
           for (const [otherKey, candidate] of entries) {

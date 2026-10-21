@@ -722,6 +722,12 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
       responseSha256: string;
       computing: boolean;
     }[] = [];
+    const refreshSamples: {
+      phase: "cold" | "steady";
+      tab: number;
+      checkout: number;
+      elapsedMs: number;
+    }[] = [];
     const firstPollStarted = new Map<string, number>();
     const firstContentMs = new Map<string, number>();
     let coldToSteady: Promise<void> | undefined;
@@ -849,14 +855,29 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
           await Promise.all(
             peers.map(async (_peer, tab) => {
               const checkout = tab % targets.length;
+              let refreshStarted = performance.now();
+              let refreshPhase = measurementPhase;
               for (let sequence = 0; performance.now() < deadline; sequence++) {
                 const computing = await sampleRpc(tab, checkout, sequence);
+                if (!computing) {
+                  refreshSamples.push({
+                    phase: refreshPhase,
+                    tab,
+                    checkout,
+                    elapsedMs: performance.now() - refreshStarted,
+                  });
+                }
                 if (coldToSteady) {
                   await coldToSteady;
                 }
                 await delay(
                   Math.max(0, Math.min(computing ? 500 : pollMs, deadline - performance.now())),
                 );
+                if (!computing) {
+                  // Include computing retries and timer delays, but exclude the refresh cadence.
+                  refreshStarted = performance.now();
+                  refreshPhase = measurementPhase;
+                }
               }
             }),
           );
@@ -1059,6 +1080,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
       (["cold", "steady"] as const).map((phase) => {
         const entries = rpcSamples.filter((sample) => sample.phase === phase);
         const handlers = cacheSamples.filter((sample) => sample.phase === phase);
+        const refreshes = refreshSamples.filter((sample) => sample.phase === phase);
         return [
           phase,
           {
@@ -1069,6 +1091,14 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
               : null,
             handlerCount: handlers.length,
             handlerSeconds: handlers.reduce((sum, sample) => sum + sample.durationMs, 0) / 1000,
+            ...(values.cold
+              ? {
+                  completedRefreshes: refreshes.length,
+                  refreshLatencyMs: refreshes.length
+                    ? summarize(refreshes.map((sample) => sample.elapsedMs))
+                    : null,
+                }
+              : {}),
           },
         ];
       }),
@@ -1192,6 +1222,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
         ),
       },
       rpcSamples,
+      ...(values.cold ? { refreshSamples } : {}),
       operationSamples,
       phaseSamples,
     };
@@ -1224,7 +1255,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
         "every cold client must receive materialized content during the measurement window",
       );
       assert(
-        rpcSamples.some((sample) => sample.phase === "steady"),
+        refreshSamples.some((sample) => sample.phase === "steady"),
         "extend --duration-ms to include steady polling after all cold clients receive content",
       );
     }

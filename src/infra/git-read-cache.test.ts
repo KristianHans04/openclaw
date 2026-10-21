@@ -398,6 +398,26 @@ describe("typed Git read ownership", () => {
     }
   });
 
+  it("delivers a shared pending diff that settles within each viewer's wait budget", async () => {
+    vi.useFakeTimers();
+    const held = holdRead("checkout.diff", emptyDiff);
+    const poll = () =>
+      runGitReadOperation(
+        { type: "checkout.diff", input: { cwd: "/poll-shared-budget" } },
+        { poll: true },
+      );
+    const first = poll();
+    await vi.advanceTimersByTimeAsync(50);
+    const second = poll();
+    await vi.advanceTimersByTimeAsync(50);
+    held.resolve({ ...emptyDiff, additions: 7 });
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { ...emptyDiff, additions: 7 },
+      { ...emptyDiff, additions: 7 },
+    ]);
+    expect(gitRead).toHaveBeenCalledOnce();
+  });
+
   it("bounds pending poll work, fans out its errors, and retires it with the Gateway", async () => {
     vi.useFakeTimers();
     await drainGlobalSingletonLifecycleState("restart");

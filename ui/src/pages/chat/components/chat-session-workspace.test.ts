@@ -283,7 +283,9 @@ describe("session workspace state", () => {
 
   it("retains uncommitted changes while computing and retires retries with visible demand", async () => {
     vi.useFakeTimers();
-    onTestFinished(() => vi.useRealTimers());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const result = {
       sessionKey: "agent:main:current",
       files: [{ path: "changed.ts", status: "modified", additions: 2, deletions: 1 }],

@@ -1436,12 +1436,15 @@ them. `firstRequestLatencyMs` includes the initial response for each assigned ta
 `firstContentLatencyMs` also includes polling until any `computing: true` response
 becomes materialized. The `phases.cold` and `phases.steady` fields separately report
 RPC latency, computing-response counts, and summed `sessions.diff` handler seconds.
+Their `refreshLatencyMs` includes all computing retries and actual timer delays from
+each refresh's first request to usable content, excluding the recurring poll cadence.
+Refreshes are tagged by their start phase; individual RPCs are tagged on completion.
 Completions are tagged cold until every client has received content and their
 diagnostics have drained, then tagged steady. Clients that finish early keep their
 own cadence. Cold samples use a per-client `sequence`; `rpcPollSequenceMaxLatencyMs`
 groups matching ordinals, not synchronized rounds. Warm mode retains its cross-product
 polling and synchronized round metrics. A run fails
-if any client never receives content or no steady request completes; increase
+if any client never receives content or no steady refresh completes; increase
 `--duration-ms` when needed. Compare both first-response and first-content tails,
 then the steady distribution, in concurrent pairs with swapped CPU halves.
 
