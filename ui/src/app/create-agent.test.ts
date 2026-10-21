@@ -15,7 +15,7 @@ import {
   createSessionsHarness,
   mountSidebarContext,
 } from "../test-helpers/app-sidebar.ts";
-import "../lib/toast-host.ts";
+import "../lib/toast-host.tsx";
 import "../pages/chat/pending-session-create.tsx";
 import "../test-helpers/app-sidebar-suite.ts";
 import { gatewayHelloForMethods } from "../test-helpers/gateway-methods.ts";
