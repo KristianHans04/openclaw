@@ -3,9 +3,11 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { resolveOpenClawPackageRoot } from "../infra/openclaw-root.js";
-import { resolveInitialDoctorHealthContributions } from "./doctor-health-contributions-initial.js";
-import { createDoctorHealthFlowContext } from "./doctor-health-contributions.test-support.js";
-import type { HealthCheckContext, HealthFinding } from "./health-checks.js";
+import {
+  createDoctorHealthFlowContext,
+  resolveDoctorHealthContributions,
+} from "./doctor-health-contributions.test-support.js";
+import type { HealthFinding } from "./health-checks.js";
 
 vi.mock("../infra/openclaw-root.js", () => ({
   resolveOpenClawPackageRoot: vi.fn(),
@@ -13,27 +15,11 @@ vi.mock("../infra/openclaw-root.js", () => ({
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 let globalRoot: string;
-const context: HealthCheckContext = {
-  mode: "lint",
-  cfg: {},
-  env: {},
-  runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
-};
-
-function contribution() {
-  return resolveInitialDoctorHealthContributions({
-    runStructuredHealthRepairs: vi.fn(),
-    runGatewayConfigHealth: vi.fn(),
-    runAuthProfileMigration: vi.fn(),
-    runAuthProfileHealth: vi.fn(),
-    runGatewayAuthHealth: vi.fn(),
-    runLegacyStateHealth: vi.fn(),
-  }).find((entry) => entry.id === "doctor:update-snapshots");
-}
-
-function check() {
-  return contribution()?.healthChecks[0];
-}
+const context = { ...createDoctorHealthFlowContext(), mode: "lint" as const, env: {} };
+const contribution = resolveDoctorHealthContributions().find(
+  (entry) => entry.id === "doctor:update-snapshots",
+);
+const check = contribution?.healthChecks[0];
 
 function warningMessage(findings: readonly HealthFinding[] | undefined) {
   expect(findings).toEqual([
@@ -75,7 +61,7 @@ it("reports dotted and retired dashed snapshots with sizes and quoted commands, 
   await fs.symlink(second, path.join(first, "linked-snapshot"), "dir");
   await fs.symlink(second, path.join(globalRoot, ".openclaw.package-backup-link.databases"), "dir");
 
-  const message = warningMessage(await check()?.detect({ ...context, mode: "fix" }));
+  const message = warningMessage(await check?.detect({ ...context, mode: "fix" }));
   expect(message).toContain(
     "2 retained pre-migration database snapshot directories: 3072 bytes (3.0 KiB)",
   );
@@ -91,16 +77,16 @@ it("reports dotted and retired dashed snapshots with sizes and quoted commands, 
   expect(message).toContain(
     "confirm no update is in progress and no recovery needs these snapshots",
   );
-  expect(typeof check()?.repair).toBe("undefined");
+  expect(check?.repair).toBeUndefined();
 });
 
 it("does not report a finding without snapshot directories or outside an npm global layout", async () => {
-  expect(await check()?.detect(context)).toEqual([]);
+  expect(await check?.detect(context)).toEqual([]);
   packageRoot("missing", "lib", "node_modules", "openclaw");
-  expect(await check()?.detect(context)).toEqual([]);
+  expect(await check?.detect(context)).toEqual([]);
   await snapshot("1-100", 1024);
   packageRoot("source", "openclaw");
-  expect(await check()?.detect(context)).toEqual([]);
+  expect(await check?.detect(context)).toEqual([]);
 });
 
 it.each(["budget", "read-error", "size-budget"])(
@@ -124,7 +110,7 @@ it.each(["budget", "read-error", "size-budget"])(
         return directory;
       });
     }
-    const message = warningMessage(await check()?.detect(context));
+    const message = warningMessage(await check?.detect(context));
     if (cause === "size-budget") {
       expect(message).toContain("at least 0 bytes");
       expect(message).toContain("paths and size may be partial");
@@ -143,7 +129,7 @@ it.each([
 ])("defers snapshot discovery under the shipped updater marker %s", async (marker) => {
   await snapshot("1-100", 1024);
   const ctx = createDoctorHealthFlowContext({ env: { [marker]: "1" } });
-  await contribution()?.run(ctx);
+  await contribution?.run(ctx);
   expect(ctx.runtime.log).not.toHaveBeenCalled();
   expect(ctx.runtime.error).not.toHaveBeenCalled();
 });

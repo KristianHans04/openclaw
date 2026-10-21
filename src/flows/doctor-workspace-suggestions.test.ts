@@ -24,16 +24,13 @@ function detect(
   if (!check || !("detect" in check)) {
     throw new Error("workspace suggestions check not found");
   }
+  const entries = Object.fromEntries(
+    Object.entries(workspaces).map(([id, workspace]) => [id, { workspace }]),
+  );
   return check.detect({
     mode: "lint",
     runtime,
-    cfg: {
-      agents: {
-        entries: Object.fromEntries(
-          Object.entries(workspaces).map(([id, workspace]) => [id, { workspace }]),
-        ),
-      },
-    },
+    cfg: { agents: { entries } },
   });
 }
 
