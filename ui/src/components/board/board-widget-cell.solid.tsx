@@ -1,16 +1,6 @@
 import { createErrorBoundary } from "@solidjs/signals";
 import { dynamic, type JSX as SolidJSX } from "@solidjs/web";
-import {
-  action,
-  createEffect,
-  createMemo,
-  createOptimistic,
-  createSignal,
-  onCleanup,
-  Show,
-  Switch,
-  Match,
-} from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, Show, Switch, Match } from "solid-js";
 import {
   ensureCustomElementDefined,
   isOptionalElementDefined,
@@ -86,7 +76,7 @@ function BoardWidgetCellContent(
     actionBinding();
     return "";
   });
-  const [actionPending, setActionPending] = createOptimistic(false);
+  const [actionPending, setActionPending] = createSignal(false);
   const [widgetRoot, setWidgetRoot] = createSignal<HTMLElement>();
   let mcpElement: HTMLElementTagNameMap["mcp-app-view"] | undefined;
   // Signals commit later; admission must reject a second action in the same tick.
@@ -172,19 +162,17 @@ function BoardWidgetCellContent(
       : null,
   );
 
-  const performAction = action(function* (run: () => Promise<void>) {
-    setActionPending(true);
-    yield run();
-  });
   async function runAction(run: () => Promise<void>, failureMessage?: string) {
     if (actionInFlight || props.busy) {
       return;
     }
     actionInFlight = true;
+    // A cell-local action would hold the shared owner's busy updates across bridge roots.
+    setActionPending(true);
     setActionError("");
     menu?.close();
     try {
-      await performAction(run);
+      await run();
     } catch (error) {
       if (connected) {
         setActionError(formatUiError(error));
@@ -194,6 +182,9 @@ function BoardWidgetCellContent(
       }
     } finally {
       actionInFlight = false;
+      if (connected) {
+        setActionPending(false);
+      }
     }
   }
   function selectMenuItem(value: string | undefined) {
