@@ -85,12 +85,18 @@ describe("GatewayBrowserClient heartbeat recovery", () => {
     },
   );
 
-  it("reconnects only after an idle silence probe receives no inbound frame for ten seconds", async () => {
+  it("retires a silent connection and schedules reconnect without a native close event", async () => {
     useNodeFakeTimers();
     const onClose = vi.fn();
-    const client = new GatewayBrowserClient({ url: DEFAULT_GATEWAY_URL, onClose });
+    const onReconnectScheduled = vi.fn();
+    const client = new GatewayBrowserClient({
+      url: DEFAULT_GATEWAY_URL,
+      onClose,
+      onReconnectScheduled,
+    });
     try {
       const ws = await startConnect(client);
+      expect(client.connected).toBe(true);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(probes(ws)).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(9_999);
@@ -98,8 +104,16 @@ describe("GatewayBrowserClient heartbeat recovery", () => {
       expect(probes(ws)).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(1);
       expect(ws.lastClose).toEqual({ code: 4000, reason: "inbound silence probe timeout" });
-      ws.emitClose(4000, "inbound silence probe timeout");
-      expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ willRetry: true }));
+      expect(client.connected).toBe(false);
+      expect(client.hello).toBeNull();
+      expect(onClose).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          code: 4000,
+          reason: "inbound silence probe timeout",
+          willRetry: true,
+        }),
+      );
+      expect(onReconnectScheduled).toHaveBeenCalledOnce();
       await vi.advanceTimersByTimeAsync(1_000);
       expect(wsInstances).toHaveLength(2);
     } finally {

@@ -328,7 +328,9 @@ or 15 seconds after the first request sent since the last inbound frame, it send
 one read-only `health` request without active integration probing. Sent requests
 still count after they time out; any inbound event or response resets that clock.
 It reconnects only if no event or response
-arrives during the next 10 seconds. Any inbound traffic proves the link is alive;
+arrives during the next 10 seconds. A locally closed socket is retired immediately;
+recovery does not wait for an unreachable peer to finish the WebSocket closing handshake.
+Any inbound traffic proves the link is alive;
 a responsive but busy Gateway is not reconnected just because application ticks
 are delayed. Hidden tabs do not probe; returning to a suspended tab uses the
 existing wake recovery after two advertised heartbeat intervals of silence.
