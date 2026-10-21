@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerShortTermPromotionDreaming } from "./dreaming.js";
 
 const ORPHAN_AGE_MS = 300_000;
+const FIRST_CLEANUP_DELAY_MS = 30_000;
 
 type GatewayHook = (event: unknown, context: unknown) => Promise<void> | void;
 
@@ -32,6 +33,9 @@ beforeEach(async () => {
   });
   stateDir = state.stateDir;
   setRuntimeConfigSnapshot(createConfig());
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+  });
 });
 
 afterEach(async () => {
@@ -116,7 +120,9 @@ function createGateway(params: GatewayOptions = {}) {
       throw new Error("gateway_start hook missing");
     }
     await hook({ port: 0 }, { config, getCron: () => cron });
-    // Storage assertions observe finished maintenance, not just a completed start hook.
+    // Storage assertions observe the delayed pass, not just a completed start hook.
+    await Promise.all(backgroundTasks);
+    await vi.advanceTimersByTimeAsync(FIRST_CLEANUP_DELAY_MS);
     await Promise.all(backgroundTasks);
   };
   const stop = async () => {

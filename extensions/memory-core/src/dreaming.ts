@@ -27,6 +27,7 @@ import { resolveMemoryPromotionFileMaxChars } from "./memory-budget.js";
 import type { PromotionRejectionCategory } from "./short-term-promotion-types.js";
 
 const RUNTIME_CRON_RECONCILE_INTERVAL_MS = 60_000;
+const STARTUP_DREAMING_CLEANUP_DELAY_MS = 30_000;
 
 type Logger = Pick<OpenClawPluginApi["logger"], "info" | "warn" | "error">;
 
@@ -367,6 +368,7 @@ export function registerShortTermPromotionDreaming(api: OpenClawPluginApi): void
   let resolveServiceCron: (() => CronServiceLike | null) | null = null;
   let unavailableCronWarningEmitted = false;
   let missingOwnerWarningEmitted = false;
+  let initialDreamingCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   let startupDreamingCleanupTimer: ReturnType<typeof setTimeout> | null = null;
   const dreamingTasks = new Set<Promise<unknown>>();
   let runtimeCronReconcileTimer: ReturnType<typeof setInterval> | null = null;
@@ -376,12 +378,20 @@ export function registerShortTermPromotionDreaming(api: OpenClawPluginApi): void
   const resolveCurrentConfig = (): OpenClawConfig =>
     (api.runtime.config?.current?.() ?? api.config) as OpenClawConfig;
 
-  const disposeDreaming = (): void => {
-    disposed = true;
+  const clearStartupDreamingCleanupTimers = (): void => {
+    if (initialDreamingCleanupTimer) {
+      clearTimeout(initialDreamingCleanupTimer);
+      initialDreamingCleanupTimer = null;
+    }
     if (startupDreamingCleanupTimer) {
       clearTimeout(startupDreamingCleanupTimer);
       startupDreamingCleanupTimer = null;
     }
+  };
+
+  const disposeDreaming = (): void => {
+    disposed = true;
+    clearStartupDreamingCleanupTimers();
     if (runtimeCronReconcileTimer) {
       clearInterval(runtimeCronReconcileTimer);
       runtimeCronReconcileTimer = null;
@@ -509,11 +519,23 @@ export function registerShortTermPromotionDreaming(api: OpenClawPluginApi): void
       }
     };
 
-    // Cron reconciliation can itself stall; never classify sessions admitted after startup.
-    await scrubConfiguredAgents(config, startupStartedAtMs);
-    if (disposed) {
-      return;
-    }
+    // Historical maintenance must not compete with startup recovery on its worker.
+    // Short-lived Gateways leave this pass for the next long-enough boot.
+    initialDreamingCleanupTimer = setTimeout(() => {
+      if (disposed) {
+        return;
+      }
+      initialDreamingCleanupTimer = null;
+      // Cron reconciliation can itself stall; never classify sessions admitted after startup.
+      void trackDreamingTask(() => scrubConfiguredAgents(config, startupStartedAtMs)).catch(
+        (error: unknown) => {
+          api.logger.warn(
+            `memory-core: dreaming startup cleanup failed: ${formatErrorMessage(error)}`,
+          );
+        },
+      );
+    }, STARTUP_DREAMING_CLEANUP_DELAY_MS);
+    initialDreamingCleanupTimer.unref?.();
     // Interrupted runs are initially indistinguishable from live runs; revisit once their
     // persisted activity ages past the same guard used by normal narrative cleanup.
     startupDreamingCleanupTimer = setTimeout(() => {
@@ -574,10 +596,7 @@ export function registerShortTermPromotionDreaming(api: OpenClawPluginApi): void
     if (disposed || startupStartedAtMs === undefined) {
       return;
     }
-    if (startupDreamingCleanupTimer) {
-      clearTimeout(startupDreamingCleanupTimer);
-      startupDreamingCleanupTimer = null;
-    }
+    clearStartupDreamingCleanupTimers();
     // Historical cleanup is maintenance, not activation. Keep it owned by the
     // instance and joined at service stop without consuming the start hook deadline.
     void trackDreamingTask(() =>

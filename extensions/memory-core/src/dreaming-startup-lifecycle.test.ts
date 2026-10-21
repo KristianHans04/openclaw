@@ -72,6 +72,44 @@ async function createStartedPlugin() {
 }
 
 describe("dreaming startup lifecycle", () => {
+  it("defers the first scrub while preserving both startup cutoffs", async () => {
+    const startupStartedAtMs = Date.now();
+    const plugin = await createStartedPlugin();
+    try {
+      await plugin.start();
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(scrub).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(scrub.mock.calls.map(([params]) => [params.agentId, params.nowMs])).toEqual([
+        ["main", startupStartedAtMs],
+        ["researcher", startupStartedAtMs],
+      ]);
+      await vi.advanceTimersByTimeAsync(270_000);
+      expect(scrub.mock.calls.slice(2).map(([params]) => [params.agentId, params.nowMs])).toEqual([
+        ["main", startupStartedAtMs + 300_000 - 1],
+        ["researcher", startupStartedAtMs + 300_000 - 1],
+      ]);
+    } finally {
+      await plugin.dispose();
+    }
+  });
+
+  it("replaces pending startup timers and cancels both when stopped before the first pass", async () => {
+    const plugin = await createStartedPlugin();
+    try {
+      await plugin.start();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await plugin.start();
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(scrub).not.toHaveBeenCalled();
+      await plugin.stop();
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(scrub).not.toHaveBeenCalled();
+    } finally {
+      await plugin.dispose();
+    }
+  });
+
   it("finishes the replacement hook before slow cleanup and still joins cleanup at service stop", async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -85,6 +123,7 @@ describe("dreaming startup lifecycle", () => {
       (error: unknown) => error,
     );
     try {
+      await vi.advanceTimersByTimeAsync(30_000);
       await entered.promise;
       await vi.advanceTimersByTimeAsync(5_000);
       expect(await result).toBe("started");
@@ -118,6 +157,7 @@ describe("dreaming startup lifecycle", () => {
     const plugin = await createStartedPlugin();
     const starting = plugin.start();
     try {
+      await vi.advanceTimersByTimeAsync(30_000);
       await entered.promise;
       await starting;
       release.resolve();
@@ -150,6 +190,7 @@ describe("dreaming startup lifecycle", () => {
     const plugin = await createStartedPlugin();
     const starting = plugin.start();
     try {
+      await vi.advanceTimersByTimeAsync(30_000);
       await entered.promise;
       await starting;
       const stopping = plugin.stop();
@@ -159,6 +200,7 @@ describe("dreaming startup lifecycle", () => {
       const successor = await createStartedPlugin();
       try {
         await successor.start();
+        await vi.advanceTimersByTimeAsync(30_000);
         await successorFinished.promise;
         await successor.stop();
       } finally {

@@ -18,8 +18,13 @@ Disabled dreaming does not inspect heartbeat system-event queues.
 
 When the cron scheduler is disabled (`cron.enabled: false` or
 `OPENCLAW_SKIP_CRON=1`), dreaming defers automatic job creation and updates while
-preserving existing jobs. Startup cleanup of historical dreaming artifacts waits
-for each agent's pending database preparation before running, including managed
+preserving existing jobs. Historical dreaming cleanup starts 30 seconds after the
+Gateway start hook so it does not compete with startup recovery. A second pass
+still runs after five minutes to reclaim interrupted runs that were initially
+too recent. Both passes retain the startup cutoff and preserve newer sessions.
+A Gateway that stops before the first pass leaves those artifacts for the next
+long-enough run. Cleanup waits for each agent's pending database preparation,
+including managed
 background cleanup after a restart or upgrade. Database preparation failures are
 reported with repair guidance. If an agent database is still absent after preparation,
 cleanup completes without creating it; concurrent first creation is not a cleanup failure.
