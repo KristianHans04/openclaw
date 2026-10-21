@@ -1,6 +1,16 @@
 import { createErrorBoundary } from "@solidjs/signals";
 import { dynamic, type JSX as SolidJSX } from "@solidjs/web";
-import { createEffect, createMemo, createSignal, onCleanup, Show, Switch, Match } from "solid-js";
+import {
+  action,
+  createEffect,
+  createMemo,
+  createOptimistic,
+  createSignal,
+  onCleanup,
+  Show,
+  Switch,
+  Match,
+} from "solid-js";
 import {
   ensureCustomElementDefined,
   isOptionalElementDefined,
@@ -76,7 +86,7 @@ function BoardWidgetCellContent(
     actionBinding();
     return "";
   });
-  const [actionPending, setActionPending] = createSignal(false);
+  const [actionPending, setActionPending] = createOptimistic(false);
   const [widgetRoot, setWidgetRoot] = createSignal<HTMLElement>();
   let mcpElement: HTMLElementTagNameMap["mcp-app-view"] | undefined;
   // Signals commit later; admission must reject a second action in the same tick.
@@ -162,16 +172,19 @@ function BoardWidgetCellContent(
       : null,
   );
 
-  async function runAction(action: () => Promise<void>, failureMessage?: string) {
+  const performAction = action(function* (run: () => Promise<void>) {
+    setActionPending(true);
+    yield run();
+  });
+  async function runAction(run: () => Promise<void>, failureMessage?: string) {
     if (actionInFlight || props.busy) {
       return;
     }
     actionInFlight = true;
-    setActionPending(true);
     setActionError("");
     menu?.close();
     try {
-      await action();
+      await performAction(run);
     } catch (error) {
       if (connected) {
         setActionError(formatUiError(error));
@@ -181,9 +194,6 @@ function BoardWidgetCellContent(
       }
     } finally {
       actionInFlight = false;
-      if (connected) {
-        setActionPending(false);
-      }
     }
   }
   function selectMenuItem(value: string | undefined) {
