@@ -20,6 +20,7 @@ import {
   canReuseSqliteSchemaInTransaction,
   createSqliteTableContractReader,
   runSqliteImmediateTransactionSync,
+  tableExists,
   type SqliteTableContractReader,
 } from "./openclaw-runtime-sqlite.js";
 
@@ -211,13 +212,7 @@ function markInvalidMemoryEmbeddings(db: DatabaseSync, sql: string): void {
     `);
     // Standalone legacy schemas can predate the revision table. Admitted
     // databases invalidate retained corpus facts in this same transaction.
-    if (
-      db
-        .prepare(
-          "SELECT 1 FROM main.sqlite_schema WHERE type = 'table' AND name = 'memory_index_state'",
-        )
-        .get()
-    ) {
+    if (tableExists(db, "memory_index_state")) {
       db.exec("UPDATE main.memory_index_state SET revision = revision + 1 WHERE id = 1");
     }
   }
