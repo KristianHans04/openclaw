@@ -105,6 +105,7 @@ it.each(["session", "goal", "presentation"] as const)(
       flush();
       expect(save.disabled).toBe(false);
       save.click();
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
       flush();
       expect(onSubmit).toHaveBeenCalledExactlyOnceWith({
         action: "edit",
@@ -124,6 +125,7 @@ it.each(["session", "goal", "presentation"] as const)(
       expect(modal.querySelector('[role="alert"]')?.textContent).toBe(submissionError);
       expect(input.value).toBe(objective);
       expect(save.disabled).toBe(false);
+      expect(document.activeElement).toBe(input);
       setGoal({ ...goal, tokensUsed: 240 });
       flush();
       expect(document.body.contains(modal)).toBe(true);
