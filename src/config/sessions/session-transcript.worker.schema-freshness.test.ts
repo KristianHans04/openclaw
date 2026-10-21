@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import type { Transferable } from "node:worker_threads";
 import { constants as zlibConstants, inflateRawSync } from "node:zlib";
 import { expect, it, vi } from "vitest";
-import { observeSqliteReadSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
+import {
+  isSessionEntryDataSql,
+  observeSqliteReadSql,
+} from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import { prepareChatHistoryResponsePage } from "../../gateway/server-methods/chat-history-response-page.js";
 import type { SessionArtifactReadQuery } from "../../gateway/session-artifact-read.js";
 import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
@@ -269,12 +272,23 @@ it.for([
       vi.useFakeTimers({ toFake: ["setImmediate"] });
       let pending: Promise<unknown> | undefined;
       try {
-        await expect(
-          worker.read({ kind: "prewarm", database, env: state.env, history: false }),
-        ).resolves.toEqual({
-          ok: true,
-          value: { kind: "prewarm" },
-        });
+        {
+          const observation = observeSqliteReadSql(
+            nodeSqlite.requireNodeSqlite().StatementSync.prototype,
+          );
+          using reads = { ...observation, [Symbol.dispose]: observation.restore };
+          await expect(
+            worker.read({ kind: "prewarm", database, env: state.env, history: false }),
+          ).resolves.toEqual({
+            ok: true,
+            value: { kind: "prewarm" },
+          });
+          expect(
+            reads.queries.filter(
+              (query) => isSessionEntryDataSql(query) || /\bsession_pending_inputs\b/i.test(query),
+            ),
+          ).toEqual([]);
+        }
         expect(countOpens()).toBe(1);
         pending = worker.read(request);
         await expect(racePromiseWithAbortSignal(pending, signal)).resolves.toMatchObject(expected);

@@ -24,6 +24,8 @@ import {
 } from "./session-entry-read-maintenance.js";
 import { readSessionEntrySummariesInWorker } from "./session-entry-read-runtime.js";
 import { readSessionSendRecoveryPage } from "./session-pending-input-history.js";
+import { maintenanceLane } from "./session-transcript-worker-resources.js";
+import { prewarmSessionHistoryWorker } from "./session-transcript-worker-runtime.js";
 import type { InternalSessionEntry } from "./types.js";
 
 type InputScope = Parameters<typeof stageSessionPendingInput>[0];
@@ -128,7 +130,7 @@ test("selects recovery claims and main-session startup orphans", async ({ store:
   expect(await keys()).toHaveLength(Object.keys(entries).length);
 });
 
-test("pages exec owners without unrelated entries or saved prompts", async ({
+test("pages exec owners after prewarm without unrelated entries or saved prompts", async ({
   store: { database, store },
 }) => {
   const { env } = store;
@@ -165,6 +167,10 @@ test("pages exec owners without unrelated entries or saved prompts", async ({
     pendingExecNotifications: {},
   });
 
+  await prewarmSessionHistoryWorker(
+    { agentId: store.agentId, path: store.storePath, env },
+    maintenanceLane,
+  );
   const selected = [];
   for await (const item of iteratePendingExecNotificationEntriesInWorker(store)) {
     selected.push(item);
@@ -208,7 +214,7 @@ test("pages saved deliveries while preserving live custody", async ({
   expect(newer.items.slice(0, -1).every((item) => item.state === "interrupted")).toBe(true);
 });
 
-test("reconciles interrupted and crash-left chat inputs at startup", async ({
+test("preserves interrupted and crash-left chat inputs through startup prewarm", async ({
   store: { database, store },
 }) => {
   const scope = { ...store, sessionKey: "agent:main:chat-recovery", sessionId: "chat-recovery" };
@@ -229,6 +235,17 @@ test("reconciles interrupted and crash-left chat inputs at startup", async ({
     }
   }
   rotateAgentEventLifecycleGeneration();
+  await prewarmSessionHistoryWorker(
+    { agentId: store.agentId, path: store.storePath, env: store.env },
+    maintenanceLane,
+  );
+  expect(
+    database.db.prepare("SELECT run_id, state FROM session_pending_inputs ORDER BY seq").all(),
+  ).toEqual([
+    { run_id: "terminated", state: "interrupted" },
+    { run_id: "killed", state: "queued" },
+    { run_id: "legacy", state: "queued" },
+  ]);
   expect(
     (await readPendingInputRecoveryEntriesInWorker(store)).map((row) => row.sessionKey),
   ).toEqual([scope.sessionKey]);

@@ -157,7 +157,7 @@ serveOwnedWorkerTasks(
         };
       }
       if (request.kind === "prewarm") {
-        // Maintenance needs database admission, not a second resident chat presentation graph.
+        // Prepare maintenance reads without loading the foreground history entrypoints.
         if (request.history) {
           await Promise.all([
             import("../../gateway/session-history-worker-reader.js"),
@@ -165,6 +165,8 @@ serveOwnedWorkerTasks(
             import("../../gateway/server-methods/chat-history-response-page.js"),
             import("../../gateway/session-history-snapshot.js"),
           ]);
+        } else {
+          await import("./session-entry-list.worker.js");
         }
         const { withOpenClawAgentDatabaseReadOnly } =
           await import("../../state/openclaw-agent-db-readonly.js");
