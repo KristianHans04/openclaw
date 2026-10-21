@@ -217,7 +217,7 @@ describe.skipIf(!browserAvailable)("Claws discovery and Add", () => {
         expect(await card.textContent()).not.toContain("@openclaw/workflow-operator");
         expect(await page.locator("[data-claws-attention]").count()).toBe(0);
         if (capture) {
-          const toolbar = page.locator(".catalog-page-header.claws-catalog-header");
+          const toolbar = page.locator(".hub-page-header.claws-catalog-header");
           const frame = await takeControlUiScreenshotFrame(
             page,
             toolbar,

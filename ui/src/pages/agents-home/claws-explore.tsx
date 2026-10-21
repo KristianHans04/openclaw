@@ -1,5 +1,5 @@
 import { createStore, For, onCleanup, Show } from "solid-js";
-import { CatalogPageHeader } from "../../components/solid/catalog-page-header.tsx";
+import { HubPageHeader } from "../../components/solid/hub-page-header.tsx";
 import { Icon } from "../../components/solid/icon.tsx";
 import { SettingsPage } from "../../components/solid/settings-ui.tsx";
 import { registerClawsEnglish } from "../../i18n/locales/en-claws.ts";
@@ -175,10 +175,11 @@ export function ClawsExplore(props: { onSelect?: (entry: ClawCatalogEntry) => vo
   };
   return (
     <openclaw-claws-explore>
-      <CatalogPageHeader
-        class="claws-catalog-header"
-        title={t("tabs.claws")}
+      <HubPageHeader
+        active="claws"
         subtitle={t("clawsCatalog.exploreDescription")}
+        wide
+        class="claws-catalog-header"
         actions={
           <label class="agents-home__claw-search">
             <span aria-hidden="true">

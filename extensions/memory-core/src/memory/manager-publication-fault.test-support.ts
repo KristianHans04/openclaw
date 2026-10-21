@@ -24,31 +24,6 @@ export function bindSqliteWorkerBackend(
     | { kind: "cache-prune-result"; publication: MemoryPublicationConnection },
   context: Parameters<typeof bindBackend>[1],
 ) {
-  if (input.kind === "cache-clear-result" || input.kind === "cache-prune-result") {
-    const backend = bindBackend(input.publication, context);
-    const operation = input.kind === "cache-clear-result" ? "cache.clear" : "cache.prune";
-    return {
-      ...backend,
-      execute(command: Parameters<typeof backend.execute>[0]) {
-        const result = backend.execute(command);
-        if (
-          command.type === operation &&
-          result &&
-          typeof result === "object" &&
-          "ok" in result &&
-          result.ok &&
-          result.value === true
-        ) {
-          throw new Error(
-            input.kind === "cache-clear-result"
-              ? "injected committed cache clear reply failure"
-              : "injected committed cache prune reply failure",
-          );
-        }
-        return result;
-      },
-    };
-  }
   if (input.kind === "cache-capacity") {
     return bindBackend(input.publication, {
       ...context,
@@ -60,8 +35,31 @@ export function bindSqliteWorkerBackend(
       },
     });
   }
-  const backend = bindBackend(input, context);
+  const backend = bindBackend(input.kind === "publication" ? input : input.publication, context);
   const db = context.database;
+  const execute = (command: Parameters<typeof backend.execute>[0]) => {
+    const result = backend.execute(command);
+    if (result && typeof result === "object" && "ok" in result) {
+      if (input.kind === "publication" && input.throwResultFailure && !result.ok) {
+        throw new Error("injected result delivery failure");
+      }
+      const operation =
+        input.kind === "cache-clear-result"
+          ? "cache.clear"
+          : input.kind === "cache-prune-result"
+            ? "cache.prune"
+            : undefined;
+      if (command.type === operation && result.ok && result.value === true) {
+        throw new Error(
+          `injected committed cache ${operation === "cache.clear" ? "clear" : "prune"} reply failure`,
+        );
+      }
+    }
+    return result;
+  };
+  if (input.kind === "cache-clear-result" || input.kind === "cache-prune-result") {
+    return { ...backend, execute };
+  }
   const originalExec = db.exec.bind(db);
   const originalClose = db.close.bind(db);
   db.exec = (sql) => {
@@ -81,19 +79,7 @@ export function bindSqliteWorkerBackend(
   };
   return {
     ...backend,
-    execute(command: Parameters<typeof backend.execute>[0]) {
-      const result = backend.execute(command);
-      if (
-        input.throwResultFailure &&
-        result &&
-        typeof result === "object" &&
-        "ok" in result &&
-        !result.ok
-      ) {
-        throw new Error("injected result delivery failure");
-      }
-      return result;
-    },
+    execute,
     close() {
       db.exec = originalExec;
       db.close = originalClose;
