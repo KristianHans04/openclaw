@@ -425,14 +425,14 @@ describe("system-event routing", () => {
     const instanceId = `presence-device-${randomUUID()}`;
     const deviceId = `device-${randomUUID()}`;
     const explicitDeviceId = "explicit" in scenario ? `remote-${randomUUID()}` : undefined;
-    const request = eventRequest({ text: scenario.text, instanceId, deviceId: explicitDeviceId });
-    request.client = {
+    const request = createRequest({ text: scenario.text, instanceId, deviceId: explicitDeviceId });
+    request.options.client = {
       connect: {
         client: { id: scenario.clientId },
         ...("noDevice" in scenario ? {} : { device: { id: deviceId } }),
       },
     } as NonNullable<GatewayRequestHandlerOptions["client"]>;
-    await eventHandler(request);
+    await systemEvent(request.options);
 
     const entry = expectDefined(
       listSystemPresence().find((candidate) => candidate.instanceId === instanceId),
