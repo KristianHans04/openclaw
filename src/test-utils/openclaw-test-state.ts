@@ -7,6 +7,7 @@ import { resolveAuthProfileDatabasePath } from "../agents/auth-profiles/sqlite.j
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import * as configRuntime from "../config/runtime-snapshot.js";
 import { GATEWAY_STARTUP_MUTATED_ENV_KEYS } from "../gateway/test-helpers.env.js";
+import { withEngineStoreAdmission } from "../infra/database-engine/admission-scope.js";
 import { acquireStateDatabaseSchemaLease } from "../infra/gateway-state-owner.js";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
@@ -360,19 +361,21 @@ export async function createOpenClawTestState(
             async (_params, run) => run(),
           ),
         );
-        withEnv(env, () => {
-          const lease = acquireStateDatabaseSchemaLease(resolveOpenClawStateSqlitePath(env));
-          try {
-            lease.run(() =>
-              saveAuthProfileStore(store as AuthProfileStore, targetAgentDir, {
-                filterExternalAuthProfiles: false,
-                syncExternalCli: false,
-              }),
-            );
-          } finally {
-            lease.release();
-          }
-        });
+        withEnv(env, () =>
+          withEngineStoreAdmission(() => {
+            const lease = acquireStateDatabaseSchemaLease(resolveOpenClawStateSqlitePath(env));
+            try {
+              lease.run(() =>
+                saveAuthProfileStore(store as AuthProfileStore, targetAgentDir, {
+                  filterExternalAuthProfiles: false,
+                  syncExternalCli: false,
+                }),
+              );
+            } finally {
+              lease.release();
+            }
+          }),
+        );
         return resolveAuthProfileDatabasePath(targetAgentDir);
       },
       applyEnv: () => {
