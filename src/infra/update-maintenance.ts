@@ -14,6 +14,44 @@ export function formatUpdateCleanupCommand(directory: string): string {
     : `rm -rf -- ${quoteCliArg(directory)}`;
 }
 
+/** Disposable-copy cleanup must not replace the candidate's result or exception. */
+export async function warnOnUpdateCleanupFailure(params: {
+  directory: string;
+  root: string;
+  name: string;
+  cleanup: () => Promise<unknown>;
+  onWarning: (step: UpdateStepResult) => void | Promise<void>;
+}): Promise<void> {
+  const started = Date.now();
+  try {
+    await params.cleanup();
+  } catch (error) {
+    if (hasCommandProcessCleanupError(error)) {
+      throw error;
+    }
+    const reason = `${error instanceof Error ? error.name : typeof error}: ${formatErrorMessage(error)}`;
+    const message = `Skipped ${params.name} for ${params.directory}. ${reason}`;
+    try {
+      await params.onWarning({
+        name: params.name,
+        command: "",
+        cwd: params.root,
+        durationMs: Date.now() - started,
+        exitCode: 1,
+        stderrTail: reason,
+        advisory: { kind: "recoverable-maintenance", message },
+      });
+    } catch (reportingError) {
+      if (hasCommandProcessCleanupError(reportingError)) {
+        throw reportingError;
+      }
+      console.warn(
+        `[update] ${message}; warning reporting failed: ${formatErrorMessage(reportingError)}`,
+      );
+    }
+  }
+}
+
 /** Only disposable directories owned by this update, never recovery originals. */
 export async function cleanupUpdateTemporaryDirectory(params: {
   directory: string;

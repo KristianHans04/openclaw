@@ -10,6 +10,7 @@ import { readPackageManagerSpec } from "./package-json.js";
 import { DEV_BRANCH } from "./update-channels.js";
 import { resolveDevUpdateTargetRevision, type DevUpdateTarget } from "./update-dev-target.js";
 import { resolveGitUpdateTrackingRef, type GitFetchTarget } from "./update-git-metadata.js";
+import { warnOnUpdateCleanupFailure } from "./update-maintenance.js";
 import {
   parsePnpmPackageManagerVersion,
   resolveUpdateBuildManager,
@@ -609,7 +610,32 @@ export async function runGitCandidatePreflight(params: {
         });
   } finally {
     if (!cleanupUncertain) {
-      const cleanup = () => cleanupGitPreflight(params, worktreeDir, preflightRoot);
+      const cleanup = async () => {
+        let removed = false;
+        await warnOnUpdateCleanupFailure({
+          directory: preflightRoot,
+          root: params.gitRoot,
+          name: "preflight-cleanup",
+          cleanup: async () => {
+            removed = await cleanupGitPreflight(params, worktreeDir, preflightRoot);
+          },
+          onWarning: async (warning) => {
+            const recorded = params.steps.findLast((entry) => entry.name === warning.name);
+            if (recorded) {
+              recorded.advisory = warning.advisory;
+            } else {
+              params.steps.push(warning);
+            }
+            const options = params.step(warning.name, [], params.gitRoot);
+            await options.progress?.onStepComplete?.({
+              ...warning,
+              index: options.stepIndex,
+              total: options.totalSteps,
+            });
+          },
+        });
+        return removed;
+      };
       if (tested?.status !== "ok" || !params.retainCleanup?.(cleanup)) {
         await cleanup();
       }

@@ -19,7 +19,10 @@ import {
   readGitUpdateFetchTarget,
   type GitFetchTarget,
 } from "./update-git-metadata.js";
-import { cleanupUpdateTemporaryDirectory } from "./update-maintenance.js";
+import {
+  cleanupUpdateTemporaryDirectory,
+  warnOnUpdateCleanupFailure,
+} from "./update-maintenance.js";
 import { isFailedUpdateStep } from "./update-run-step.js";
 import { runStep } from "./update-runner-command.js";
 import { createGitStepFactory, gitCleanCheckArgs } from "./update-runner-git-commands.js";
@@ -268,10 +271,20 @@ export async function withGitTargetInspectionRoot<T>(
     if (!cleanupUncertain) {
       const cleanup = async () => {
         let removed = true;
-        await cleanupUpdateTemporaryDirectory({
+        await warnOnUpdateCleanupFailure({
           directory: temporaryRoot,
           root: params.root,
           name: "git-target-inspection-cleanup",
+          cleanup: () =>
+            cleanupUpdateTemporaryDirectory({
+              directory: temporaryRoot,
+              root: params.root,
+              name: "git-target-inspection-cleanup",
+              onWarning: (warning) => {
+                removed = false;
+                return params.onWarning(warning);
+              },
+            }),
           onWarning: (warning) => {
             removed = false;
             return params.onWarning(warning);

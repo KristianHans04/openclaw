@@ -109,6 +109,43 @@ describe("canary teardown evidence", () => {
     stubHealthyGateway();
   });
 
+  it("preserves a candidate failure when private-copy cleanup reporting throws", async () => {
+    const original = new TypeError("synthetic candidate receipt failure");
+    const steps: UpdateStepResult[] = [];
+    const retained = new Set<string>();
+    try {
+      await expect(
+        validateUpdateCandidateCanary({
+          ...canaryStateOptions(3_000),
+          onStep: (step) => {
+            steps.push(step);
+            if (step.name === "candidate-doctor") {
+              throw original;
+            }
+          },
+          onProgress: (step) => {
+            if (step.step === "candidate-state-cleanup") {
+              const directory = step.detail?.match(/Temporary-copy cleanup (.*); waiting/)?.[1];
+              if (directory) {
+                retained.add(directory);
+              }
+              throw new RangeError("synthetic cleanup progress failure");
+            }
+          },
+        }),
+      ).rejects.toBe(original);
+      const warning = steps.find((step) =>
+        step.advisory?.message.includes("synthetic cleanup progress failure"),
+      );
+      expect(warning?.advisory?.message).toContain("RangeError");
+      expect(warning?.advisory?.message).toContain([...retained][0]);
+    } finally {
+      for (const directory of retained) {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    }
+  });
+
   it.each(["initial-progress", "candidate-gateway-startup"])(
     "propagates a %s receipt refusal once, cleaning up only admitted work",
     async (stepName) => {
