@@ -3521,6 +3521,24 @@ export const en: TranslationMap & {
       unavailable: "This discussion cannot be embedded.",
     },
     workspaceFiles: {
+      attachments: "Attachments",
+      attachmentsLoading: "Loading transcript attachments…",
+      attachmentsUnknown: "Transcript attachment coverage is not yet known.",
+      attachmentsPartial:
+        "Showing attachments available in the loaded transcript. Earlier or omitted content may contain more.",
+      mobile: {
+        searchFolder: "Search in {folder}",
+        empty: "No files match this view.",
+        unavailable: "Workspace files are unavailable.",
+        disconnected: "Gateway is disconnected.",
+      },
+      desktop: {
+        sessionFiles: "Session files",
+        project: "Project",
+        closeSearch: "Close file search",
+        filePath: "File path",
+        hiddenFolders: "Show hidden folders",
+      },
       label: "Session workspace",
       collapse: "Collapse session workspace",
       showFiles: "Show session files",

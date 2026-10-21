@@ -21,8 +21,8 @@ import type { ChatPageHost } from "./chat-state-host.ts";
 import type { ChatProps } from "./chat-view-frame.ts";
 import type { ChatModelControlsProps } from "./components/chat-model-controls.tsx";
 import type { SessionWorkspaceState } from "./components/chat-session-workspace-types.ts";
-import type { SessionWorkspaceProps } from "./components/chat-session-workspace.ts";
 import type { SidebarSelection } from "./components/chat-sidebar-content-types.ts";
+import type { SessionWorkspaceProps } from "./components/chat-sidebar-view-types.ts";
 import type { SessionDiscussionPanelConfig } from "./components/session-discussion-panel.tsx";
 import type { SidebarSlotId } from "./sidebar-layout-types.ts";
 
@@ -30,6 +30,7 @@ export type ChatDetailSlotProps = {
   chat: ChatProps;
   content: SidebarSelection;
   host: ChatPageHost;
+  onWorkspaceIntent?: () => void;
 };
 
 export type SidebarPanelDefinitionParams = {
@@ -71,6 +72,7 @@ export type SidebarPanelDefinitionParams = {
   ) => void;
   dashboard: Parameters<typeof ChatBoardPanel>[0] | null;
   workspace: SessionWorkspaceProps | undefined;
+  workspacePresented?: PresentationValue;
   detail: Omit<ChatDetailSlotProps, "content">;
   digest: SessionObserverDigest | null;
   activeRunId: string | null;
