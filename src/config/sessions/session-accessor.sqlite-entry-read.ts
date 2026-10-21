@@ -126,7 +126,7 @@ export function prepareSqliteSessionEntryRowDecoder(
   projectParticipants = true,
   onParticipantProjectionError?: (sessionKey: string) => void,
 ): (row: ReadableSessionEntryRow) => SessionEntry | null {
-  const project =
+  const project: ReturnType<typeof prepareSqliteSessionParticipantProjection> =
     projection === "delivery" || !projectParticipants
       ? (_key: string, entry: SessionEntry) => entry
       : prepareSqliteSessionParticipantProjection(
