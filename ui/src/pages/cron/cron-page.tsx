@@ -1,5 +1,6 @@
 import { createEffect, createMemo } from "solid-js";
 import { pathForRoute } from "../../app-route-paths.ts";
+import type { SolidRouteProps } from "../../app-route-types.ts";
 import { AgentScopeControl } from "../../components/agent-scope-control.tsx";
 import { HubPageHeader } from "../../components/solid/hub-page-header.tsx";
 import { SettingsWorkspace } from "../../components/solid/settings-workspace.tsx";
@@ -10,6 +11,12 @@ import { createCronPage } from "./cron-page-state.ts";
 import { CronRunTranscriptView } from "./run-transcript.tsx";
 import { buildCronViewProps } from "./view-props.ts";
 import { CronView } from "./view.tsx";
+
+export const header = true;
+
+export function renderSolid(props: SolidRouteProps) {
+  return <CronPage routeSearch={typeof props.data === "string" ? props.data : ""} />;
+}
 
 export function CronPageContent(props: { page: ReturnType<typeof createCronPage> }) {
   const revision = () => i18nRevision() + props.page.revision();
