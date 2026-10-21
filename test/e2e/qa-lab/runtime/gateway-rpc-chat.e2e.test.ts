@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, describe, expect, it, onTestFailed, vi } from "vitest";
 import { z } from "zod";
@@ -539,29 +537,8 @@ describe("Gateway chat RPCs", () => {
           (otherHistory.messages ?? []).some((message) => messageContains(message, reply)),
         ).toBe(false);
       }
-      const database = new DatabaseSync(
-        path.join(gateway.tempRoot, "state", "state", "openclaw.sqlite"),
-        { readOnly: true },
-      );
-      try {
-        const placements = database.prepare(
-          "SELECT agent_id, session_key, session_id, state, turn_claim_id FROM worker_session_placements WHERE agent_id IN (?, ?) ORDER BY agent_id",
-        );
-        // The terminal event can precede the placement owner's final claim release.
-        await expect
-          .poll(() => placements.all(first, second))
-          .toEqual(
-            [first, second].toSorted().map((agentId) => ({
-              agent_id: agentId,
-              session_key: sessionKey,
-              session_id: expectDefined(sessionIds.get(agentId), "owner session id"),
-              state: "local",
-              turn_claim_id: null,
-            })),
-          );
-      } finally {
-        database.close();
-      }
+      // Plain-local placements and turn claims stay in the Gateway placement owner, not SQL.
+      expect([...sessionIds.keys()].toSorted()).toEqual([first, second].toSorted());
     },
   );
 
