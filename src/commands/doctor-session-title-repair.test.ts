@@ -1,4 +1,6 @@
+import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { buildSubagentTaskMessage } from "../agents/subagents/spawn/subagent-system-prompt.js";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import * as sessionAccessor from "../config/sessions/session-accessor.js";
 import type { SessionEntry } from "../config/sessions/types.js";
@@ -55,6 +57,78 @@ function repair() {
     postSessionPluginMigrationPlanBound: true,
   });
 }
+
+it("preserves native child names while repairing ordinary sessions in the same scan", async () => {
+  await withSession(
+    async (params) => {
+      const task = "Investigate the gateway timeout";
+      const fixtures: Array<{
+        sessionKey: string;
+        message: string;
+        entry?: Partial<SessionEntry>;
+        displayName?: string;
+      }> = [
+        ...(["run", "session"] as const).flatMap((spawnMode) => {
+          const historical = `[Subagent Context] You are running as a subagent.\n\n[Subagent Task]\n\n${task}`;
+          const current = buildSubagentTaskMessage({
+            task,
+            spawnMode,
+            childDepth: 1,
+            maxSpawnDepth: 5,
+          });
+          return [historical, current].map((message, index) => ({
+            sessionKey: `agent:main:subagent:${spawnMode}-${index}:thread:child`,
+            message,
+          }));
+        }),
+        {
+          sessionKey: "agent:main:subagent:named",
+          message: task,
+          entry: { label: "Explicit child label" },
+          displayName: undefined,
+        },
+        {
+          sessionKey: "agent:main:dashboard:child",
+          message: task,
+          entry: {},
+          displayName: task,
+        },
+      ];
+      const expected = new Map<string, SessionEntry>();
+      for (const [index, fixture] of fixtures.entries()) {
+        const scope = { ...params, sessionKey: fixture.sessionKey, sessionId: `child-${index}` };
+        await sessionAccessor.persistSessionTranscriptTurn(scope, {
+          messages: [{ message: user(fixture.message) }],
+          touchSessionEntry: false,
+        });
+        await sessionAccessor.replaceSessionEntry(scope, {
+          sessionId: scope.sessionId,
+          lifecycleRevision: `child-lifecycle-${index}`,
+          status: "done",
+          updatedAt: Date.now(),
+          lastActivityAt: 11,
+          lastInteractionAt: 10,
+          ...fixture.entry,
+        });
+        const before = expectDefined(sessionAccessor.loadSessionEntry(scope), fixture.sessionKey);
+        expected.set(fixture.sessionKey, {
+          ...before,
+          ...(fixture.displayName ? { displayName: fixture.displayName } : {}),
+        });
+      }
+      await repair();
+      for (const [sessionKey, entry] of expected) {
+        expect
+          .soft(sessionAccessor.loadSessionEntry({ ...params, sessionKey }), sessionKey)
+          .toEqual(entry);
+      }
+      expect(sessionAccessor.loadSessionEntry(params)?.displayName).toBe(
+        "[Subagent Context] Explain this phrase",
+      );
+    },
+    [user("[Subagent Context] Explain this phrase")],
+  );
+});
 
 const relay = { ...user("Internal relay"), provenance: { kind: "inter_session" } };
 const later = user("A later task must not become the title");
