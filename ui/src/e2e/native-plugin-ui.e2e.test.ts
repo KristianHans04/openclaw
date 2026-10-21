@@ -385,6 +385,7 @@ suite.define(() => {
       const pluginPage = page.locator("openclaw-plugin-page");
 
       try {
+        await page.clock.install();
         await page.goto(pluginUrl(), {
           waitUntil: "domcontentloaded",
         });
@@ -435,8 +436,15 @@ suite.define(() => {
         await button(page, "Call current activation").click();
         await gateway.waitForRequest("fixture.current");
         await outcome(page).toBe("completed");
+        await page.clock.fastForward(15_000);
         const activation = await gateway.waitForRequest("plugins.controlUi.report");
-        expect(activation.params).toMatchObject({ reports: [{ pluginId, status: "activated" }] });
+        expect(activation.params).toMatchObject({
+          reports: expect.arrayContaining([
+            expect.objectContaining({ pluginId, status: "activated" }),
+            expect.objectContaining({ pluginId: "hung-ui", status: "failed" }),
+          ]),
+        });
+        expect(await gateway.getRequests("plugins.controlUi.report")).toHaveLength(1);
         await capture(page, "startup-ready.png");
       } finally {
         bootstrapGate.resolve();
@@ -770,7 +778,7 @@ suite.define(() => {
     });
   });
 
-  it("activates healthy peers while a hung initializer times out and releases the reload control", async () => {
+  it("times out a hung initializer and releases the reload control", async () => {
     await withPluginPage(async ({ page }) => {
       const gateway = await mockPlugin(page, "one", {
         featureMethods: ["plugins.controlUi.reload"],
@@ -790,9 +798,7 @@ suite.define(() => {
       const reload = button(page, "Reload plugin UI");
       await reload.click();
       await gateway.waitForRequest("fixture.peerStarted");
-      await returnFromCustomizeUi(page);
-      await heading(page, "two").waitFor();
-      await visitCustomizeUi(page);
+      // Keep the manager mounted: it owns the reload button's pending state.
       expect(await reload.isDisabled()).toBe(true);
       await waitForPendingPluginInitializer(page);
       await page.clock.fastForward(15_000);

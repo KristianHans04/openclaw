@@ -44,6 +44,8 @@ import {
 } from "./server-http.test-harness.js";
 import { pluginsControlUiHandlers } from "./server-methods/plugins-control-ui.js";
 import type { GatewayRequestHandlerOptions, RespondFn } from "./server-methods/types.js";
+import { createGatewayRequestContext } from "./server-request-context.js";
+import { makeContextParams } from "./server-request-context.test-support.js";
 import { resolveSharedGatewaySessionGeneration } from "./server/ws-shared-generation.js";
 import { makeMockHttpResponse } from "./test-http-response.js";
 import { withTempConfig } from "./test-temp-config.js";
@@ -229,10 +231,9 @@ it("records valid receipts in a mixed batch only from a live Control UI connecti
     },
   };
   let connected = false;
-  const context = {
-    getClientConnIds: (filter?: (candidate: typeof client) => boolean) =>
-      new Set(connected && (!filter || filter(client)) ? [client.connId!] : []),
-  } as GatewayRequestHandlerOptions["context"];
+  const context = createGatewayRequestContext(makeContextParams());
+  context.getClientConnIds = (filter) =>
+    new Set(connected && (!filter || filter(client)) ? [client.connId!] : []);
   const call = async (method: string, params: Record<string, unknown>) => {
     const respond = vi.fn<RespondFn>();
     await pluginsControlUiHandlers[method]!({
