@@ -16,7 +16,7 @@ function listing<T>(sessionKey: string, folder: string, entries: T[], parentPath
 
 suite.define(() => {
   it.each([false, true])(
-    "keeps parent navigation usable after a directory refresh (missing: %s)",
+    "keeps sibling folders usable after a directory refresh (missing: %s)",
     async (missing) => {
       await suite.withPage({}, async ({ page }) => {
         const baseListing = { sessionKey: "main", root: "/workspace", files: [] };
@@ -36,28 +36,19 @@ suite.define(() => {
         });
         await page.goto(`${suite.server.baseUrl}chat`);
         await openChatSidePanelType(page, "Files");
-        const rail = page.locator(".chat-workspace-rail");
+        const rail = page.locator(".workspace-desktop");
         const file = (name: string) => rail.getByRole("button", { name, exact: true });
-        await file("reports").waitFor();
+        await rail.getByRole("button", { name: "reports", exact: true }).waitFor();
         await gateway.setMethodResponse(listMethod, directoryListing("reports", "notes.md"));
-        await file("reports").click();
-        const originalFile = file("reports/notes.md");
+        await rail.getByRole("button", { name: "reports", exact: true }).click();
+        const originalFile = rail.getByRole("button", {
+          name: "reports/notes.md",
+          exact: true,
+        });
         await originalFile.waitFor();
 
         // A removed or renamed directory returns a successful listing without browser.
-        await gateway.setMethodResponse(
-          listMethod,
-          missing ? baseListing : directoryListing("reports", "refreshed.md"),
-        );
-        await gateway.emitChatFinal({ runId: "folder-change", text: "Workspace updated." });
-        await originalFile.waitFor({ state: "hidden" });
-        if (!missing) {
-          await file("reports/refreshed.md").waitFor();
-        }
-        const parent = file("..");
-        await expect.poll(() => parent.isVisible()).toBe(true);
-
-        await gateway.setMethodResponse(listMethod, {
+        const refreshedRoot = {
           ...rootListing,
           browser: {
             ...rootListing.browser,
@@ -65,8 +56,21 @@ suite.define(() => {
               (entry) => !missing || entry.path !== "reports",
             ),
           },
+        };
+        await gateway.setMethodResponse(listMethod, {
+          cases: [
+            { match: { path: "" }, response: refreshedRoot },
+            {
+              match: { path: "reports" },
+              response: missing ? baseListing : directoryListing("reports", "refreshed.md"),
+            },
+          ],
         });
-        await parent.click();
+        await gateway.emitChatFinal({ runId: "folder-change", text: "Workspace updated." });
+        await originalFile.waitFor({ state: "hidden" });
+        if (!missing) {
+          await file("reports/refreshed.md").waitFor();
+        }
         await file("other").waitFor();
         await gateway.setMethodResponse(listMethod, directoryListing("other", "keep.md"));
         await file("other").click();
@@ -109,49 +113,47 @@ suite.define(() => {
       });
       await page.goto(`${suite.server.baseUrl}chat`);
       await openChatSidePanelType(page, "Files");
-      const rail = page.locator(".chat-workspace-rail");
+      const rail = page.locator(".workspace-desktop");
       await rail.getByRole("button", { name: "reports", exact: true }).waitFor();
-      const rootRequest = {
-        sessionKey: "agent:main:main",
-        agentId: "main",
-        path: "",
-        search: "",
-      };
-      const beforeRefresh = (await gateway.getRequests(listMethod, rootRequest)).length;
-      await gateway.deferNext(listMethod);
+      await gateway.deferNext(listMethod, { path: "" });
       await gateway.emitChatFinal({ runId: "directory-refresh", text: "Report is ready." });
-      await gateway.waitForRequest(listMethod, {
-        after: beforeRefresh,
-        match: rootRequest,
-      });
+      await expect.poll(async () => (await gateway.getRequests(listMethod)).length).toBe(2);
       await page.locator('a.markdown-file-link[data-file-path="reports/inventory.csv"]').click();
       await expect
         .poll(() => page.locator(".chat-files-panel__page:not([hidden]) .cm-content").textContent())
         .toContain("notebooks");
-      await page
-        .locator('[data-region-header="side"]')
-        .getByRole("button", { name: "Files", exact: true })
-        .click();
-      const directoryRequest = { ...rootRequest, path: "reports" };
-      const beforeBrowse = (await gateway.getRequests("sessions.files.list", directoryRequest))
-        .length;
+      const fileTab = page.getByRole("tab", { name: "inventory.csv", exact: true });
+      expect(await fileTab.getAttribute("aria-selected")).toBe("true");
       await rail.getByRole("button", { name: "reports", exact: true }).click();
-      await gateway.resolveDeferred(listMethod, rootListing);
-      await gateway.waitForRequest(listMethod, {
-        after: beforeBrowse,
-        match: directoryRequest,
-      });
-      const row = rail.locator(".chat-workspace-rail__file").filter({ hasText: "inventory.csv" });
+      await gateway.resolveDeferred(
+        listMethod,
+        {
+          ...rootListing,
+          browser: {
+            ...rootListing.browser,
+            entries: [
+              ...rootListing.browser.entries,
+              { kind: "directory", name: "refreshed-root", path: "refreshed-root" },
+            ],
+          },
+        },
+        { match: { path: "" } },
+      );
+      // This new root entry proves the held response committed before selection is checked.
+      await rail.getByRole("button", { name: "refreshed-root", exact: true }).waitFor();
+      const row = rail.getByRole("button", { name: "reports/inventory.csv", exact: true });
       await row.waitFor();
-      const fileRequests = await gateway.getRequests("sessions.files.get");
-      expect(fileRequests).toHaveLength(1);
-      expect(fileRequests[0]?.params).toMatchObject({
-        sessionKey: "agent:main:main",
-        agentId: "main",
-        path: "reports/inventory.csv",
-      });
       await page.mouse.click(600, 300);
-      expect(await row.getAttribute("class")).toContain("chat-workspace-rail__file--active");
+      expect(await row.getAttribute("aria-current")).toBe("true");
+      expect(await fileTab.getAttribute("aria-selected")).toBe("true");
+      expect(
+        await page.locator(".chat-files-panel__page:not([hidden]) .cm-content").textContent(),
+      ).toContain("notebooks");
+      expect(await gateway.getRequests("sessions.files.get")).toHaveLength(1);
+      const requests = await gateway.getRequests(listMethod);
+      expect(requests.map((request) => request.params)).toEqual(
+        ["", "", "reports"].map((folderPath) => expect.objectContaining({ path: folderPath })),
+      );
     });
   });
 });
