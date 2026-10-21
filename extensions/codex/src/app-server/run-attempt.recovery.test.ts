@@ -1,3 +1,4 @@
+import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import path from "node:path";
 import * as toolRuntime from "openclaw/plugin-sdk/agent-harness-tool-runtime";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
@@ -18,6 +19,7 @@ import {
   createCodexManagedThreadStore,
   type StoredCodexManagedThread,
 } from "./managed-thread-store.js";
+import { codexNativeSubagentMonitorRuntime } from "./native-subagent-monitor.js";
 import { isJsonObject, type CodexThreadItem, type CodexTurn, type RpcMessage } from "./protocol.js";
 import {
   createRuntimeDynamicTool,
@@ -625,6 +627,35 @@ describe("Codex active remote turn recovery", () => {
       release.resolve();
       vi.useRealTimers();
     }
+  });
+
+  it("re-registers recovery under the active attempt when an older transport closes", async () => {
+    const context = new AsyncLocalStorage<string>();
+    const transport = context.run("ended", () => new AsyncResource("previous-turn-transport"));
+    onTestFinished(() => {
+      transport.emitDestroy();
+      context.disable();
+    });
+    const contexts: Array<string | undefined> = [];
+    const register = codexNativeSubagentMonitorRuntime.register;
+    vi.spyOn(codexNativeSubagentMonitorRuntime, "register").mockImplementation((...args) => {
+      contexts.push(context.getStore());
+      return register(...args);
+    });
+    const fixture = context.run("current", () => installRemoteTurn());
+    await reachTool(fixture);
+    transport.runInAsyncScope(fixture.disconnect);
+    await reachRecovery(fixture);
+    fixture.finish.resolve();
+    await waitForCheckpoint(fixture, fixture.resultAccepted.promise, "replayed result acceptance");
+    expect(readAttemptTerminal(await fixture.run)).toMatchObject({
+      aborted: false,
+      timedOut: false,
+    });
+    expect(contexts).toEqual(["current", "current"]);
+    expect(fixture.execute).toHaveBeenCalledOnce();
+    expect(fixture.counts()).toEqual({ starts: 1, threadStarts: 1 });
+    expect(fixture.methods()).not.toContain("turn/interrupt");
   });
 
   it("rejoins its original turn without repeating the tool effect, then accepts a new request", async () => {

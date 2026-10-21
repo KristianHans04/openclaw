@@ -73,6 +73,15 @@ attachment policy and context limits. The Codex plugin owns that native input
 path: update its artifact alongside the Gateway. An intentionally pinned older
 plugin does not acquire the fix from a core-only update.
 
+If only the remote Codex connection drops, the running Gateway can rejoin the
+original native turn while its ownership remains valid. Recovery uses the current
+request's authority, and replayed tool callbacks join its existing execution.
+They do not start the tool effect again.
+
+A recovery-check notice after a Gateway process restart does not confirm that
+the original task has resumed. An unknown tool outcome still blocks automatic
+replay; restarting the connection or upgrading Codex does not establish that outcome.
+
 A detached harness completion that has entered a parent turn with an outbound
 channel route can retain an exact source completion, terminal outcome, and requester-session claim. After a crash, main-session recovery
 continues that admitted turn without starting the child again. The original

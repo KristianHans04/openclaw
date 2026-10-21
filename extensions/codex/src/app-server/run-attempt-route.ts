@@ -1,3 +1,4 @@
+import { AsyncResource } from "node:async_hooks";
 import { embeddedAgentLog, formatErrorMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { CodexAttemptNotificationController } from "./run-attempt-notification-controller.js";
 import { recoverCodexAttemptConnection } from "./run-attempt-recovery.js";
@@ -26,7 +27,8 @@ export async function prepareCodexAttemptRoute(
   const { state, turnIdRef, completeTurn } = turnRuntime;
   const { noteNotificationReceived, enqueueNotification } = notifications;
   const attachRouteAbort = (route: CodexThreadRouteReservation) => {
-    const onAbort = () => {
+    // The shared socket can have been created by an already completed attempt.
+    const onAbort = AsyncResource.bind(() => {
       if (
         state.completed ||
         state.terminalTurnNotificationQueued ||
@@ -111,7 +113,7 @@ export async function prepareCodexAttemptRoute(
         resourceState.remoteRecoveryFailed = true;
       }
       fail();
-    };
+    });
     route.signal.addEventListener("abort", onAbort, { once: true });
     if (route.signal.aborted) {
       onAbort();
