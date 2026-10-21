@@ -318,21 +318,29 @@ describe("sessions_send communication boundary", () => {
     await denied(operation(undefined, target), "disabled");
   });
   it.each([
-    ["main", "subagent:child"],
-    ["worker", "subagent:child"],
-    ["main", "cron:dispatch:run:child"],
-  ])(
-    "keeps expired cron parents reachable until their %s/%s child is archived",
-    async (childAgentId, childName) => {
-      const parent = endpoint("cron:dispatch:run:old", {
-        updatedAt: Date.now() - 8 * 24 * 60 * 60_000,
-      });
+    ["main", "subagent:child", false],
+    ["worker", "subagent:child", false],
+    ["main", "cron:dispatch:run:child", false],
+    ["worker", "subagent:child", true],
+  ] as const)(
+    "keeps expired cron parents reachable until their %s/%s child is archived (archived intermediary=%s)",
+    async (childAgentId, childName, archivedIntermediary) => {
+      const expiredAt = Date.now() - 8 * 24 * 60 * 60_000;
+      const parent = endpoint("cron:dispatch:run:old", { updatedAt: expiredAt });
       parent.storePath = path.join(tempDirs.make(), "sessions.sqlite");
+      const ancestor = archivedIntermediary
+        ? endpoint("subagent:archived", {
+            spawnedBy: parent.sessionKey,
+            parentSessionId: parent.entry!.sessionId,
+            archivedAt: Date.now(),
+          })
+        : parent;
+      ancestor.storePath = parent.storePath;
       const target = {
         ...endpoint(childName, {
           updatedAt: Date.now(),
-          spawnedBy: parent.sessionKey,
-          parentSessionId: parent.entry!.sessionId,
+          spawnedBy: ancestor.sessionKey,
+          parentSessionId: ancestor.entry!.sessionId,
         }),
         agentId: childAgentId,
         sessionKey: `agent:${childAgentId}:${childName}`,
@@ -344,6 +352,10 @@ describe("sessions_send communication boundary", () => {
       state.rows.set(target.sessionKey, target);
       state.config = { tools: { agentToAgent: { enabled: true, allow: ["*"] } } };
       await replaceSessionEntry(parent, parent.entry!);
+      expect(loadSessionEntry(parent)?.updatedAt).toBe(expiredAt);
+      if (archivedIntermediary) {
+        await replaceSessionEntry(ancestor, ancestor.entry!);
+      }
       await replaceSessionEntry(target, target.entry!);
       const maintain = (apply: boolean) =>
         runSessionRegistryMaintenanceForStore({

@@ -51,7 +51,7 @@ type SessionRegistryMaintenanceSummary = {
   skippedStores: number;
   stores: SessionRegistryMaintenanceStoreSummary[];
   nextSweepAtMs: number | null;
-  /** Set when the sweep did not run; pruning without cron facts would archive live transcripts. */
+  /** Set when missing cron or child inventory facts prevent safe pruning. */
   skippedReason?: string;
 };
 
@@ -182,6 +182,26 @@ export async function runSessionRegistryMaintenance(params: {
           continue;
         }
         eligibleTargets.push(target);
+      }
+      if (
+        stores.some(
+          (store) =>
+            "skippedReason" in store &&
+            store.skippedReason !== "agent-deletion-pending" &&
+            store.skippedReason !== "agent-deletion-complete" &&
+            !deletedAgents.has(store.agentId),
+        )
+      ) {
+        // Unavailable stores can still own live children of otherwise eligible parents.
+        return {
+          retentionMs: SESSION_REGISTRY_RETENTION_MS,
+          runningCronJobs: runningCronJobs.count,
+          pruned: 0,
+          skippedStores: stores.length,
+          stores,
+          nextSweepAtMs: Date.now() + 60_000,
+          skippedReason: "session child inventory incomplete",
+        };
       }
       for (const target of eligibleTargets) {
         assertCurrent();

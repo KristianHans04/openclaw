@@ -7,6 +7,7 @@ import {
 import {
   applySessionEntryLifecycleMutation,
   type SessionEntryLifecycleRemoval,
+  type SessionEntrySummary,
 } from "./session-accessor.js";
 import { listSessionChildEntriesReadOnly } from "./session-entry-children-read.js";
 import { withSessionRegistryEntriesInWorker } from "./session-entry-read-maintenance.js";
@@ -71,26 +72,44 @@ export async function runSessionRegistryMaintenanceForStore(
           entries.map(({ sessionKey, entry }) => [sessionKey, entry]),
         );
         const revision = rowRevision;
-        // Child lookup excludes its parent keys, so retain links within this candidate page too.
-        const preserveKeys = new Set(
-          entries.flatMap(({ entry }) =>
-            entry.spawnedBy && entry.archivedAt === undefined ? [entry.spawnedBy] : [],
-          ),
-        );
+        const preserveKeys = new Set<string>();
         const parentSessionKeys = Object.keys(store);
-        for (const target of params.childStores ?? [{ agentId, storePath }]) {
-          if (parentSessionKeys.length === 0) {
-            break;
-          }
-          const children = await listSessionChildEntriesReadOnly(
-            { ...target, sessionKey: "", projection: "list" },
-            parentSessionKeys,
-          );
-          assertCurrent();
-          for (const { entry } of children) {
-            if (entry.spawnedBy && entry.archivedAt === undefined) {
-              preserveKeys.add(entry.spawnedBy);
+        const pending = [...parentSessionKeys];
+        const seen = new Set(pending);
+        const parents = new Map<string, string>();
+        const recordChildren = (children: SessionEntrySummary[]) => {
+          for (const { sessionKey, entry } of children) {
+            if (!entry.spawnedBy) {
+              continue;
             }
+            parents.set(sessionKey, entry.spawnedBy);
+            if (entry.archivedAt === undefined) {
+              preserveKeys.add(entry.spawnedBy);
+            } else if (!seen.has(sessionKey)) {
+              seen.add(sessionKey);
+              pending.push(sessionKey);
+            }
+          }
+        };
+        // Child lookup excludes its parent keys; seed links within the candidate page too.
+        recordChildren(entries);
+        for (let offset = 0; offset < pending.length;) {
+          const keys = pending.slice(offset, offset + 32);
+          offset += keys.length;
+          for (const target of params.childStores ?? [{ agentId, storePath }]) {
+            const children = await listSessionChildEntriesReadOnly(
+              { ...target, sessionKey: "", projection: "list" },
+              keys,
+            );
+            assertCurrent();
+            recordChildren(children.filter(({ entry }) => keys.includes(entry.spawnedBy ?? "")));
+          }
+        }
+        // Admission follows archived intermediates, so keep every ancestor of a live descendant.
+        for (const key of preserveKeys) {
+          const parent = parents.get(key);
+          if (parent) {
+            preserveKeys.add(parent);
           }
         }
         const removals: SessionEntryLifecycleRemoval[] = [];
