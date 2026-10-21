@@ -72,6 +72,18 @@ in diagnostic traces distinguish transcript, sidebar, and composer cache
 completions; a completion callback can include later render microtasks and is
 not a measurement of native IndexedDB cost alone.
 
+For dashboard-first reloads, use `--dashboard-mcp-app --chat-dashboard-route` to
+load the sandboxed synthetic MCP app with its own web font in the main pane and
+reload its literal `/chat/main/dashboard/<uuid>` URL. The separate
+`--dashboard-widget` mode uses a board HTML document; do not combine these two
+fixture modes. `--full-uuid-route` selects an off-roster short-reference UUID
+link instead. Compare against `--face chat` separately to distinguish the route
+from the saved pane layout.
+`--connect-not-before-ms 350 --method-latency-ms connect=240` exercises a connect
+request dispatched after 350 ms with a 240 ms response delay. Report
+`dashboardStages.helloHandledMs` alongside FCP and transcript paint: moving a
+mount earlier can delay the handshake even when the first content appears sooner.
+
 `--live-events` adds 125 synthetic live frames over 20 seconds after each reload
 settles. The stream mixes full presence snapshots, session patches for displayed,
 held-but-hidden, and outside-window rows, open-session messages and assistant
