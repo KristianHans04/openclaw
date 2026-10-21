@@ -356,6 +356,117 @@ describe("typed Git read ownership", () => {
     expect(gitRead).toHaveBeenCalledTimes(9);
   });
 
+  it("polls one cold checkout without waiting for revision work or losing unversioned results", async () => {
+    vi.useFakeTimers();
+    const revision = createDeferredCore<string | null>();
+    readRevision.mockReturnValue(revision.promise);
+    gitRead.mockResolvedValue({ ...emptyDiff, additions: 7 });
+    const input = { cwd: "/poll-cold-checkout", sessionId: "first" };
+    const poll = (sessionId = input.sessionId) =>
+      runGitReadOperation(
+        { type: "checkout.diff", input: { ...input, sessionId } },
+        { poll: true },
+      );
+    const responses: unknown[] = [];
+    const requests = [poll(), poll(), poll("second")];
+    for (const request of requests) {
+      void request.then((result) => responses.push(result));
+    }
+    try {
+      await vi.advanceTimersByTimeAsync(200);
+      expect(responses).toEqual(
+        Array.from({ length: 3 }, () => ({ ...emptyDiff, computing: true })),
+      );
+      expect(readRevision).toHaveBeenCalledOnce();
+      expect(gitRead).not.toHaveBeenCalled();
+      revision.resolve(null);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(gitRead).toHaveBeenCalledTimes(2);
+      await runGitReadOperation({ type: "checkout.diff", input });
+      expect(gitRead).toHaveBeenCalledTimes(3);
+      await expect(poll()).resolves.toMatchObject({ additions: 7 });
+      await vi.advanceTimersByTimeAsync(500);
+      await expect(poll()).resolves.toMatchObject({ additions: 7 });
+      await expect(poll("second")).resolves.toMatchObject({ additions: 7 });
+      expect(gitRead).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(501);
+      await expect(poll()).resolves.toMatchObject({ additions: 7 });
+      expect(gitRead).toHaveBeenCalledTimes(4);
+    } finally {
+      revision.resolve(null);
+      await Promise.allSettled(requests);
+    }
+  });
+
+  it("bounds pending poll work, fans out its errors, and retires it with the Gateway", async () => {
+    vi.useFakeTimers();
+    await drainGlobalSingletonLifecycleState("restart");
+    readRevision.mockResolvedValue(null);
+    const held = createDeferredCore<GitReadOperations["checkout.diff"]["output"]>();
+    const retiringRevision = createDeferredCore<string | null>();
+    gitRead.mockReturnValue(held.promise);
+    const poll = (index: number) =>
+      runGitReadOperation(
+        { type: "checkout.diff", input: { cwd: `/poll-capacity-${index}` } },
+        { poll: true },
+      );
+    const responses: unknown[] = [];
+    const requests = Array.from({ length: 33 }, (_, index) => poll(index));
+    for (const request of requests) {
+      void request.then((result) => responses.push(result));
+    }
+    try {
+      await vi.advanceTimersByTimeAsync(200);
+      expect(responses).toEqual(
+        Array.from({ length: 33 }, () => ({ ...emptyDiff, computing: true })),
+      );
+      expect(gitRead).toHaveBeenCalledTimes(32);
+      held.reject(new Error("Git read failed"));
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(poll(0)).rejects.toThrow("Git read failed");
+      await expect(poll(0)).rejects.toThrow("Git read failed");
+      await vi.advanceTimersByTimeAsync(1_001);
+      gitRead.mockResolvedValue(emptyDiff);
+      await expect(poll(32)).resolves.toEqual(emptyDiff);
+      expect(gitRead).toHaveBeenCalledTimes(33);
+      readRevision.mockReturnValueOnce(retiringRevision.promise);
+      const retiringRead = poll(33);
+      await vi.advanceTimersByTimeAsync(200);
+      await expect(retiringRead).resolves.toEqual({ ...emptyDiff, computing: true });
+      const owner = vi.mocked(runGitWorkerOperation).mock.calls.at(-1)?.[1]?.signal;
+      const retiring = drainGlobalSingletonLifecycleState("restart");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(owner?.aborted).toBe(true);
+      retiringRevision.resolve(null);
+      await retiring;
+      await expect(poll(1)).resolves.toEqual(emptyDiff);
+      expect(gitRead).toHaveBeenCalledTimes(34);
+    } finally {
+      held.resolve(emptyDiff);
+      retiringRevision.resolve(null);
+      await Promise.allSettled(requests);
+    }
+  });
+
+  it("lets blocking reads reclaim expired poll slots", async () => {
+    vi.useFakeTimers();
+    await drainGlobalSingletonLifecycleState("restart");
+    onTestFinished(() => drainGlobalSingletonLifecycleState("restart"));
+    readRevision.mockResolvedValue("unchanged");
+    gitRead.mockResolvedValue(emptyDiff);
+    for (let index = 0; index < 32; index++) {
+      await runGitReadOperation(
+        { type: "checkout.diff", input: { cwd: `/poll-expired-${index}` } },
+        { poll: true },
+      );
+    }
+    await vi.advanceTimersByTimeAsync(1_001);
+    const input = { cwd: "/blocking-after-polls" };
+    await runGitReadOperation({ type: "checkout.diff", input });
+    await runGitReadOperation({ type: "checkout.diff", input });
+    expect(gitRead).toHaveBeenCalledTimes(33);
+  });
+
   it("shares only in-flight revision checks with identical inputs and environment", async () => {
     const held = createDeferredCore<string>();
     onTestFinished(() => held.resolve("unchanged"));
@@ -374,11 +485,11 @@ describe("typed Git read ownership", () => {
     const revisionCount = readRevision.mock.calls.length;
     held.resolve("unchanged");
     await Promise.all([first, otherCheckout, otherBase, second, otherEnvironment]);
-    expect(revisionCount).toBe(4);
+    expect(revisionCount).toBe(3);
     expect(gitRead).toHaveBeenCalledTimes(4);
     readRevision.mockResolvedValue("edited");
     await read(input);
-    expect(readRevision).toHaveBeenCalledTimes(5);
+    expect(readRevision).toHaveBeenCalledTimes(4);
     expect(gitRead).toHaveBeenCalledTimes(5);
   });
 
