@@ -1,5 +1,21 @@
+import path from "node:path";
 import type { Page } from "playwright";
+import { expect } from "vitest";
 import { evaluateControlUiContext } from "../test-helpers/control-ui-e2e-context.ts";
+
+export const captureUiProof = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
+
+export async function capture(page: Page, artifactDir: string, name: string) {
+  if (!captureUiProof) {
+    return;
+  }
+  expect(await page.locator(".community-invite-card").count()).toBe(0);
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: path.join(artifactDir, name),
+  });
+}
 
 export async function dragTimelineRange(page: Page, fraction: number) {
   const panel = page.locator(".session-detail-panel");

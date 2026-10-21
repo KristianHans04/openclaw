@@ -1,6 +1,5 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "playwright";
 import { expect, it, vi } from "vitest";
 import { setRuntimeConfigSnapshot } from "../../../src/config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../../src/config/types.openclaw.js";
@@ -15,6 +14,8 @@ import { getFreePort } from "../../../src/test-utils/ports.ts";
 import { waitForControlUiGatewayReady } from "../test-helpers/control-ui-e2e-readiness.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 import {
+  capture,
+  captureUiProof,
   dragTimelineRange,
   requestGateway,
 } from "./usage-sessions-owner-attribution.test-support.ts";
@@ -105,24 +106,11 @@ const suite = createControlUiE2eSuite({
   },
 });
 
-const captureUiProof = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
 const viewport = { height: 900, width: 1_440 };
 
 const PROOF_SESSION_ID = "tg-dm-owner-attribution-proof";
 const PROOF_STORE_KEY = "agent:main:telegram:dm";
 const PROOF_LABEL = "Telegram DM";
-
-async function capture(page: Page, name: string) {
-  if (!captureUiProof) {
-    return;
-  }
-  expect(await page.locator(".community-invite-card").count()).toBe(0);
-  await page.screenshot({
-    animations: "disabled",
-    fullPage: true,
-    path: path.join(suite.artifactDir, name),
-  });
-}
 
 suite.define(() => {
   it.for([false, true])(
@@ -273,7 +261,7 @@ suite.define(() => {
               await otherRow.waitFor();
               await expect.poll(() => otherRow.count()).toBe(1);
               await otherRow.scrollIntoViewIfNeeded();
-              await capture(page, "01-other-owner.png");
+              await capture(page, suite.artifactDir, "01-other-owner.png");
 
               // The named family stays visible before its new current instance has a transcript.
               const row = page.locator(`.session-bar-row[title="${PROOF_STORE_KEY}"]`);
@@ -293,7 +281,7 @@ suite.define(() => {
               await expect.poll(() => page.locator(".session-bar-row").count()).toBe(2);
 
               await row.scrollIntoViewIfNeeded();
-              await capture(page, "02-current-owner.png");
+              await capture(page, suite.artifactDir, "02-current-owner.png");
               expect(pageErrors).toEqual([]);
             },
           );
@@ -482,7 +470,7 @@ suite.define(() => {
               if (pointCount === 1) {
                 await page.mouse.up();
               }
-              await capture(page, "01-original-instance-details.png");
+              await capture(page, suite.artifactDir, "01-original-instance-details.png");
               const selectedConnections = connections;
 
               const deleted = await requestGateway<{ deleted: boolean }>(page, "sessions.delete", {
@@ -566,9 +554,9 @@ suite.define(() => {
                 expect(await panel.locator(".timeseries-summary__range").count()).toBe(0);
               } finally {
                 await page.mouse.up();
-                await capture(page, "02-replacement-instance-details.png");
+                await capture(page, suite.artifactDir, "02-replacement-instance-details.png");
                 await panel.locator(".session-logs-compact").scrollIntoViewIfNeeded();
-                await capture(page, "03-replacement-instance-conversation.png");
+                await capture(page, suite.artifactDir, "03-replacement-instance-conversation.png");
                 if (captureUiProof) {
                   await writeFile(
                     path.join(suite.artifactDir, "instance-replacement.json"),
@@ -602,6 +590,14 @@ suite.define(() => {
               }
               expect(connections).toBe(selectedConnections);
               expect(pageErrors).toEqual([]);
+              // Labels are unique per owner; retire this case's replacement before reuse.
+              const removed = await requestGateway<{ deleted: boolean }>(page, "sessions.delete", {
+                key,
+                agentId: "opus",
+                expectedSessionId: replacementId,
+                deleteTranscript: true,
+              });
+              expect(removed.deleted).toBe(true);
             },
           );
           completed = true;
