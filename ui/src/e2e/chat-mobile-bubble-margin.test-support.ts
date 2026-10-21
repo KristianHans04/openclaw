@@ -208,13 +208,13 @@ export async function resizeMarginViewport(page: Page, width: number): Promise<v
 export async function measureMargin(page: Page, testCase: MarginCase) {
   const target = page.locator(`.chat-thread ${testCase.selector}`).first();
   await target.waitFor();
-  await page
-    .locator(".chat-thread img.chat-message-image")
-    .evaluateAll((images: HTMLImageElement[]) =>
-      Promise.all(images.map((element) => element.decode())),
+  return target.evaluate(async (element, side) => {
+    await Promise.all(
+      [...document.querySelectorAll<HTMLImageElement>(".chat-thread img.chat-message-image")].map(
+        (imageElement) => imageElement.decode(),
+      ),
     );
-  await page.evaluate(() => document.fonts.ready);
-  return target.evaluate((element, side) => {
+    await document.fonts.ready;
     const group = element.closest(".chat-group") ?? element.closest(".chat-thread-inner")!;
     const column = group.getBoundingClientRect();
     const box = element.getBoundingClientRect();
