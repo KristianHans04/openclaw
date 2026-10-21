@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http";
-import { connect, type Socket } from "node:net";
+import { connect } from "node:net";
+import type { Duplex } from "node:stream";
 import type { ImageGenerationProvider } from "openclaw/plugin-sdk/image-generation";
 import { generateImage } from "openclaw/plugin-sdk/image-generation-runtime";
 import type {
@@ -83,7 +84,7 @@ describe("registered ClawRouter image generation over HTTP", () => {
   let baseUrl: string;
   let externalResultUrl: string;
   const proxyTargets: string[] = [];
-  const proxySockets = new Set<Socket>();
+  const proxySockets = new Set<Duplex>();
   let cfg: OpenClawConfig;
   let payload: unknown;
   let inventory: unknown;
