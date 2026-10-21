@@ -44,11 +44,67 @@ export type ClientCredentialMigrationCapture = {
   assertCurrent(): void;
 };
 
+function postgresBootstrapProvenance(
+  source: EngineConnection,
+): NonNullable<ClientCredentialReceipt["source"]> | undefined {
+  const postgres = isPostgresSqlConnection(source);
+  const rows = readEngineAnchor(postgres ? source.anchor : source, "identity", postgres);
+  if (!rows) {
+    return undefined;
+  }
+  const row = rows[0];
+  if (
+    rows.length !== 1 ||
+    !row ||
+    row.engine !== "postgres" ||
+    typeof row.store_id !== "string" ||
+    !row.store_id.trim() ||
+    typeof row.schema !== "string" ||
+    !row.schema.trim()
+  ) {
+    throw new Error("Invalid PostgreSQL anchor identity during client credential bootstrap.");
+  }
+  return {
+    kind: "canonical",
+    engine: "postgres",
+    identity: row.store_id,
+    generation: `bootstrap:${row.store_id}`,
+    sha256: hashClientCredentialRows({ identities: [], tokens: [], origins: [], approvals: [] }),
+    destinationVersion: CLIENT_CREDENTIAL_SCHEMA_VERSION,
+  };
+}
+
+function bootstrapProvenance(
+  source: EngineConnection,
+  pathname: string,
+): NonNullable<ClientCredentialReceipt["source"]> {
+  const postgres = postgresBootstrapProvenance(source);
+  if (postgres) {
+    return postgres;
+  }
+  const metadata = source
+    .prepare("SELECT created_at FROM schema_meta WHERE meta_key = 'primary'")
+    .get();
+  if (!metadata) {
+    throw new Error("Shared credential source identity was not published.");
+  }
+  return {
+    kind: "canonical",
+    engine: "sqlite",
+    identity: `${pathname}:${String(metadata.created_at)}`,
+    generation: `bootstrap:${String(metadata.created_at)}`,
+    sha256: hashClientCredentialRows({ identities: [], tokens: [], origins: [], approvals: [] }),
+    destinationVersion: CLIENT_CREDENTIAL_SCHEMA_VERSION,
+  };
+}
+
 /** Fresh shared bootstrap binds existing local-only credentials without replacing them. */
 export function bindFreshClientCredentialStore(
   source: EngineConnection,
   options: { path: string; env: NodeJS.ProcessEnv },
 ): void {
+  // A fresh PG anchor exists before its first network connection or schema metadata.
+  const postgres = postgresBootstrapProvenance(source);
   const target = openClientCredentialCustody(options.env, {
     createIfMissing: true,
     migration: true,
@@ -61,7 +117,23 @@ export function bindFreshClientCredentialStore(
     const publication = beginUpdateSqliteCompanion(target.database, target.path, target.created);
     const previous = readClientCredentialReceipt(target.database);
     const sharedFile = readClientCredentialFileIdentity(options.path);
-    if (previous?.receipt.source) {
+    if (!sharedFile) {
+      throw new Error("Shared credential source is missing during bootstrap.");
+    }
+    const previousSource = previous?.receipt.source;
+    const previousFile = previous?.receipt.sharedFile;
+    const samePostgresBootstrap =
+      postgres &&
+      previousSource?.kind === postgres.kind &&
+      previousSource.engine === postgres.engine &&
+      previousSource.identity === postgres.identity &&
+      previousSource.generation === postgres.generation &&
+      previousSource.sha256 === postgres.sha256 &&
+      previousSource.destinationVersion === postgres.destinationVersion &&
+      previousFile?.path === sharedFile.path &&
+      previousFile.dev === sharedFile.dev &&
+      previousFile.ino === sharedFile.ino;
+    if (previousSource && !samePostgresBootstrap) {
       throw new Error(
         "Existing client credentials belong to a previous shared database; run openclaw doctor --fix.",
       );
@@ -81,6 +153,8 @@ export function bindFreshClientCredentialStore(
         stage() {},
         commit() {
           try {
+            // Persist the committed database identity so a later remount can be recovered.
+            receipt.source = bootstrapProvenance(source, sharedFile.path);
             runSqliteImmediateTransactionSync(target.database, () =>
               writeClientCredentialReceipt(target.database, receipt, "complete"),
             );
@@ -165,9 +239,11 @@ export function recoverClientCredentialStore(
         provenance.identity = identity;
       }
     }
-    if (stored.phase === "complete" && sameFile && !sameNativeBootstrap) {
+    if (stored.phase === "complete" && sameFile && !sameNativeBootstrap && provenance) {
       return;
     }
+    // A bootstrap interrupted after source commit still has the original file fence.
+    stored.receipt.source ??= bootstrapProvenance(source, file.path);
     stored.receipt.sharedFile = file;
     target.transaction(() =>
       writeClientCredentialReceipt(target.database, stored.receipt, "complete"),

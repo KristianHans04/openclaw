@@ -3,7 +3,10 @@ import type { ConfigSnapshotReadMeasure, ConfigSnapshotReadOptions } from "../co
 import { resolveStateDir } from "../config/paths.js";
 import type { ConfigFileSnapshot } from "../config/types.js";
 import { withEngineStoreAdmission } from "../infra/database-engine/admission-scope.js";
-import { getDatabaseEngineSelection } from "../infra/database-engine/context.js";
+import {
+  getDatabaseEngineSelection,
+  installDatabaseEngineSelection,
+} from "../infra/database-engine/context.js";
 import { assertDatabasePortStartupAllowed } from "../infra/database-port-recovery.js";
 import type { StartupMigrationLease } from "../infra/startup-migration-checkpoint.js";
 import { recordStartupMigrationWarnings } from "../infra/state-migrations.messages.js";
@@ -18,6 +21,7 @@ import {
 import { setActiveDegradedPlugins } from "../plugins/runtime-degraded-state.js";
 import {
   readAdmittedConfigSnapshot,
+  readConfigSnapshotBeforeEngineSelection,
   createConfigPreflightSnapshotReader,
   type ConfigPreflightSnapshotRead,
 } from "./config-preflight-snapshot.js";
@@ -43,7 +47,7 @@ export type StartupConfigPreflightResult = ReturnType<typeof result> & {
   pluginCache?: PluginCache;
 };
 
-/** Prepare current runtime state; legacy imports and repair receipts belong to Doctor. */
+/** Prepare runtime state, including backed-up client credential migration through Doctor custody. */
 export async function runStartupConfigPreflight(
   options: StartupConfigPreflightOptions,
 ): Promise<StartupConfigPreflightResult> {
@@ -118,6 +122,38 @@ async function prepareStartupConfig(
     }
     recordStartupMigrationWarnings(readStartupStateWarnings(env));
     return result(read);
+  }
+
+  // Select the final root and recovery candidate before credential admission.
+  // Migration must finish outside the admitted read's artifact-preserving snapshot.
+  let restoreSelectedSourceEnv: (() => void) | undefined;
+  const selected = await readConfigSnapshotBeforeEngineSelection(env, {
+    isolateEnv: false,
+    onSourceEnvApplied: (restore) => {
+      restoreSelectedSourceEnv = restore;
+    },
+  });
+  if (selected.valid) {
+    const { createConfigIO } = await import("../config/io.factory.js");
+    const recovery = await createConfigIO({
+      configPath: selected.path,
+      env,
+      observe: false,
+      pluginValidation: "core-only",
+    }).prepareConfigRecovery(selected);
+    if (recovery) {
+      // The admitted backup replaces only this source's env, never earlier selection layers.
+      restoreSelectedSourceEnv?.();
+    }
+    const candidate = recovery?.snapshot ?? selected;
+    await options.validateStartupConfig?.(candidate);
+    await beforeStatePreparation(candidate);
+    const { resolveDatabaseEngineSelection } = await import("../infra/database-engine/config.js");
+    installDatabaseEngineSelection(
+      getDatabaseEngineSelection() ?? (await resolveDatabaseEngineSelection(candidate.config, env)),
+    );
+    const { prepareStartupClientCredentials } = await import("./startup-client-credentials.js");
+    await prepareStartupClientCredentials({ env, config: candidate.config });
   }
 
   const readAdmitted = () =>
