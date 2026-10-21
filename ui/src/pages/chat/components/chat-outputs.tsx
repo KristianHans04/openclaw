@@ -54,7 +54,7 @@ export function hasChatDesktopOutputs(data: ChatOutputsData): boolean {
 }
 
 /** The explicit mobile destination distinguishes loading from confirmed absence. */
-export function isChatOutputsEmpty(data: ChatOutputsData): boolean {
+function isChatOutputsEmpty(data: ChatOutputsData): boolean {
   return (
     getChatOutputsCount(data) === 0 &&
     !data.artifactsLoading &&
