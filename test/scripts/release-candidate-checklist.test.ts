@@ -53,6 +53,7 @@ import {
   preflightCorePackageTarballs,
   preflightDependencyTarballs,
   reconcileReleaseCandidateState,
+  resolveEarlyPluginSdkApiBases,
   resolveArtifactName,
   requireRunIdFromDispatchOutput,
   run,
@@ -156,6 +157,34 @@ async function withGithubApiTimeoutEnv<T>(value: string, fn: () => Promise<T>): 
 }
 
 describe("release candidate checklist", () => {
+  it("resolves the early Plugin SDK review against the publication selectors", () => {
+    expect(
+      resolveEarlyPluginSdkApiBases({
+        distTags: { beta: "2026.10.20-beta.1", latest: "2026.10.19" },
+        npmDistTag: "latest",
+        packageVersion: "2026.10.21",
+      }),
+    ).toEqual({ beta: "v2026.10.20-beta.1", latest: "v2026.10.19" });
+    expect(
+      resolveEarlyPluginSdkApiBases({
+        distTags: { beta: "2026.10.20-beta.1", latest: "2026.10.19" },
+        npmDistTag: "beta",
+        packageVersion: "2026.10.21-beta.1",
+      }),
+    ).toEqual({ beta: "v2026.10.20-beta.1" });
+  });
+
+  it("runs the Plugin SDK review after dispatch and before waiting for FRV", () => {
+    const source = readFileSync("scripts/release-candidate-checklist.mts", "utf8");
+    const main = source.match(/^async function main\(\)[\s\S]*?^\}/mu)?.[0] ?? "";
+    const dispatch = main.indexOf("dispatchFullReleaseUsingHelper(options, targetSha, toolingSha)");
+    const sdkReview = main.indexOf("runEarlyPluginSdkApiReview({");
+    const waitForFrv = main.indexOf("const { run: fullRun } = await waitForSuccessfulRun(");
+    expect(dispatch).toBeGreaterThanOrEqual(0);
+    expect(sdkReview).toBeGreaterThan(dispatch);
+    expect(waitForFrv).toBeGreaterThan(sdkReview);
+  });
+
   it.each([
     {
       flags: [
@@ -489,6 +518,9 @@ describe("release candidate checklist", () => {
         source.match(/^function savedPublishWorkflowRef\([\s\S]*?^\}/mu)?.[0] ?? "";
       const statePlanning =
         source.match(/^function canUpdateReleaseCandidateState\([\s\S]*?^\}/mu)?.[0] ?? "";
+      const sdkAcknowledgementFailure =
+        source.match(/^function formatPluginSdkApiAcknowledgementFailure\([\s\S]*?^\}/mu)?.[0] ??
+        "";
       const shellQuote = source.match(/^function shellQuote\([\s\S]*?^\}/mu)?.[0] ?? "";
       const log = vi.fn();
       const stages: string[] = [];
@@ -618,7 +650,7 @@ describe("release candidate checklist", () => {
       const dispatches: string[][] = [];
       const completion = runInNewContext(
         stripNodeTypeScriptTypes(
-          `${android}\n${selectPublication}\n${statePlanning}\n${savedTagReader}\n${helperDispatch}\n${shellQuote}\n${main}\nmain();`,
+          `${android}\n${selectPublication}\n${statePlanning}\n${savedTagReader}\n${helperDispatch}\n${shellQuote}\n${sdkAcknowledgementFailure}\n${main}\nmain();`,
         ),
         {
           process: {
@@ -682,6 +714,7 @@ describe("release candidate checklist", () => {
           validateCandidateReleaseNotes: () => ({ status: "passed" }),
           validateCandidateChangelogProvenance: () => ({ status: "passed", shippedBaselines: [] }),
           runLocalGeneratedCheckIfNeeded: generatedChecks,
+          runEarlyPluginSdkApiReview: () => {},
           releaseBranchForTag,
           readFileSync: (file: string) =>
             file.endsWith("plugin-sdk-api-release-diff.md")
