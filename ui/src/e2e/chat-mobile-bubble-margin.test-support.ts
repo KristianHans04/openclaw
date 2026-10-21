@@ -206,9 +206,10 @@ export async function resizeMarginViewport(page: Page, width: number): Promise<v
 }
 
 export async function measureMargin(page: Page, testCase: MarginCase) {
-  const target = page.locator(`.chat-thread ${testCase.selector}`).first();
+  const pane = page.locator('openclaw-chat-pane[aria-hidden="false"]');
+  const target = pane.locator(`.chat-thread ${testCase.selector}`).first();
   await target.waitFor();
-  await page
+  await pane
     .locator(".chat-thread img.chat-message-image")
     .evaluateAll((images: HTMLImageElement[]) =>
       Promise.all(images.map((element) => element.decode())),
