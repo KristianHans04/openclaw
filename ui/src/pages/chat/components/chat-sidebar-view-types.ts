@@ -11,11 +11,27 @@ import type {
 } from "./chat-sidebar-content-types.ts";
 
 type SessionWorkspaceView = ReturnType<typeof createSessionWorkspaceProps>;
-export type SessionWorkspaceProps = Omit<
-  SessionWorkspaceView,
-  "connectionEpoch" | "onDownloadFile" | "onOpenDiff"
-> &
-  Partial<Pick<SessionWorkspaceView, "connectionEpoch" | "onDownloadFile" | "onOpenDiff">>;
+type SessionWorkspaceOptionalKey =
+  | "transcriptAttachments"
+  | "presentation"
+  | "folderView"
+  | "navigation"
+  | "mobileNavigation"
+  | "onToggleMobileGroup"
+  | "onMobileScroll"
+  | "onSearchFocus"
+  | "connected"
+  | "directories"
+  | "onToggleDirectory"
+  | "onSearchOpenChange"
+  | "onTreeVisibleChange"
+  | "onSessionExpandedChange"
+  | "onNavigationScroll"
+  | "connectionEpoch"
+  | "onDownloadFile"
+  | "onOpenDiff";
+export type SessionWorkspaceProps = Omit<SessionWorkspaceView, SessionWorkspaceOptionalKey> &
+  Partial<Pick<SessionWorkspaceView, SessionWorkspaceOptionalKey>>;
 
 /** Navigation facts/operations supplied by the workspace/tab owner, never a reader-local stack. */
 export type FileReaderWorkspace = {
