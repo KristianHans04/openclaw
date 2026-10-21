@@ -14,7 +14,14 @@ import {
   BROWSER_WEBSOCKET_SECURITY_ERROR_CODE,
   formatBrowserWebSocketConstructorError,
 } from "./gateway-browser-socket.ts";
-import type { GatewayBrowserClientOptions } from "./gateway.ts";
+
+export type GatewayBrowserCloseInfo = {
+  code: number;
+  reason: string;
+  error?: ErrorShape;
+  willRetry: boolean;
+  busy?: boolean;
+};
 
 export class GatewayRequestError extends GatewayProtocolRequestError {
   constructor(error: ErrorShape) {
@@ -78,7 +85,7 @@ export function resolveBrowserGatewayClose(
 
 export function notifyBrowserWebSocketError(
   error: Error,
-  opts: Pick<GatewayBrowserClientOptions, "url" | "onClose">,
+  opts: { url: string; onClose?: (info: GatewayBrowserCloseInfo) => void },
 ): void {
   const formatted = formatBrowserWebSocketConstructorError(error, opts.url);
   try {

@@ -1,5 +1,5 @@
 /** @vitest-environment node */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest";
 import { createStorageMock } from "../test-helpers/storage.ts";
 import {
   getLatestWebSocket,
@@ -71,8 +71,10 @@ describe("GatewayBrowserClient heartbeat recovery", () => {
         expect(probes(ws)).toEqual([]);
         await vi.advanceTimersByTimeAsync(1);
         expect(probes(ws)).toHaveLength(1);
-        expect(probes(ws)[0].params).toEqual({ probe: false });
-        ws.emitMessage({ type: "res", id: probes(ws)[0].id, ok, payload: {} });
+        const probe = probes(ws)[0];
+        assert(probe);
+        expect(probe.params).toEqual({ probe: false });
+        ws.emitMessage({ type: "res", id: probe.id, ok, payload: {} });
         await vi.advanceTimersByTimeAsync(59_999);
         expect(ws.lastClose).toBeNull();
         expect(probes(ws)).toHaveLength(1);
@@ -221,8 +223,10 @@ describe("GatewayBrowserClient heartbeat recovery", () => {
       const ws = await startConnect(client);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(probes(ws)).toHaveLength(1);
+      const probe = probes(ws)[0];
+      assert(probe);
       client.stop();
-      ws.emitMessage({ type: "res", id: probes(ws)[0].id, ok: true, payload: {} });
+      ws.emitMessage({ type: "res", id: probe.id, ok: true, payload: {} });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(ws.lastClose).toEqual({ code: undefined, reason: undefined });
       expect(wsInstances).toHaveLength(1);
@@ -239,10 +243,12 @@ describe("GatewayBrowserClient heartbeat recovery", () => {
       const ws = await startConnect(client);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(probes(ws)).toHaveLength(1);
+      const probe = probes(ws)[0];
+      assert(probe);
       ws.emitClose(1006, "lost connection");
       await vi.advanceTimersByTimeAsync(1_000);
       const replacement = await startConnect(client);
-      ws.emitMessage({ type: "res", id: probes(ws)[0].id, ok: true, payload: {} });
+      ws.emitMessage({ type: "res", id: probe.id, ok: true, payload: {} });
       await vi.advanceTimersByTimeAsync(10_000);
       expect(replacement.lastClose).toBeNull();
       expect(probes(replacement)).toEqual([]);

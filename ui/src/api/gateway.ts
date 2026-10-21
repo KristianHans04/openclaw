@@ -7,7 +7,6 @@ import {
   type GatewayConnectAuthSelection,
   type GatewayProtocolRequestOptions,
   type GatewayProtocolRequestTiming,
-  type ErrorShape,
   type EventFrame,
   type HelloOk,
   selectGatewayConnectAuth,
@@ -41,6 +40,7 @@ import {
   resolveBrowserGatewayClose,
   resolveGatewayErrorDetailCode,
   toGatewayErrorInfo,
+  type GatewayBrowserCloseInfo,
 } from "./gateway-connect-errors.ts";
 import {
   buildBrowserGatewayConnectPlan,
@@ -70,13 +70,7 @@ export type GatewayBrowserClientOptions = GatewayBrowserConnectOptions & {
   offlineRecoveryScope?: string;
   onHello?: (hello: GatewayHelloOk) => void;
   onEvent?: (evt: EventFrame) => void;
-  onClose?: (info: {
-    code: number;
-    reason: string;
-    error?: ErrorShape;
-    willRetry: boolean;
-    busy?: boolean;
-  }) => void;
+  onClose?: (info: GatewayBrowserCloseInfo) => void;
   onConnecting?: () => void;
   onReconnectScheduled?: (delayMs: number) => void;
   onGap?: (info: { expected: number; received: number }) => void;
