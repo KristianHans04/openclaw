@@ -56,13 +56,18 @@ type FixtureJournal = {
   callbackOutcomes: { label: string; status: string; disposed: boolean }[];
 };
 
-function fixtureSource(mode: FixtureMode, root: string): string {
+function fixtureSource(): string {
   return `
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
+import path from "node:path";
 import { setImmediate as nextTurn } from "node:timers/promises";
 import { afterAll, expect, it, vi } from "vitest";
 import { tryBeginGatewayRootWorkAdmission } from ${JSON.stringify(path.join(repoRoot, "src/process/gateway-work-admission.ts"))};
+const { mode, scenarioRoot } = vi.hoisted(() => ({
+  mode: process.env.UI_LIFETIME_FIXTURE_MODE,
+  scenarioRoot: process.env.UI_LIFETIME_FIXTURE_ROOT,
+}));
 const state = vi.hoisted(() => {
   const deferred = () => {
     let resolve;
@@ -82,11 +87,11 @@ const state = vi.hoisted(() => {
     closeFault: new Error("synthetic context close failure") };
 });
 vi.mock("playwright", () => ({ chromium: { launch: async () => {
-  if (${JSON.stringify(mode)} === "resources-browser-failure") throw new Error("synthetic browser startup failure");
+  if (mode === "resources-browser-failure") throw new Error("synthetic browser startup failure");
   state.browserAcquired = true;
   return {
     newContext: async () => {
-      if (${JSON.stringify(mode)} === "late-context") await new Promise(resolve => setTimeout(resolve, 40));
+      if (mode === "late-context") await new Promise(resolve => setTimeout(resolve, 40));
       state.arrived = true;
       const rejectClosedPage = async () => { throw new Error("synthetic page closed"); };
       const closedPage = Object.assign(new EventEmitter(), {
@@ -105,7 +110,7 @@ vi.mock("playwright", () => ({ chromium: { launch: async () => {
         });
         return context;
       };
-      if (${JSON.stringify(mode)}.startsWith("diagnostic-") || ${JSON.stringify(mode)}.startsWith("page-concurrent")) {
+      if (mode.startsWith("diagnostic-") || mode.startsWith("page-concurrent")) {
         let pageClosed = false;
         let context;
         const page = Object.assign(new EventEmitter(), {
@@ -135,7 +140,7 @@ vi.mock("playwright", () => ({ chromium: { launch: async () => {
         });
         return context;
       }
-      if (${JSON.stringify(mode)} === "held-route-drain") {
+      if (mode === "held-route-drain") {
         const handlers = [];
         const pending = new Set();
         const contextHandlers = [];
@@ -219,8 +224,8 @@ vi.mock("playwright", () => ({ chromium: { launch: async () => {
         close: () => {
           state.closeCalls++;
           record();
-          if (["close-failure", "tracked-close-failure"].includes(${JSON.stringify(mode)})) return Promise.reject(state.closeFault);
-          return ${JSON.stringify(mode)} === "concurrent-close" && state.closeCalls === 1
+          if (["close-failure", "tracked-close-failure"].includes(mode)) return Promise.reject(state.closeFault);
+          return mode === "concurrent-close" && state.closeCalls === 1
             ? state.gate : Promise.resolve();
         }
       });
@@ -233,11 +238,11 @@ const journalKeys = ["closeCalls", "arrived", "published", "browserAcquired", "b
   "serverAcquired", "serverClosed", "events", "nativeAbortObserved", "firstCleanupEvent",
   "pendingCloseCalls", "fulfilledBeforeFetchRelease", "heldBodyErrorRetained",
   "contextCleanupEvent", "callbackOutcomes"];
-const record = () => fs.writeFileSync(${JSON.stringify(path.join(root, "journal.json"))},
+const record = () => fs.writeFileSync(path.join(scenarioRoot, "journal.json"),
   JSON.stringify(Object.fromEntries(journalKeys.map(key => [key, state[key]]))));
 const event = name => { state.events.push(name); record(); };
-const successor = () => fs.writeFileSync(${JSON.stringify(path.join(root, "successor.txt"))}, "started");
-fs.writeFileSync(${JSON.stringify(path.join(root, "worker.pid"))}, String(process.pid));
+const successor = () => fs.writeFileSync(path.join(scenarioRoot, "successor.txt"), "started");
+fs.writeFileSync(path.join(scenarioRoot, "worker.pid"), String(process.pid));
 record();
 async function waitForAbort(signal) {
   await new Promise(resolve => {
@@ -248,7 +253,7 @@ async function waitForAbort(signal) {
 // These synthetic gateways open no databases. Keep their state fixture limited to
 // the directory and selector whose lifetime belongs to the suite release callback.
 function createFixtureState() {
-  const root = ${JSON.stringify(path.join(root, "retained-state"))};
+  const root = path.join(scenarioRoot, "retained-state");
   const previousStateDir = process.env.OPENCLAW_STATE_DIR;
   fs.mkdirSync(root);
   process.env.OPENCLAW_STATE_DIR = root;
@@ -270,7 +275,7 @@ function scenario(acquired, run, close, optionalRelease = false) {
     retainedState: () => fixture?.root,
     run: async signal => {
       fixture = createFixtureState();
-      fs.writeFileSync(${JSON.stringify(path.join(root, "retained-root.txt"))}, fixture.root);
+      fs.writeFileSync(path.join(scenarioRoot, "retained-root.txt"), fixture.root);
       await run(signal, fixture, () => event(acquired));
     },
     close,
@@ -282,19 +287,19 @@ function scenario(acquired, run, close, optionalRelease = false) {
   };
 }
 const suite = createControlUiE2eSuite({ name: "owned context fixture",
-  trackBrowserContexts: ${mode.startsWith("tracked-") || mode === "diagnostic-tracked-timeout"},
-  ...(${JSON.stringify(mode)}.startsWith("resources-") ? {
+  trackBrowserContexts: mode.startsWith("tracked-") || mode === "diagnostic-tracked-timeout",
+  ...(mode.startsWith("resources-") ? {
     resources: {
       retainedState: () => sharedFixture?.root,
       run: async signal => {
         sharedFixture = createFixtureState();
-        if (${JSON.stringify(mode)} === "resources-root-drain") {
+        if (mode === "resources-root-drain") {
           gatewayAdmission = tryBeginGatewayRootWorkAdmission("synthetic shared Gateway request");
           expect(gatewayAdmission).not.toBeNull();
         }
-        fs.writeFileSync(${JSON.stringify(path.join(root, "retained-root.txt"))}, sharedFixture.root);
+        fs.writeFileSync(path.join(scenarioRoot, "retained-root.txt"), sharedFixture.root);
         event("resource acquired");
-        if (${JSON.stringify(mode)} === "resources-late-setup") {
+        if (mode === "resources-late-setup") {
           await waitForAbort(signal);
           signal.throwIfAborted();
         }
@@ -302,20 +307,20 @@ const suite = createControlUiE2eSuite({ name: "owned context fixture",
       close: async () => {
         gatewayAdmission?.release();
         event("resource closed");
-        if (${JSON.stringify(mode)} === "resources-close-failure") throw new Error("synthetic shared resource close failure");
+        if (mode === "resources-close-failure") throw new Error("synthetic shared resource close failure");
       },
       release: async () => { await sharedFixture.cleanup(); event("released"); },
     },
   } : {}),
-  startServerBeforeBrowser: ${mode === "late-setup"},
+  startServerBeforeBrowser: mode === "late-setup",
   startServer: async () => {
-    if (${JSON.stringify(mode)} === "late-setup") await new Promise(resolve => setTimeout(resolve, 75));
+    if (mode === "late-setup") await new Promise(resolve => setTimeout(resolve, 75));
     state.serverAcquired = true;
     return { baseUrl: "http://fixture.invalid/", close: async () => { state.serverClosed = true; record(); } };
   },
 });
 suite.define(() => {
-  if (${JSON.stringify(mode)} === "page-concurrent") {
+  if (mode === "page-concurrent") {
     it("keeps concurrent page callbacks independently alive", async () => {
       const shortGate = state.deferred();
       const longGate = state.deferred();
@@ -337,7 +342,7 @@ suite.define(() => {
         await Promise.all([short, long]);
       }
     });
-  } else if (${JSON.stringify(mode)} === "page-concurrent-timeout") {
+  } else if (mode === "page-concurrent-timeout") {
     it("joins every concurrent callback after native cancellation", async () => {
       await Promise.all([
         suite.withPage({}, async ({ page }) => {
@@ -349,7 +354,7 @@ suite.define(() => {
     it("never starts while a concurrent callback remains unjoined", () => {
       successor();
     });
-  } else if (${JSON.stringify(mode)}.startsWith("diagnostic-")) {
+  } else if (mode.startsWith("diagnostic-")) {
     it("retains the native page timeout", async (context) => {
       const awaitTimeout = async (page) => {
         expect(page.listenerCount("websocket"), "one RPC observer owns each page").toBe(1);
@@ -370,14 +375,14 @@ suite.define(() => {
         await new Promise((resolve, reject) => { state.pendingPageReject = reject; });
       };
       const run = async () => {
-        if (${JSON.stringify(mode)} === "diagnostic-page-timeout") {
+        if (mode === "diagnostic-page-timeout") {
           await suite.withPage({}, ({ page }) => awaitTimeout(page));
         } else {
           const browserContext = await suite.newBrowserContext({});
           await awaitTimeout(await browserContext.newPage());
         }
       };
-      if (${JSON.stringify(mode)} === "diagnostic-scenario-timeout") {
+      if (mode === "diagnostic-scenario-timeout") {
         await suite.runScenario(context, { run });
       } else {
         await run();
@@ -387,7 +392,7 @@ suite.define(() => {
       event("successor");
       successor();
     });
-  } else if (${JSON.stringify(mode)}.startsWith("scenario-root-")) {
+  } else if (mode.startsWith("scenario-root-")) {
     it("closes its Gateway before requiring requests to drain", async (context) => {
       await suite.runScenario(context, scenario("acquired", async (_signal, _fixture, acquired) => {
           gatewayAdmission = tryBeginGatewayRootWorkAdmission("synthetic scenario Gateway request");
@@ -396,20 +401,20 @@ suite.define(() => {
           await suite.withPage({}, async () => {});
         }, async () => {
           event("gateway closed");
-          if (${JSON.stringify(mode)} === "scenario-root-drain") gatewayAdmission.release();
+          if (mode === "scenario-root-drain") gatewayAdmission.release();
         }));
     });
-  } else if (${JSON.stringify(mode)}.startsWith("resources-")) {
+  } else if (mode.startsWith("resources-")) {
     it.for(["first", "second"])("uses shared resources: %s", async (name, context) => {
       await suite.runScenario(context, { run: async () => {
         expect(process.env.OPENCLAW_STATE_DIR).toBe(sharedFixture.stateDir);
         event(name);
-        if (${JSON.stringify(mode)} === "resources-root-drain") {
+        if (mode === "resources-root-drain") {
           await suite.withPage({}, async () => {});
         }
       } });
     });
-  } else if (${JSON.stringify(mode)}.startsWith("tracked-")) {
+  } else if (mode.startsWith("tracked-")) {
     it("first ordinary case acquires a context", async () => {
       await suite.newBrowserContext({});
     });
@@ -417,7 +422,7 @@ suite.define(() => {
       successor();
       await suite.newBrowserContext({});
     });
-  } else if (${JSON.stringify(mode)} === "held-route-drain") {
+  } else if (mode === "held-route-drain") {
     it("records held-module cleanup after an early body failure", async () => {
       const bodyFault = new Error("synthetic held-module body failure");
       const callbacks = [];
@@ -500,7 +505,7 @@ suite.define(() => {
       });
       event("held callback joined");
     });
-  } else if (${JSON.stringify(mode)} === "concurrent-close") {
+  } else if (mode === "concurrent-close") {
     it("joins the first context close", async () => {
       const context = await suite.newBrowserContext({});
       const first = suite.closeBrowserContext(context);
@@ -515,7 +520,7 @@ suite.define(() => {
         await Promise.all([first, second]);
       }
     });
-  } else if (${JSON.stringify(mode)} === "close-failure") {
+  } else if (mode === "close-failure") {
     it("preserves the body and finalization failures", async () => {
       const bodyFault = new Error("synthetic page body failure");
       const failure = await suite.withPage({}, async () => { throw bodyFault; }).catch(error => error);
@@ -530,27 +535,27 @@ suite.define(() => {
     it("never starts after page cleanup fails", () => {
       successor();
     });
-  } else if (${JSON.stringify(mode)} === "late-context") {
+  } else if (mode === "late-context") {
     it.fails("times out during context acquisition", async () => {
       await suite.newBrowserContext({});
       state.published = true;
     }, 5);
-  } else if (${JSON.stringify(mode)} === "late-setup") {
+  } else if (mode === "late-setup") {
     it("never starts after setup timed out", () => { state.published = true; record(); });
   } else {
     const previousStateDir = process.env.OPENCLAW_STATE_DIR;
     it.fails("first usage-style attempt times out or fails cleanup", async (context) => {
       await suite.runScenario(context, scenario("acquired", async (signal, _fixture, acquired) => {
           acquired();
-          if (${JSON.stringify(mode)} === "scenario-noncooperative") await new Promise(() => {});
-          if (["scenario-close-failure", "scenario-late-close"].includes(${JSON.stringify(mode)})) return;
+          if (mode === "scenario-noncooperative") await new Promise(() => {});
+          if (["scenario-close-failure", "scenario-late-close"].includes(mode)) return;
           await waitForAbort(signal);
           state.nativeAbortObserved = signal.aborted; record();
           signal.throwIfAborted();
         }, async () => {
           event("gateway closed");
-          if (${JSON.stringify(mode)} === "scenario-late-close") await state.gate;
-          if (${JSON.stringify(mode)} === "scenario-close-failure") throw new Error("synthetic gateway close failure");
+          if (mode === "scenario-late-close") await state.gate;
+          if (mode === "scenario-close-failure") throw new Error("synthetic gateway close failure");
         }, true));
     }, 50);
     it("next usage-style attempt starts only after the original cleanup", () => {
@@ -561,7 +566,7 @@ suite.define(() => {
     });
   }
 });
-if (${JSON.stringify(mode)} === "scenario-late-close") {
+if (mode === "scenario-late-close") {
   afterAll(async () => {
     state.release();
     await nextTurn();
@@ -583,6 +588,7 @@ beforeAll(async () => {
     path.join(fixtureRoot, "node_modules"),
     "junction",
   );
+  await fs.writeFile(path.join(fixtureRoot, "fixture.test.ts"), fixtureSource());
   await fs.writeFile(
     path.join(fixtureRoot, "vitest.config.ts"),
     `
@@ -619,7 +625,7 @@ async function runFixture(mode: FixtureMode, signal: AbortSignal) {
   if (hasUnjoinedFixture) {
     throw new Error("Cannot reuse transforms while a native UI fixture remains unjoined");
   }
-  // The serial native children share transforms, never a worker or mutable case state.
+  // A stable entry module lets serial native children reuse transforms, never workers or case state.
   const root = path.join(fixtureRoot, mode);
   const hookTimeout = mode === "late-setup" || mode === "resources-late-setup" ? 50 : 500;
   let completed = false;
@@ -627,14 +633,13 @@ async function runFixture(mode: FixtureMode, signal: AbortSignal) {
     const vitestPackageDir = path.dirname(require.resolve("vitest/package.json"));
     await fs.mkdir(path.join(root, "home"), { recursive: true });
     await fs.mkdir(path.join(root, "tmp"));
-    await fs.writeFile(path.join(root, "fixture.test.ts"), fixtureSource(mode, root));
     const report = path.join(root, "report.json");
     let child!: ChildProcess;
     const output = await runVitestShutdownCommand({
       args: [
         path.join(vitestPackageDir, "vitest.mjs"),
         "run",
-        path.join(root, "fixture.test.ts"),
+        path.join(fixtureRoot, "fixture.test.ts"),
         "--root",
         fixtureRoot,
         "--config",
@@ -652,6 +657,8 @@ async function runFixture(mode: FixtureMode, signal: AbortSignal) {
       env: {
         PATH: process.env.PATH,
         UI_LIFETIME_HOOK_TIMEOUT_MS: String(hookTimeout),
+        UI_LIFETIME_FIXTURE_MODE: mode,
+        UI_LIFETIME_FIXTURE_ROOT: root,
         HOME: path.join(root, "home"),
         USERPROFILE: path.join(root, "home"),
         OPENCLAW_HOME: path.join(root, "home"),
