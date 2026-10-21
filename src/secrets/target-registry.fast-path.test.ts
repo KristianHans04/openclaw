@@ -2,13 +2,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SecretTargetRegistryEntry } from "./target-registry-types.js";
 
-const { loadPluginManifestRegistryMock } = vi.hoisted(() => ({
+const { loadPluginManifestRegistryMock, getSecretTargetRegistryMock } = vi.hoisted(() => ({
   loadPluginManifestRegistryMock: vi.fn(() => {
     throw new Error("manifest registry should stay off configured-only target fast paths");
   }),
-}));
-
-const { getSecretTargetRegistryMock } = vi.hoisted(() => ({
   getSecretTargetRegistryMock: vi.fn(),
 }));
 
@@ -27,19 +24,16 @@ const { channelTarget, loadBundledPublicArtifactMock } = vi.hoisted(() => {
   });
   const loadArtifact = vi.fn(
     ({ artifactCandidates, dirName }: { artifactCandidates: string[]; dirName: string }) => {
-      if (dirName === "googlechat" && artifactCandidates[0] === "secret-contract-api.js") {
-        return {
-          secretTargetRegistryEntries: [buildChannelTarget("channels.googlechat.serviceAccount")],
-        };
+      if (artifactCandidates[0] !== "secret-contract-api.js") {
+        return null;
       }
-      if (dirName === "telegram" && artifactCandidates[0] === "secret-contract-api.js") {
-        return {
-          secretTargetRegistryEntries: [
-            buildChannelTarget("channels.telegram.botToken", "channels.telegram.botTokenRef"),
-          ],
-        };
-      }
-      return null;
+      const entry =
+        dirName === "googlechat"
+          ? buildChannelTarget("channels.googlechat.serviceAccount")
+          : dirName === "telegram"
+            ? buildChannelTarget("channels.telegram.botToken", "channels.telegram.botTokenRef")
+            : null;
+      return entry ? { secretTargetRegistryEntries: [entry] } : null;
     },
   );
   return { channelTarget: buildChannelTarget, loadBundledPublicArtifactMock: loadArtifact };
@@ -89,11 +83,8 @@ describe("secret target registry fast path", () => {
   it("resolves bundled channel targets by explicit channel id without manifest scans", () => {
     const target = resolveConfigSecretTargetByPath(["channels", "googlechat", "serviceAccount"]);
 
-    if (!target) {
-      throw new Error("expected googlechat service account target");
-    }
-    expect(target.entry.id).toBe("channels.googlechat.serviceAccount");
-    expect(target.refPathSegments).toBeUndefined();
+    expect(target?.entry.id).toBe("channels.googlechat.serviceAccount");
+    expect(target?.refPathSegments).toBeUndefined();
     expect(loadBundledPublicArtifactMock).toHaveBeenCalledWith({
       dirName: "googlechat",
       artifactCandidates: ["secret-contract-api.js"],
@@ -118,10 +109,7 @@ describe("secret target registry fast path", () => {
       plugins: { load: { paths: ["/plugins/custom"] }, entries: {} },
       channels: {
         qqbot: { clientSecret: "qqbot-secret" },
-        custom: {
-          primaryToken: "primary-secret",
-          secondaryToken: "secondary-secret",
-        },
+        custom: { primaryToken: "primary-secret", secondaryToken: "secondary-secret" },
       },
     };
     const targets = discoverConfigSecretTargets(config, { env });

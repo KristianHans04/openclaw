@@ -15,15 +15,32 @@ vi.mock("./store/secret-store.js", async (importOriginal) => {
 
 const roots: string[] = [];
 const { prepareSecretsRuntimeSnapshot } = setupSecretsRuntimeSnapshotTestHooks();
+const missing = {
+  ok: false,
+  error: { code: "SECRET_STORE_NOT_FOUND", message: "Secret store entry was not found." },
+};
+
+async function runtimeOptions(skill: string, id: string) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-store-"));
+  roots.push(root);
+  const ref = { source: "store", provider: "default", id } as const;
+  return {
+    ref,
+    options: {
+      config: asConfig({
+        agents: { entries: { main: {} } },
+        skills: { entries: { [skill]: { apiKey: ref } } },
+      }),
+      env: { OPENCLAW_STATE_DIR: path.join(root, "state") },
+      includeAuthStoreRefs: false,
+      allowUnavailableSecretOwners: true,
+      loadablePluginOrigins: new Map(),
+    },
+  };
+}
 
 beforeEach(() => {
-  storeMocks.readValue.mockReset().mockResolvedValue({
-    ok: false,
-    error: {
-      code: "SECRET_STORE_NOT_FOUND",
-      message: "Secret store entry was not found.",
-    },
-  });
+  storeMocks.readValue.mockReset().mockResolvedValue(missing);
 });
 
 afterEach(async () => {
@@ -32,19 +49,8 @@ afterEach(async () => {
 
 describe("store SecretRef runtime degradation", () => {
   it("isolates a missing store-backed skill instead of failing gateway startup", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-store-"));
-    roots.push(root);
-    const ref = { source: "store", provider: "default", id: "MISSING_SKILL_API_KEY" } as const;
-    const snapshot = await prepareSecretsRuntimeSnapshot({
-      config: asConfig({
-        agents: { entries: { main: {} } },
-        skills: { entries: { unavailable: { apiKey: ref } } },
-      }),
-      env: { OPENCLAW_STATE_DIR: path.join(root, "state") },
-      includeAuthStoreRefs: false,
-      allowUnavailableSecretOwners: true,
-      loadablePluginOrigins: new Map(),
-    });
+    const { ref, options } = await runtimeOptions("unavailable", "MISSING_SKILL_API_KEY");
+    const snapshot = await prepareSecretsRuntimeSnapshot(options);
 
     expect(snapshot.config.skills?.entries?.unavailable?.apiKey).toEqual(ref);
     expect(snapshot.degradedOwners).toMatchObject([
@@ -60,40 +66,19 @@ describe("store SecretRef runtime degradation", () => {
   it.each(["missing", "redacted"])(
     "makes a %s store ref cold instead of retaining its value",
     async (failure) => {
-      const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-store-"));
-      roots.push(root);
-      const ref = { source: "store", provider: "default", id: "SERVICE_API_KEY" } as const;
-      const config = asConfig({
-        agents: { entries: { main: {} } },
-        skills: { entries: { service: { apiKey: ref } } },
-      });
-      const runtimeOptions = {
-        config,
-        env: { OPENCLAW_STATE_DIR: path.join(root, "state") },
-        includeAuthStoreRefs: false,
-        allowUnavailableSecretOwners: true,
-        loadablePluginOrigins: new Map(),
-      } as const;
+      const { ref, options } = await runtimeOptions("service", "SERVICE_API_KEY");
 
       storeMocks.readValue.mockResolvedValue({ ok: true, value: "previous-secret" });
-      const active = await prepareSecretsRuntimeSnapshot(runtimeOptions);
+      const active = await prepareSecretsRuntimeSnapshot(options);
       const { activateSecretsRuntimeSnapshot } = await import("./runtime.js");
       activateSecretsRuntimeSnapshot(active);
       expect(active.config.skills?.entries?.service?.apiKey).toBe("previous-secret");
 
       storeMocks.readValue.mockResolvedValue(
-        failure === "redacted"
-          ? { ok: true, value: "__OPENCLAW_REDACTED__" }
-          : {
-              ok: false,
-              error: {
-                code: "SECRET_STORE_NOT_FOUND",
-                message: "Secret store entry was not found.",
-              },
-            },
+        failure === "redacted" ? { ok: true, value: "__OPENCLAW_REDACTED__" } : missing,
       );
       const refreshed = await prepareSecretsRuntimeSnapshot({
-        ...runtimeOptions,
+        ...options,
         ...(failure === "missing"
           ? { forceColdRefKeys: new Set(["store:default:SERVICE_API_KEY"]) }
           : {}),

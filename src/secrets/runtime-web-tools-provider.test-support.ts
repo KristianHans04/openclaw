@@ -20,8 +20,6 @@ export function createWebCredentialEntry(
 
 export function providerPluginId(provider: ProviderUnderTest): string {
   switch (provider) {
-    case "duckduckgo":
-      return "duckduckgo";
     case "gemini":
       return "google";
     case "grok":
@@ -38,23 +36,25 @@ export { ensureRecord };
 function setConfiguredProviderKey(
   configTarget: OpenClawConfig,
   pluginId: string,
+  surface: "webSearch" | "webFetch",
   value: unknown,
 ): void {
   const plugins = ensureRecord(configTarget as Record<string, unknown>, "plugins");
   const entries = ensureRecord(plugins, "entries");
   const pluginEntry = ensureRecord(entries, pluginId);
   const config = ensureRecord(pluginEntry, "config");
-  const webSearch = ensureRecord(config, "webSearch");
-  webSearch.apiKey = value;
+  ensureRecord(config, surface).apiKey = value;
 }
 
-function setConfiguredFetchProviderKey(configTarget: OpenClawConfig, value: unknown): void {
-  const plugins = ensureRecord(configTarget as Record<string, unknown>, "plugins");
-  const entries = ensureRecord(plugins, "entries");
-  const pluginEntry = ensureRecord(entries, "firecrawl");
-  const config = ensureRecord(pluginEntry, "config");
-  const webFetch = ensureRecord(config, "webFetch");
-  webFetch.apiKey = value;
+function configuredKey(
+  config: OpenClawConfig | undefined,
+  pluginId: string,
+  surface: "webSearch" | "webFetch",
+) {
+  const entry = config?.plugins?.entries?.[pluginId]?.config;
+  return entry && typeof entry === "object"
+    ? (entry as Partial<Record<typeof surface, { apiKey?: unknown }>>)[surface]?.apiKey
+    : undefined;
 }
 
 export function createTestProvider(params: {
@@ -80,14 +80,7 @@ export function createTestProvider(params: {
     setCredentialValue: (searchConfigTarget, value) => {
       searchConfigTarget.apiKey = value;
     },
-    getConfiguredCredentialValue: (config) => {
-      const entryConfig = config?.plugins?.entries?.[params.pluginId]?.config;
-      const configuredValue =
-        entryConfig && typeof entryConfig === "object"
-          ? (entryConfig as { webSearch?: { apiKey?: unknown } }).webSearch?.apiKey
-          : undefined;
-      return configuredValue;
-    },
+    getConfiguredCredentialValue: (config) => configuredKey(config, params.pluginId, "webSearch"),
     getConfiguredCredentialFallback: (config) => {
       if (params.provider === "gemini") {
         const provider = config?.models?.providers?.google;
@@ -101,7 +94,7 @@ export function createTestProvider(params: {
       return undefined;
     },
     setConfiguredCredentialValue: (configTarget, value) => {
-      setConfiguredProviderKey(configTarget, params.pluginId, value);
+      setConfiguredProviderKey(configTarget, params.pluginId, "webSearch", value);
     },
     resolveRuntimeMetadata:
       params.provider === "perplexity"
@@ -142,18 +135,9 @@ export function buildTestWebFetchProviders(): PluginWebFetchProviderEntry[] {
       setCredentialValue: (fetchConfigTarget, value) => {
         fetchConfigTarget.apiKey = value;
       },
-      getConfiguredCredentialValue: (config) => {
-        const entryConfig = config?.plugins?.entries?.firecrawl?.config;
-        return entryConfig && typeof entryConfig === "object"
-          ? (entryConfig as { webFetch?: { apiKey?: unknown } }).webFetch?.apiKey
-          : undefined;
-      },
+      getConfiguredCredentialValue: (config) => configuredKey(config, "firecrawl", "webFetch"),
       getConfiguredCredentialFallback: (config) => {
-        const entryConfig = config?.plugins?.entries?.firecrawl?.config;
-        const apiKey =
-          entryConfig && typeof entryConfig === "object"
-            ? (entryConfig as { webSearch?: { apiKey?: unknown } }).webSearch?.apiKey
-            : undefined;
+        const apiKey = configuredKey(config, "firecrawl", "webSearch");
         return apiKey === undefined
           ? undefined
           : {
@@ -162,7 +146,7 @@ export function buildTestWebFetchProviders(): PluginWebFetchProviderEntry[] {
             };
       },
       setConfiguredCredentialValue: (configTarget, value) => {
-        setConfiguredFetchProviderKey(configTarget, value);
+        setConfiguredProviderKey(configTarget, "firecrawl", "webFetch", value);
       },
       createTool: () => null,
     },
