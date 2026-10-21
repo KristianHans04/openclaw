@@ -1,7 +1,23 @@
-// Openshell tests cover config plugin behavior.
 import fsSync from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createOpenShellPluginConfigSchema, resolveOpenShellPluginConfig } from "./config.js";
+
+const parse = (config: unknown) => createOpenShellPluginConfigSchema().safeParse?.(config).success;
+const resolveWorkspace = (remoteRoot: string) =>
+  resolveOpenShellPluginConfig({
+    worker: {
+      agentWorkspace: { agentId: "main", remoteRoot },
+      model: {
+        provider: "openai",
+        id: "worker-model",
+        api: "openai-responses",
+        baseUrl: "https://api.openai.com/v1",
+        credentialEnv: "OPENAI_API_KEY",
+        contextWindow: 8192,
+        maxTokens: 1024,
+      },
+    },
+  });
 
 describe("openshell plugin config", () => {
   it("applies defaults", () => {
@@ -22,38 +38,19 @@ describe("openshell plugin config", () => {
     });
   });
 
-  it("rejects relative remote paths", () => {
-    expect(
-      createOpenShellPluginConfigSchema().safeParse?.({
-        remoteWorkspaceDir: "sandbox",
-      }).success,
-    ).toBe(false);
-    expect(() =>
-      resolveOpenShellPluginConfig({
-        remoteWorkspaceDir: "sandbox",
-      }),
-    ).toThrow("OpenShell remoteWorkspaceDir must be absolute");
-  });
-
-  it("rejects remote paths outside managed sandbox roots", () => {
-    expect(
-      createOpenShellPluginConfigSchema().safeParse?.({
-        remoteWorkspaceDir: "/tmp/victim",
-      }).success,
-    ).toBe(false);
-    expect(() =>
-      resolveOpenShellPluginConfig({
-        remoteWorkspaceDir: "/tmp/victim",
-      }),
-    ).toThrow("OpenShell remoteWorkspaceDir must stay under /sandbox or /agent");
+  it.each([
+    ["sandbox", "must be absolute"],
+    ["/tmp/victim", "must stay under /sandbox or /agent"],
+  ])("rejects unmanaged remote path %s", (remoteWorkspaceDir, message) => {
+    const config = { remoteWorkspaceDir };
+    expect(parse(config)).toBe(false);
+    expect(() => resolveOpenShellPluginConfig(config)).toThrow(
+      `OpenShell remoteWorkspaceDir ${message}`,
+    );
   });
 
   it("rejects normalized paths that escape managed sandbox roots during config validation", () => {
-    expect(
-      createOpenShellPluginConfigSchema().safeParse?.({
-        remoteAgentWorkspaceDir: "/agent/../../etc",
-      }).success,
-    ).toBe(false);
+    expect(parse({ remoteAgentWorkspaceDir: "/agent/../../etc" })).toBe(false);
   });
 
   it("preserves shipped equal workspace roots", () => {
@@ -61,27 +58,14 @@ describe("openshell plugin config", () => {
       remoteWorkspaceDir: "/sandbox/project",
       remoteAgentWorkspaceDir: "/sandbox/project",
     };
-    expect(createOpenShellPluginConfigSchema().safeParse?.(config).success).toBe(true);
+    expect(parse(config)).toBe(true);
     expect(resolveOpenShellPluginConfig(config)).toMatchObject(config);
   });
 
   it("requires a literal, normalized private agent workspace root", () => {
-    const parse = (remoteRoot: string) =>
-      resolveOpenShellPluginConfig({
-        worker: {
-          agentWorkspace: { agentId: "main", remoteRoot },
-          model: {
-            provider: "openai",
-            id: "worker-model",
-            api: "openai-responses",
-            baseUrl: "https://api.openai.com/v1",
-            credentialEnv: "OPENAI_API_KEY",
-            contextWindow: 8192,
-            maxTokens: 1024,
-          },
-        },
-      });
-    expect(parse("/agent/canonical").worker?.agentWorkspace?.remoteRoot).toBe("/agent/canonical");
+    expect(resolveWorkspace("/agent/canonical").worker?.agentWorkspace?.remoteRoot).toBe(
+      "/agent/canonical",
+    );
     for (const root of [
       "/agent",
       "/sandbox",
@@ -93,16 +77,14 @@ describe("openshell plugin config", () => {
       "/agent/!(private)",
       "/agent/a\\b",
     ]) {
-      expect(() => parse(root)).toThrow();
+      expect(() => resolveWorkspace(root)).toThrow();
     }
   });
 
   it("rejects timeouts beyond Node's safe timer range", () => {
-    expect(() =>
-      resolveOpenShellPluginConfig({
-        timeoutSeconds: 2_147_001,
-      }),
-    ).toThrow("timeoutSeconds must be a number <= 2147000");
+    expect(() => resolveOpenShellPluginConfig({ timeoutSeconds: 2_147_001 })).toThrow(
+      "timeoutSeconds must be a number <= 2147000",
+    );
   });
 
   it("keeps the runtime json schema in sync with the manifest config schema", () => {
