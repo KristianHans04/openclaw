@@ -1,4 +1,3 @@
-// Cron-owned session retention preserves transcripts owned by running jobs.
 import { formatCliCommand } from "../cli/command-format.js";
 import { getRuntimeConfig } from "../config/config.js";
 import {
@@ -145,10 +144,12 @@ export async function runSessionRegistryMaintenance(params: {
       const deletedAgents = new Map(
         snapshot?.deletedAgents.map(({ agentId, status }) => [agentId, status]),
       );
-      for (const target of await resolveAllAgentSessionStoreTargetsAsync(cfg, {
+      const targets = await resolveAllAgentSessionStoreTargetsAsync(cfg, {
         env,
         registeredDatabases,
-      })) {
+      });
+      const eligibleTargets: typeof targets = [];
+      for (const target of targets) {
         assertCurrent();
         const deletion = deletedAgents.get(target.agentId) ?? "absent";
         const databasePath =
@@ -180,11 +181,16 @@ export async function runSessionRegistryMaintenance(params: {
           stores.push({ ...target, skippedReason: "agent-store-held", warning });
           continue;
         }
+        eligibleTargets.push(target);
+      }
+      for (const target of eligibleTargets) {
+        assertCurrent();
         const result = await runSessionRegistryMaintenanceForStore({
           ...target,
           apply: params.apply,
           retentionMs: SESSION_REGISTRY_RETENTION_MS,
           runningCronJobIds: runningCronJobs.ids,
+          childStores: eligibleTargets,
           assertCurrent,
         });
         assertCurrent();

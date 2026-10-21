@@ -185,11 +185,29 @@ it("retains a cron session whose cold snapshot changes after pruning was planned
     await replaceSessionEntry(scope, changedEntry);
     return applyRemoval(params);
   });
-  expect(await maintain(scope.storePath)).toMatchObject({ preservedRunning: 0, pruned: 0 });
+  await expect(maintain(scope.storePath)).rejects.toThrow(
+    "Session ancestry changed before cron registry cleanup",
+  );
   expect(mutation).toHaveBeenCalledOnce();
   expect(read()).toEqual(changedEntry);
   await expect(transcripts()).resolves.toEqual([event]);
   expect(await archives()).toEqual([]);
+});
+
+it("defers cleanup when a live child is created after the ancestry read", async () => {
+  const { scope, read } = await cronCase("new-child");
+  spyRemoval().mockImplementationOnce(async (params) => {
+    await replaceSessionEntry(
+      { storePath: scope.storePath, sessionKey: "agent:main:subagent:new-child" },
+      staleEntry("child", { spawnedBy: scope.sessionKey, parentSessionId: scope.sessionId }),
+    );
+    return applyRemoval(params);
+  });
+  await expect(maintain(scope.storePath)).rejects.toThrow(
+    "Session ancestry changed before cron registry cleanup",
+  );
+  expect(read()?.sessionId).toBe(scope.sessionId);
+  expect((await maintain(scope.storePath)).pruned).toBe(0);
 });
 
 it("summarizes a missing store without creating it", async () => {
