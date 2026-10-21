@@ -1,22 +1,12 @@
 import fsSync from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createOpenShellPluginConfigSchema, resolveOpenShellPluginConfig } from "./config.js";
+import { createWorkerFixture } from "./worker.test-support.js";
 
 const parse = (config: unknown) => createOpenShellPluginConfigSchema().safeParse?.(config).success;
 const resolveWorkspace = (remoteRoot: string) =>
   resolveOpenShellPluginConfig({
-    worker: {
-      agentWorkspace: { agentId: "main", remoteRoot },
-      model: {
-        provider: "openai",
-        id: "worker-model",
-        api: "openai-responses",
-        baseUrl: "https://api.openai.com/v1",
-        credentialEnv: "OPENAI_API_KEY",
-        contextWindow: 8192,
-        maxTokens: 1024,
-      },
-    },
+    worker: createWorkerFixture({ agentId: "main", remoteRoot }),
   });
 
 describe("openshell plugin config", () => {
@@ -66,17 +56,9 @@ describe("openshell plugin config", () => {
     expect(resolveWorkspace("/agent/canonical").worker?.agentWorkspace?.remoteRoot).toBe(
       "/agent/canonical",
     );
-    for (const root of [
-      "/agent",
-      "/sandbox",
-      "/etc/private",
-      "/agent/a/../b",
-      "/agent/*",
-      "/agent/[ab]",
-      "/agent/{a,b}",
-      "/agent/!(private)",
-      "/agent/a\\b",
-    ]) {
+    const rejectedRoots =
+      "/agent /sandbox /etc/private /agent/a/../b /agent/* /agent/[ab] /agent/{a,b} /agent/!(private) /agent/a\\b";
+    for (const root of rejectedRoots.split(" ")) {
       expect(() => resolveWorkspace(root)).toThrow();
     }
   });

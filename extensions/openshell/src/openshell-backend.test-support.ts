@@ -22,16 +22,14 @@ export let createOpenShellSandboxBackendManager: typeof import("./backend.js").c
 export let createOpenShellSandboxBackendFactory: typeof import("./backend.js").createOpenShellSandboxBackendFactory;
 
 export async function installOpenShellBackendMocks() {
-  vi.doMock("openclaw/plugin-sdk/sandbox", async () => ({
-    ...(await vi.importActual<typeof import("openclaw/plugin-sdk/sandbox")>(
-      "openclaw/plugin-sdk/sandbox",
-    )),
+  vi.doMock("openclaw/plugin-sdk/sandbox", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("openclaw/plugin-sdk/sandbox")>()),
     disposeSshSandboxSession: sandboxMocks.disposeSshSandboxSession,
     prepareSshSandboxExec: sandboxMocks.prepareSshSandboxExec,
     runSshSandboxCommand: sandboxMocks.runSshSandboxCommand,
   }));
-  vi.doMock("./cli.js", async () => ({
-    ...(await vi.importActual<typeof import("./cli.js")>("./cli.js")),
+  vi.doMock("./cli.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("./cli.js")>()),
     ...cliMocks,
   }));
   ({ createOpenShellSandboxBackendFactory, createOpenShellSandboxBackendManager } =
@@ -109,9 +107,7 @@ export async function createOpenShellBackendFixture(params: {
   const factory = createOpenShellSandboxBackendFactory({
     pluginConfig: resolveOpenShellPluginConfig({
       mode: params.mode,
-      ...(params.remoteAgentWorkspaceDir
-        ? { remoteAgentWorkspaceDir: params.remoteAgentWorkspaceDir }
-        : {}),
+      remoteAgentWorkspaceDir: params.remoteAgentWorkspaceDir || undefined,
     }),
   });
   return (await factory({

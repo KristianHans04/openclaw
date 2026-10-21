@@ -13,25 +13,16 @@ vi.mock("openclaw/plugin-sdk/process-runtime", async (importOriginal) => ({
   runUtf8CommandWithTimeout: run,
 }));
 import { registerOpenShellWorkerCli } from "./worker-cli.js";
+import { createWorkerFixture } from "./worker.test-support.js";
 
-const worker = {
-  model: {
-    provider: "openai",
-    id: "worker-model",
-    api: "openai-responses",
-    baseUrl: "https://api.openai.com/v1",
-    credentialEnv: "OPENAI_API_KEY",
-    contextWindow: 8192,
-    maxTokens: 1024,
-  },
-};
+const worker = createWorkerFixture();
 function config(agentWorkspace?: { agentId: string; remoteRoot: string }): OpenClawConfig {
   const pluginConfig = {
     gateway: "container",
     workspace: "workers",
     providers: ["broker"],
     from: "worker-image",
-    worker: agentWorkspace ? { ...worker, agentWorkspace } : worker,
+    worker: createWorkerFixture(agentWorkspace),
   };
   return { plugins: { entries: { openshell: { enabled: true, config: pluginConfig } } } };
 }
@@ -68,15 +59,10 @@ describe("OpenShell standalone worker CLI", () => {
         gateway: {
           nodes: {
             commands: {
-              allow: [
-                "file.fetch",
-                "file.stat",
-                "file.write",
-                "file.create",
-                "dir.list",
-                "workspace.memory",
-                "workspace.skills",
-              ],
+              allow:
+                "file.fetch file.stat file.write file.create dir.list workspace.memory workspace.skills".split(
+                  " ",
+                ),
             },
           },
         },
@@ -113,27 +99,19 @@ describe("OpenShell standalone worker CLI", () => {
       }
       const restrictions: Array<[(cfg: OpenClawConfig) => void, RegExp]> = [
         [
-          (cfg) => {
-            cfg.plugins!.entries!["file-transfer"] = { enabled: false };
-          },
+          (cfg) => Object.assign(cfg.plugins!.entries!, { "file-transfer": { enabled: false } }),
           /existing plugin restriction/,
         ],
         [
-          (cfg) => {
-            cfg.plugins!.deny = ["file-transfer"];
-          },
+          (cfg) => Object.assign(cfg.plugins!, { deny: ["file-transfer"] }),
           /existing plugin restriction/,
         ],
         [
-          (cfg) => {
-            cfg.gateway!.nodes!.commands!.allow = ["file.fetch"];
-          },
+          (cfg) => Object.assign(cfg.gateway!.nodes!.commands!, { allow: ["file.fetch"] }),
           /existing Gateway node-command grants/,
         ],
         [
-          (cfg) => {
-            cfg.gateway!.nodes!.commands!.deny = ["file.write"];
-          },
+          (cfg) => Object.assign(cfg.gateway!.nodes!.commands!, { deny: ["file.write"] }),
           /existing Gateway node-command grants/,
         ],
         [
@@ -182,18 +160,9 @@ describe("OpenShell standalone worker CLI", () => {
     await invoke(config(), "create", "native-worker");
     expect(run.mock.calls[0]?.[0]).toEqual([
       ...sandboxArgv,
-      "create",
-      "--name",
-      "native-worker",
-      "--from",
-      "worker-image",
-      "--detach",
-      "--no-auto-providers",
-      "--provider",
-      "broker",
-      "--",
-      "sleep",
-      "infinity",
+      ..."create --name native-worker --from worker-image --detach --no-auto-providers --provider broker -- sleep infinity".split(
+        " ",
+      ),
     ]);
     await expect(invoke({}, "create", "native-worker")).rejects.toThrow("at least one existing");
     expect(run).toHaveBeenCalledTimes(1);
@@ -212,11 +181,7 @@ describe("OpenShell standalone worker CLI", () => {
       await invoke(config(), "run", "native-worker", "--target-file", target);
       expect(run.mock.calls[0]?.[0]).toEqual([
         ...sandboxArgv,
-        "provider",
-        "attach",
-        "native-worker",
-        "broker",
-        "--wait",
+        ..."provider attach native-worker broker --wait".split(" "),
       ]);
       const [argv, options] = run.mock.calls[1]!;
       const command = argv.slice(argv.indexOf("sandbox"));
