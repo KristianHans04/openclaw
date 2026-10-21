@@ -1,4 +1,3 @@
-import type { SessionsDiffResult } from "../../../../../packages/gateway-protocol/src/index.js";
 import { BROWSER_IMAGE_MIME_TYPES } from "../../../../../src/shared/browser-image-mime-types.js";
 import { downloadArtifact } from "../../../api/artifact-download.ts";
 import { GatewayRequestError } from "../../../api/gateway.ts";
@@ -15,6 +14,7 @@ import { pathDisplayName } from "../../../lib/path-display.ts";
 import { resolveSessionDisplayName } from "../../../lib/session-display.ts";
 import { parseAgentSessionKey } from "../../../lib/sessions/session-key.ts";
 import { sessionWorkspaceFileKey } from "../../../lib/sessions/workspace.ts";
+import { resolveSessionWorkspaceDiff } from "./chat-session-workspace-diff.ts";
 import {
   hasUniformLineEndings,
   loadArtifactSidebarContent,
@@ -31,7 +31,6 @@ import {
   loadSessionWorkspace,
   refreshSessionWorkspaceState,
   sessionWorkspaceForHost,
-  trackSessionCheckoutSidebar,
 } from "./chat-session-workspace-state.ts";
 import type {
   SessionWorkspaceHost,
@@ -76,6 +75,7 @@ function openFile(
     requestPath?: string;
     sessionKey?: string;
     disposition?: "pinned" | "preview";
+    intent?: "navigate";
   } = {},
 ) {
   const requestPath = opts.requestPath ?? path;
@@ -307,6 +307,7 @@ function openFile(
     {
       line: opts.line,
       disposition: opts.disposition,
+      intent: opts.intent,
       label: pathDisplayName(path),
       revalidate: true,
       resolveLabel: (result) => result.file?.name,
@@ -395,6 +396,7 @@ function openArtifact(
   workspace: SessionWorkspaceState,
   artifactId: string,
   disposition?: "pinned" | "preview",
+  intent?: "navigate",
 ) {
   const query = {
     sessionKey: workspace.sessionKey,
@@ -450,6 +452,7 @@ function openArtifact(
     `Failed to load artifact ${artifactId}`,
     {
       disposition,
+      intent,
       label:
         workspace.list?.artifacts?.find((artifact) => artifact.id === artifactId)?.title ||
         t("chat.workspaceFiles.artifacts"),
@@ -462,6 +465,7 @@ export function createSessionWorkspaceProps(
   state: SessionWorkspaceHost,
   options?: {
     presentation?: "desktop" | "mobile";
+    openIntent?: "navigate";
     transcriptAttachments?: TranscriptAttachments;
     /** Mobile host owns persistent expansion on editable focus. */
     onSearchFocus?: () => void;
@@ -667,6 +671,7 @@ export function createSessionWorkspaceProps(
           : {};
       void openFile(state, workspace, path, {
         ...opts,
+        intent: options?.openIntent,
         disposition: options?.presentation === "desktop" ? (disposition ?? "preview") : undefined,
       });
     },
@@ -692,6 +697,7 @@ export function createSessionWorkspaceProps(
         workspace,
         artifactId,
         options?.presentation === "desktop" ? (disposition ?? "preview") : undefined,
+        options?.openIntent,
       ),
     onOpenDiff: diffContent ? () => state.handleOpenSidebar(diffContent) : undefined,
   };
@@ -700,43 +706,7 @@ export function createSessionWorkspaceProps(
 export function resolveSessionDiffSidebarContent(
   state: SessionWorkspaceHost,
 ): SidebarContent | null {
-  const workspace = getSessionWorkspace(state);
-  const client = state.client;
-  if (isGatewayMethodAdvertised(state, "sessions.diff") !== true || !client) {
-    return null;
-  }
-  if (workspace.diffContent) {
-    return workspace.diffContent;
-  }
-  const sessionKey = state.sessionKey;
-  const agentId = workspace.agentId;
-  const canLoadFileText =
-    isGatewayMethodAdvertised(state, "sessions.files.get") === true && Boolean(state.client);
-  const content: SidebarContent = {
-    kind: "session-diff",
-    // Checkout retirement replaces this identity; ordinary refreshes retain it.
-    owner: workspace,
-    load: async (scope) =>
-      await client.request<SessionsDiffResult>("sessions.diff", {
-        sessionKey,
-        ...(agentId ? { agentId } : {}),
-        ...scope,
-      }),
-    loadFileText: canLoadFileText
-      ? async (path) => {
-          try {
-            const result = await state.sessions.getFile(sessionKey, path, {
-              agentId,
-            });
-            return readWorkspaceFileText(result?.file);
-          } catch {
-            return null;
-          }
-        }
-      : undefined,
-    openFile: (path) => void openFile(state, getSessionWorkspace(state), path),
-  };
-  trackSessionCheckoutSidebar(content);
-  workspace.diffContent = content;
-  return content;
+  return resolveSessionWorkspaceDiff(state, (path) =>
+    openFile(state, getSessionWorkspace(state), path),
+  );
 }
