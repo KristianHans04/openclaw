@@ -564,22 +564,44 @@ describe("onboard (non-interactive): gateway and remote auth", () => {
   });
 
   it.each([
-    "existing-password",
-    { source: "env", provider: "default", id: "EXISTING_REMOTE_PASSWORD" },
+    [remoteCredentialUrl, "existing-password"],
+    [remoteCredentialUrl, { source: "env", provider: "default", id: "EXISTING_REMOTE_PASSWORD" }],
+    [
+      `${remoteCredentialUrl}/`,
+      { source: "env", provider: "default", id: "EXISTING_REMOTE_PASSWORD" },
+    ],
   ] as const)(
-    "preserves existing remote token and password %j without a replacement",
-    async (password) => {
+    "preserves existing remote credentials from %s without a replacement",
+    async (url, password) => {
       const remote = {
-        url: remoteCredentialUrl,
+        url,
         token: "existing-token",
         password,
         tlsFingerprint: remoteTlsFingerprint,
+        transport: "ssh" as const,
+        sshTarget: "operator@gateway.example.test",
       };
       expect(
         await setupRemoteCredentials({ secretInputMode: "ref" }, remoteCredentialConfig(remote)),
-      ).toEqual(remote);
+      ).toEqual({ ...remote, url: remoteCredentialUrl });
     },
   );
+
+  it("clears credentials and transport trust when the remote query changes", async () => {
+    const url = `${remoteCredentialUrl}?account=work`;
+    const remote = await setupRemoteCredentials(
+      { remoteUrl: url },
+      remoteCredentialConfig({
+        url: remoteCredentialUrl,
+        token: remoteTokenRef,
+        password: "existing-password",
+        transport: "ssh",
+        sshTarget: "operator@gateway.example.test",
+        tlsFingerprint: remoteTlsFingerprint,
+      }),
+    );
+    expect(remote).toEqual({ url });
+  });
 
   it("writes gateway.remote url/token", async () => {
     await withStateDir("state-remote-", async (_stateDir) => {

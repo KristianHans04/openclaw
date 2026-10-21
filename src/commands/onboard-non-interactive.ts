@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { gatewayCredentialScope } from "../../packages/gateway-client/src/gateway-origin-scope.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { ConfigMutationConflictError, replaceConfigFile } from "../config/config.js";
 import { readConfigFileSnapshot } from "../config/io.js";
@@ -123,7 +124,8 @@ async function runNonInteractiveSetupExclusive(opts: OnboardOptions, runtime: Ru
     const remoteToken = normalizeOptionalString(opts.remoteToken);
     const remotePassword = normalizeOptionalString(opts.remotePassword);
     const existingRemote = baseConfig.gateway?.remote;
-    const remoteUrlChanged = normalizeOptionalString(existingRemote?.url) !== remoteUrl;
+    const remoteUrlChanged =
+      gatewayCredentialScope(existingRemote?.url ?? "") !== gatewayCredentialScope(remoteUrl ?? "");
     // A remote block belongs to one endpoint. Reusing it for a different URL can
     // send old credentials or keep routing through the old SSH target.
     const preservedRemote = remoteUrlChanged ? {} : { ...existingRemote };

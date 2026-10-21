@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { gatewayCredentialScope } from "../../packages/gateway-client/src/gateway-origin-scope.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { resolveOnboardingSetupTarget } from "../commands/onboard-agent-target.js";
 import * as firstAgentOnboarding from "../commands/onboard-first-agent.js";
@@ -359,7 +360,9 @@ async function runSetupWizardOnce(
   const optionRemoteUrl = normalizeOptionalString(opts.remoteUrl);
   const optionRemoteToken = normalizeOptionalString(opts.remoteToken);
   const optionRemotePassword = normalizeOptionalString(opts.remotePassword);
-  const remoteUrlChanged = opts.remoteUrl !== undefined && optionRemoteUrl !== storedRemoteUrl;
+  const remoteUrlChanged =
+    opts.remoteUrl !== undefined &&
+    gatewayCredentialScope(optionRemoteUrl ?? "") !== gatewayCredentialScope(storedRemoteUrl ?? "");
   const remoteSeedConfig: OpenClawConfig =
     opts.remoteUrl === undefined &&
     opts.remoteToken === undefined &&

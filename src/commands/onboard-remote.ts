@@ -1,5 +1,8 @@
 import { parseStrictNonNegativeInteger } from "@openclaw/normalization-core/number-coercion";
-import { gatewayOriginScope } from "../../packages/gateway-client/src/gateway-origin-scope.js";
+import {
+  gatewayCredentialScope,
+  gatewayOriginScope,
+} from "../../packages/gateway-client/src/gateway-origin-scope.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { SecretInput } from "../config/types.secrets.js";
 import { isSecureWebSocketUrl } from "../gateway/net.js";
@@ -163,7 +166,8 @@ export async function promptRemoteGatewayConfig(
 
   // A saved secret belongs to the selected endpoint, not a newly entered URL or tunnel.
   const existingSecret =
-    (!cfg.gateway?.remote?.url || url === cfg.gateway.remote.url.trim()) &&
+    (!cfg.gateway?.remote?.url ||
+      gatewayCredentialScope(url) === gatewayCredentialScope(cfg.gateway.remote.url)) &&
     selectedDiscovery?.transport !== "ssh"
       ? (cfg.gateway?.remote?.token ?? cfg.gateway?.remote?.password)
       : undefined;
@@ -243,7 +247,8 @@ export async function promptRemoteGatewayConfig(
       mode: "remote",
       remote: {
         // A newly suggested manual tunnel can reach another host behind the same loopback URL.
-        ...(url === remoteOriginUrl?.trim() && selectedDiscovery?.transport !== "ssh"
+        ...(gatewayCredentialScope(url) === gatewayCredentialScope(remoteOriginUrl ?? "") &&
+        selectedDiscovery?.transport !== "ssh"
           ? cfg.gateway?.remote
           : {}),
         url,

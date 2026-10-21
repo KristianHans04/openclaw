@@ -557,29 +557,31 @@ describe("runSetupWizard", () => {
     expect(runtime.log).not.toHaveBeenCalledWith(expect.stringContaining(remoteCredential));
   });
 
-  it("does not reuse stored remote credentials for an overridden URL", async () => {
+  it.each([
+    { name: "a different host", url: "wss://flag.example.com:18789", preserve: false },
+    {
+      name: "a different query",
+      url: "wss://stored.example.com:18789?account=work",
+      preserve: false,
+    },
+    { name: "an equivalent URL", url: "wss://stored.example.com:18789/", preserve: true },
+  ])("scopes interactive remote credentials for $name", async ({ url, preserve }) => {
     const remote = storedRemote({
+      token: "stored-token",
+      password: undefined,
       edgeAuth: { "X-Edge-Auth": "test-secret" },
       tlsFingerprint: "ab".repeat(32),
     });
     readConfigFileSnapshot.mockResolvedValueOnce(configSnapshot({ gateway: { remote } }));
     vi.stubEnv("OPENCLAW_GATEWAY_PASSWORD", "ambient-password"); // pragma: allowlist secret
 
-    await runSetupWizard(
-      {
-        acceptRisk: true,
-        flow: "advanced",
-        mode: "remote",
-        remoteUrl: "wss://flag.example.com:18789",
-      },
-      createRuntime(),
-      buildWizardPrompter(),
-    );
+    await runWizard({ flow: "advanced", mode: "remote", remoteUrl: url });
 
     expect(probeGatewayReachable).toHaveBeenCalledWith({
       ...configuredRemoteProbeArgs,
-      configuredRemote: false,
-      url: "wss://flag.example.com:18789",
+      configuredRemote: preserve,
+      url,
+      token: preserve ? remote.token : undefined,
       config: expect.objectContaining({
         gateway: expect.objectContaining({
           remote: expect.objectContaining({
@@ -593,8 +595,8 @@ describe("runSetupWizard", () => {
     expect(remotePromptCalls()).toContainEqual({
       remote: {
         ...remote,
-        url: "wss://flag.example.com:18789",
-        token: undefined,
+        url,
+        token: preserve ? remote.token : undefined,
         password: undefined,
       },
       prompter: expect.any(Object),
@@ -606,17 +608,12 @@ describe("runSetupWizard", () => {
     const remoteToken = "REDACTED";
     validateGatewayWebSocketUrl.mockReturnValueOnce("Use wss:// for public gateways");
 
-    await runSetupWizard(
-      {
-        acceptRisk: true,
-        flow: "advanced",
-        mode: "remote",
-        remoteUrl: "ws://public.example",
-        remoteToken,
-      },
-      createRuntime(),
-      buildWizardPrompter(),
-    );
+    await runWizard({
+      flow: "advanced",
+      mode: "remote",
+      remoteUrl: "ws://public.example",
+      remoteToken,
+    });
 
     expect(validateGatewayWebSocketUrl).toHaveBeenCalledWith("ws://public.example");
     expect(probeGatewayReachable).not.toHaveBeenCalledWith(
