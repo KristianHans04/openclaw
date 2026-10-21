@@ -119,12 +119,12 @@ beforeAll(async () => {
   });
   await fs.writeFile(configPath, JSON.stringify(cfg));
   openOpenClawStateDatabase();
-  // Gateway startup prepares these machine facts before any request can reach model selection.
-  await preparePluginMetadataMachineStateAsync({ env: process.env });
 });
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);
   setRuntimeConfigSnapshot(cfg);
+  // Shared cleanup retires plugin facts, so each case repeats Gateway startup preparation.
+  await preparePluginMetadataMachineStateAsync({ env: process.env });
   const enqueue = sessionEventHandoff.enqueueSessionEventForHost;
   vi.spyOn(sessionEventHandoff, "enqueueSessionEventForHost").mockImplementation((...args) => {
     const receipt = enqueue(...args);
