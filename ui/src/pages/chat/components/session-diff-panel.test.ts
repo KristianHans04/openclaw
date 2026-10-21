@@ -439,10 +439,12 @@ describe("SessionDiffPanel", () => {
       vi.useRealTimers();
     });
     const computing = { ...result("feature/test"), computing: true };
+    const slow = deferred<SessionsDiffResult>();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     const loader = vi
       .fn<NonNullable<SessionDiffProps["loader"]>>()
       .mockResolvedValueOnce(computing)
-      .mockResolvedValueOnce(fileResult(SNAPSHOT_PATCH))
+      .mockReturnValueOnce(slow.promise)
       .mockResolvedValueOnce(computing)
       .mockResolvedValueOnce(fileResult(FRESH_PATCH));
     const onResult = vi.fn();
@@ -455,6 +457,20 @@ describe("SessionDiffPanel", () => {
     await vi.advanceTimersByTimeAsync(499);
     expect(loader).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
+    expect(loader).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    update({ active: false });
+    await vi.advanceTimersByTimeAsync(0);
+    update({ active: true });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(loader).toHaveBeenCalledTimes(2);
+    expect(panel.querySelector("openclaw-panel-loading-skeleton")).not.toBeNull();
+    expect(onResult).not.toHaveBeenCalled();
+    slow.resolve(fileResult(SNAPSHOT_PATCH));
+    await vi.advanceTimersByTimeAsync(0);
     expect(panel.textContent).toContain("snapshot line");
     expect(onResult).toHaveBeenCalledTimes(1);
 

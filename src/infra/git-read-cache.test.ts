@@ -418,6 +418,52 @@ describe("typed Git read ownership", () => {
     expect(gitRead).toHaveBeenCalledOnce();
   });
 
+  it("keeps warm polls on the freshness path beyond the cold wait budget", async () => {
+    vi.useFakeTimers();
+    const events: DiagnosticEventPayload[] = [];
+    onTestFinished(
+      onTrustedInternalDiagnosticEvent((event) => events.push(event), {
+        includeTrusted: ["diagnostic.phase.completed"],
+      }),
+    );
+    const poll = () =>
+      runGitReadOperation(
+        { type: "checkout.diff", input: { cwd: "/poll-warm-freshness" } },
+        { poll: true },
+      );
+    gitRead.mockResolvedValueOnce({ ...emptyDiff, additions: 1 });
+    await expect(poll()).resolves.toMatchObject({ additions: 1 });
+    await vi.advanceTimersByTimeAsync(1_001);
+    const revision = createDeferredCore<string>();
+    readRevision.mockReturnValue(revision.promise);
+    gitRead.mockResolvedValueOnce({ ...emptyDiff, additions: 2 });
+    const responses: unknown[] = [];
+    const requests = [poll(), poll()];
+    for (const request of requests) {
+      void request.then((result) => responses.push(result));
+    }
+    try {
+      await vi.advanceTimersByTimeAsync(2_001);
+      expect(responses).toEqual([]);
+      revision.resolve("edited");
+      await expect(Promise.all(requests)).resolves.toEqual([
+        { ...emptyDiff, additions: 2 },
+        { ...emptyDiff, additions: 2 },
+      ]);
+      expect(gitRead).toHaveBeenCalledTimes(2);
+      await vi.runAllTimersAsync();
+      await waitForDiagnosticEventsDrained();
+      expect(
+        events.filter(
+          (event) => event.type === "diagnostic.phase.completed" && event.name === "checkout.diff",
+        ),
+      ).toHaveLength(3);
+    } finally {
+      revision.resolve("edited");
+      await Promise.allSettled(requests);
+    }
+  });
+
   it("bounds pending poll work, fans out its errors, and retires it with the Gateway", async () => {
     vi.useFakeTimers();
     await drainGlobalSingletonLifecycleState("restart");

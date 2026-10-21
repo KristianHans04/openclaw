@@ -1438,6 +1438,10 @@ becomes materialized. The `phases.cold` and `phases.steady` fields separately re
 RPC latency, computing-response counts, and summed `sessions.diff` handler seconds.
 Their `refreshLatencyMs` includes all computing retries and actual timer delays from
 each refresh's first request to usable content, excluding the recurring poll cadence.
+`measurementStartedAtUnixMs`, `contentReadyAtMs`, and each refresh's `startedAtMs`
+allow paired runs to use a common steady window: refreshes starting after both sides
+received their final initial content, before either nominal deadline. Include the
+full completion latency for those refreshes, even when they finish after that window.
 Refreshes are tagged by their start phase; individual RPCs are tagged on completion.
 Completions are tagged cold until every client has received content and their
 diagnostics have drained, then tagged steady. Clients that finish early keep their

@@ -730,10 +730,12 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
       phase: "cold" | "steady";
       tab: number;
       checkout: number;
+      startedAtMs: number;
       elapsedMs: number;
     }[] = [];
     const firstPollStarted = new Map<string, number>();
     const firstContentMs = new Map<string, number>();
+    let contentReadyAtMs: number | undefined;
     let coldToSteady: Promise<void> | undefined;
     const sampleRpc = async (tab: number, checkout: number, sequence: number) => {
       const pollStarted = performance.now();
@@ -780,6 +782,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
         computing,
       });
       if (values.cold && !coldToSteady && firstContentMs.size === tabs) {
+        contentReadyAtMs = performance.now() - started;
         // Tag completions consistently and drain their diagnostics before changing phase.
         coldToSteady = waitForDiagnosticEventsDrained().then(() => {
           measurementPhase = "steady";
@@ -807,6 +810,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
     };
     measured = true;
     const cpuStarted = process.cpuUsage();
+    const measurementStartedAtUnixMs = Date.now();
     const started = performance.now();
     deadline = started + durationMs;
     await Promise.all([
@@ -868,6 +872,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
                     phase: refreshPhase,
                     tab,
                     checkout,
+                    startedAtMs: refreshStarted - started,
                     elapsedMs: performance.now() - refreshStarted,
                   });
                 }
@@ -1133,6 +1138,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
       editVisibilityMs,
       excludesFileControlVerified,
       durationMs,
+      measurementStartedAtUnixMs,
       warmupRpcMs,
       ...(values.cold
         ? {
@@ -1145,6 +1151,7 @@ async function measureRpc(fixture: Awaited<ReturnType<typeof readFixture>>) {
               ? summarize([...firstContentMs.values()])
               : null,
             contentReadyClients: firstContentMs.size,
+            contentReadyAtMs,
             expectedContentClients: tabs,
             checkoutByTab: peers.map((_peer, tab) => tab % targets.length),
             computingRetryMs: 500,

@@ -23,7 +23,7 @@ export type GitReadOptions = {
   refresh?: boolean;
   signal?: AbortSignal;
   diffTiming?: DiffReadTiming;
-  /** Return a computing result while preparing a diff; share completed results for one second. */
+  /** Bound cold diff waits; share completed cold results for one second. */
   poll?: boolean;
 };
 
@@ -134,7 +134,8 @@ function createReadCache<Input, Output>(
   };
   const read = async (input: Input, options: GitReadOptions = {}): Promise<Output> => {
     options.signal?.throwIfAborted();
-    const timing = options.diffTiming;
+    using completedTiming = polling ? startDiffReadTiming("checkout.diff") : undefined;
+    const timing = completedTiming ?? options.diffTiming;
     const validationStarted = timing ? performance.now() : 0;
     const key = keyOf(input);
     let entry = entries.get(key)?.entry;
@@ -304,6 +305,11 @@ function createReadCache<Input, Output>(
         addDiffReadDurations(timing, entry.timing);
       }
     }
+    if (completedTiming && options.diffTiming) {
+      addDiffReadDurations(options.diffTiming, completedTiming);
+      options.diffTiming.outcome = completedTiming.outcome;
+      options.diffTiming.missReason = completedTiming.missReason;
+    }
     return value;
   };
   return {
@@ -328,6 +334,9 @@ function createReadCache<Input, Output>(
         releasePoll(key, slot);
       }
       let poll = slot.poll;
+      if (!poll && slot.entry?.value) {
+        return read(input, options);
+      }
       if (!poll) {
         if (pollCount >= maxEntries) {
           for (const [otherKey, candidate] of entries) {
@@ -344,10 +353,10 @@ function createReadCache<Input, Output>(
           return computing();
         }
         const controller = new AbortController();
-        const promise = runWithGatewayDetachedWorkContinuation(async () => {
-          using timing = startDiffReadTiming("checkout.diff");
-          return await read(input, { ...options, signal: controller.signal, diffTiming: timing });
-        }, "runtime:checkout-diff");
+        const promise = runWithGatewayDetachedWorkContinuation(
+          () => read(input, { ...options, signal: controller.signal, diffTiming: undefined }),
+          "runtime:checkout-diff",
+        );
         poll = { promise, controller, pending: true, expiresAt: Number.POSITIVE_INFINITY };
         const admitted = poll;
         // Fan out both outcomes to reconnecting tabs before the next fresh read.
@@ -368,7 +377,7 @@ function createReadCache<Input, Output>(
             ? Promise.race([
                 poll.promise,
                 new Promise<Output>((resolve) => {
-                  // Let ordinary revision checks finish without another client retry interval.
+                  // Let short cold reads finish without another client retry interval.
                   timeout = setTimeout(() => {
                     timedOut = true;
                     resolve(computing());
@@ -612,17 +621,7 @@ async function readDiff(
   input: GitReadOperations["checkout.diff"]["input"],
   options?: GitReadOptions,
 ) {
-  // Poll transactions emit their own completed-work timing after the RPC has returned.
-  using timing = options?.poll ? undefined : startDiffReadTiming("checkout.diff");
-  const value = await cache.read(input, {
-    ...options,
-    diffTiming: timing ?? options?.diffTiming,
-  });
-  if (timing && options?.diffTiming) {
-    addDiffReadDurations(options.diffTiming, timing);
-    options.diffTiming.outcome = timing.outcome;
-    options.diffTiming.missReason = timing.missReason;
-  }
+  const value = await cache.read(input, options);
   // Transport truncation mutates these envelopes, not the shared patch strings.
   return {
     ...value,
