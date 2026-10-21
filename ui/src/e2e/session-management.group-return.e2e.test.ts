@@ -67,6 +67,8 @@ suite.define(() => {
       const groups = page.locator('[data-session-section="groups"]');
       const row = done.locator('[data-session-key="agent:main:done-group"]');
       await row.waitFor({ state: "visible", timeout: 10_000 });
+      await chooseSidebarMenuOption(page, "Hide empty groups", "Never");
+      await closeSidebarMenu(page);
       await groups.waitFor({ state: "visible" });
 
       await row.hover();
