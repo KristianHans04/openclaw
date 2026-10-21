@@ -3,7 +3,7 @@ import {
   renderMermaidSvg,
   type MermaidTheme,
 } from "@openclaw/mermaid-renderer";
-import { createEffect, createMemo, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, createUniqueId, onSettled, Show } from "solid-js";
 import { pruneMapToMaxSize } from "../../../src/infra/map-size.ts";
 import { copyToClipboard } from "../lib/clipboard.ts";
 import { t } from "../lib/reactive/i18n.ts";
@@ -76,11 +76,6 @@ function MermaidContent(props: MermaidProps, host: MermaidElement) {
   let renderedSource: string | undefined;
   let copyAttempt = 0;
   let disposed = false;
-  const themeObserver = new MutationObserver(() => setThemeRevision((value) => value + 1));
-  themeObserver.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ["data-theme", "data-theme-mode", "style"],
-  });
 
   function releaseImage() {
     if (allocatedUrl) {
@@ -135,11 +130,21 @@ function MermaidContent(props: MermaidProps, host: MermaidElement) {
     },
   );
 
-  onCleanup(() => {
-    disposed = true;
-    themeObserver.disconnect();
-    copyAttempt += 1;
-    releaseImage();
+  onSettled(() => {
+    const themeObserver = new MutationObserver(() => setThemeRevision((value) => value + 1));
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme", "data-theme-mode", "style"],
+    });
+    return () => {
+      disposed = true;
+      themeObserver.disconnect();
+      copyAttempt += 1;
+      // Retire the resource without publishing into a disposed presentation.
+      if (allocatedUrl) {
+        URL.revokeObjectURL(allocatedUrl);
+      }
+    };
   });
 
   async function copySource() {
