@@ -108,7 +108,14 @@ export function parseReadableSqliteSessionEntryRow(
   projection: SessionEntryProjection = "full",
 ): SessionEntry | null {
   const parsed = parseReadableSessionEntryData(database, row, projection);
-  return parsed ? projectSqliteSessionParticipants(database.db, row.session_key, parsed) : null;
+  return parsed
+    ? projectSqliteSessionParticipants(
+        database.db,
+        row.session_key,
+        parsed,
+        row.participant_identities_json,
+      )
+    : null;
 }
 
 /** Decode supplied rows in caller order while sharing their lazy participant acquisition. */
@@ -132,7 +139,7 @@ export function prepareSqliteSessionEntryRowDecoder(
       return null;
     }
     try {
-      return project(row.session_key, parsed);
+      return project(row.session_key, parsed, row.participant_identities_json);
     } catch (error) {
       if (!onParticipantProjectionError) {
         throw error;

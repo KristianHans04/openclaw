@@ -338,6 +338,18 @@ describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
             },
           ]),
         );
+        runSqliteImmediateTransactionSync(database.db, () => {
+          const insert = database.db.prepare(
+            "INSERT INTO session_participants (session_key, identity_namespace, actor_id, contribution_count, first_prompted_at) VALUES (?, ?, ?, 1, ?)",
+          );
+          for (const [type, id, time] of [
+            ["profile", "a", 20],
+            ["agent", "a", 20],
+            ["agent", "z", null],
+          ] as const) {
+            insert.run(scope.sessionKey, JSON.stringify({ type }), id, time);
+          }
+        });
         return { database, scope };
       });
       const f = createSessionActorWorkerFixture(seed, (options) =>
@@ -406,8 +418,23 @@ describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
         };
       };
       try {
+        patch("coldPatch", { label: "Cold participant projection" });
+        if (engine === "postgres") {
+          // BEGIN + eager lock, hydrated entry, node/window CTE, COMMIT.
+          expect(recorder.queries.coldPatch).toHaveLength(4);
+        }
         const initial = state();
         const before = read();
+        const timestampedParticipants = [
+          { identity: { type: "agent", id: "a" } },
+          { identity: { type: "profile", id: "a" } },
+        ];
+        const untimestampedParticipant = { identity: { type: "agent", id: "z" } };
+        expect(before.entry?.participants).toEqual(
+          engine === "sqlite"
+            ? [untimestampedParticipant, ...timestampedParticipants]
+            : [...timestampedParticipants, untimestampedParticipant],
+        );
         const acceptedOutcome = await execute("acceptInput", {
           type: "session.actor.acceptInput",
           input: {
@@ -519,6 +546,7 @@ describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
             ).toHaveLength(name === "rollback" || name === "revokedGrant" ? 0 : 1);
           }
           expect(recorder.counts).toEqual({
+            coldPatch: 1,
             acceptInput: 1,
             completeTurn: 1,
             entryPatch: 1,
