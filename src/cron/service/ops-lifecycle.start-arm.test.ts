@@ -100,27 +100,21 @@ it.each([false, true])(
       } else {
         expect(log.error).not.toHaveBeenCalled();
       }
+      const tick = async (delayMs: number, expected: string[], drain = true) => {
+        clock.setTime(clock.clock.now() + delayMs);
+        await wake(state);
+        if (drain) {
+          await waitForCronRunQueue(state);
+        }
+        expect(runSessionEvent.mock.calls.map(([request]) => request.text)).toEqual(expected);
+      };
       database.exec("DROP TRIGGER IF EXISTS reject_startup_terminal_write");
       expect(runSessionEvent.mock.calls.map(([request]) => request.text)).toEqual(["overdue"]);
       cron.pauseScheduling();
-      clock.setTime(clock.clock.now() + 15_000);
-      await wake(state);
-      expect(runSessionEvent.mock.calls.map(([request]) => request.text)).toEqual(["overdue"]);
+      await tick(15_000, ["overdue"], false);
       cron.resumeScheduling();
-      clock.setTime(clock.clock.now() + 15_000);
-      await wake(state);
-      await waitForCronRunQueue(state);
-      expect(runSessionEvent.mock.calls.map(([request]) => request.text)).toEqual([
-        "overdue",
-        "upcoming",
-      ]);
-      clock.setTime(clock.clock.now() + 60_000);
-      await wake(state);
-      await waitForCronRunQueue(state);
-      expect(runSessionEvent.mock.calls.map(([request]) => request.text)).toEqual([
-        "overdue",
-        "upcoming",
-      ]);
+      await tick(15_000, ["overdue", "upcoming"]);
+      await tick(60_000, ["overdue", "upcoming"]);
     } finally {
       cron.stop();
       await scheduler.stop();

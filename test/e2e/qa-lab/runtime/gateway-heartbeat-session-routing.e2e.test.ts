@@ -181,6 +181,7 @@ describe("Gateway automation session routing", () => {
       const configuredSessionKey = "agent:main:ops-heartbeat";
       const configuredSessionId = nextId("configured-heartbeat-session");
       const configuredEvent = nextId("configured-heartbeat-event");
+      const configuredPassiveEvent = nextId("configured-passive-event");
       const configuredReply = nextId("configured-heartbeat-reply");
       const explicitSessionKey = "agent:main:user-session";
       const explicitSessionId = nextId("explicit-heartbeat-session");
@@ -279,7 +280,7 @@ describe("Gateway automation session routing", () => {
           wakeMode: "now",
           payload: {
             kind: "agentTurn",
-            message: "Process pending session events and report what was handled.",
+            message: `Process this scheduled task and report what was handled: ${configuredEvent}`,
           },
           delivery: { mode: "announce", channel: "last" },
         });
@@ -320,7 +321,7 @@ describe("Gateway automation session routing", () => {
         await seedSession(explicitSessionId, explicitSessionKey, "explicit-destination");
         await seedSession(mainSessionId, mainSessionKey, "main-destination");
 
-        await queueEvent(configuredSessionKey, configuredEvent);
+        await queueEvent(configuredSessionKey, configuredPassiveEvent);
 
         // A connected Gateway may still be starting cron; its lifecycle hook owns readiness.
         expect(await withinTest(cronReconciled.promise, signal)).toEqual({
@@ -364,9 +365,8 @@ describe("Gateway automation session routing", () => {
         await poll(() => providerRequests.length).toBeGreaterThan(configuredRequestBaseline);
         const configuredRequest = JSON.stringify(providerRequests[configuredRequestBaseline]);
         expect(configuredRequest).toContain(configuredEvent);
-        await poll(() => peekSystemEvents(configuredSessionKey).includes(configuredEvent)).toBe(
-          false,
-        );
+        expect(configuredRequest).not.toContain(configuredPassiveEvent);
+        expect(peekSystemEvents(configuredSessionKey)).toContain(configuredPassiveEvent);
         const delivery = (text: string, to: string) => ({
           accountId: "default",
           text,
@@ -392,12 +392,12 @@ describe("Gateway automation session routing", () => {
         ).resolves.toEqual({ ok: true });
         await poll(() => providerRequests.length).toBeGreaterThan(explicitRequestBaseline);
         const explicitRequest = JSON.stringify(providerRequests[explicitRequestBaseline]);
-        expect(explicitRequest).toContain(explicitQueuedEvent);
+        expect(explicitRequest).not.toContain(explicitQueuedEvent);
         expect(explicitRequest).toContain(explicitWakeText);
-        await poll(() => {
-          const queued = peekSystemEvents(explicitSessionKey);
-          return queued.includes(explicitQueuedEvent) || queued.includes(explicitWakeText);
-        }).toBe(false);
+        await poll(() => peekSystemEvents(explicitSessionKey).includes(explicitWakeText)).toBe(
+          false,
+        );
+        expect(peekSystemEvents(explicitSessionKey)).toContain(explicitQueuedEvent);
         await poll(() => readDeliveryTrace(deliveryTracePath)).toHaveLength(2);
         expect(await readDeliveryTrace(deliveryTracePath)).toEqual([
           configuredDelivery,
