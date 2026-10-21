@@ -144,9 +144,8 @@ describe("ClickClack native agent progress", () => {
       .fn()
       .mockImplementationOnce(() => firstRequest)
       .mockResolvedValue(undefined);
-    const publisher = createPublisher(publishEphemeral);
+    const { publisher } = createPublisher({}, publishEphemeral);
     try {
-      publisher.start();
       publisher.onItemEvent({ itemId: "tool_1", kind: "tool", title: "Searching" });
       await vi.advanceTimersByTimeAsync(100);
       publisher.onItemEvent({

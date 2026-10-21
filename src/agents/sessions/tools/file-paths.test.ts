@@ -51,7 +51,7 @@ it("preserves literal @ paths and shorthand across file operations", async () =>
     ["@a.txt", "before\n"],
     ["a.txt", "sibling\n"],
     ["shorthand.txt", "short\n"],
-  ]) {
+  ] as const) {
     await fs.writeFile(f.file(name), content);
   }
   expect(await f.read("@shorthand.txt")).toEqual(text("short\n"));

@@ -13,6 +13,7 @@ vi.mock("openclaw/plugin-sdk/gateway-runtime", async (importOriginal) => {
   return { ...actual, callGatewayFromCli: mocks.callGatewayFromCli };
 });
 
+// mock-isolation: Exercise setup diagnostics without creating a real HTTP client.
 vi.mock("./http-client.js", () => ({
   createClickClackClient: (options: unknown) => {
     mocks.createClient(options);

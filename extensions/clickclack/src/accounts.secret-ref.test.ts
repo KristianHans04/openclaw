@@ -8,7 +8,11 @@ const otherRef = { ...selectedRef, provider: "other" };
 function secrets(providers?: NonNullable<CoreConfig["secrets"]>["providers"]) {
   return { defaults: { env: "selected" }, providers };
 }
-function resolve(cfg: CoreConfig, env = { [selectedEnvId]: "injected-token" }, accountId?: string) {
+function resolve(
+  cfg: CoreConfig,
+  env: NodeJS.ProcessEnv = { [selectedEnvId]: "injected-token" },
+  accountId?: string,
+) {
   return resolveClickClackAccount({ cfg, env, accountId });
 }
 function expectToken(account: ReturnType<typeof resolve>, token: string, accountId?: string) {

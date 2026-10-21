@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { ProviderAuthContext } from "openclaw/plugin-sdk/plugin-entry";
-import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-shared";
+import type {
+  ProviderAppGuidedSetupContext,
+  ProviderAuthContext,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, vi } from "vitest";
 
@@ -17,51 +19,56 @@ const mocks = vi.hoisted(() => ({
 }));
 export { mocks };
 
-function mockWith<T extends object>(overrides: T) {
-  return async <M>(load: () => Promise<M>) => ({ ...(await load()), ...overrides });
-}
+vi.mock("openclaw/plugin-sdk/provider-auth-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("openclaw/plugin-sdk/provider-auth-runtime")>()),
+  removeProviderAuthProfilesWithLock: mocks.removeProfiles,
+}));
 
-vi.mock(
-  import("openclaw/plugin-sdk/provider-auth-runtime"),
-  mockWith({ removeProviderAuthProfilesWithLock: mocks.removeProfiles }),
-);
-vi.mock(
-  import("openclaw/plugin-sdk/ssrf-runtime"),
-  mockWith({ fetchWithSsrFGuard: mocks.downloadFetch }),
-);
-vi.mock(
-  import("./managed-server.js"),
-  mockWith({
-    ensureLlamaCppModel: mocks.ensureModel,
-    prepareManagedLlamaServer: mocks.prepareServer,
-  }),
-);
-vi.mock(
-  import("./llama-server-install.js"),
-  mockWith({ ensureLlamaServerInstalled: mocks.ensureServerInstalled }),
-);
-vi.mock(import("./hardware.js"), mockWith({ detectLlamaCppHardware: mocks.hardware }));
+vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("openclaw/plugin-sdk/ssrf-runtime")>()),
+  fetchWithSsrFGuard: mocks.downloadFetch,
+}));
 
-import { GIB, hardware } from "./catalog.test-support.js";
+vi.mock("./managed-server.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./managed-server.js")>()),
+  ensureLlamaCppModel: mocks.ensureModel,
+  prepareManagedLlamaServer: mocks.prepareServer,
+}));
+
+vi.mock("./llama-server-install.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./llama-server-install.js")>()),
+  ensureLlamaServerInstalled: mocks.ensureServerInstalled,
+}));
+
+vi.mock("./hardware.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./hardware.js")>()),
+  detectLlamaCppHardware: mocks.hardware,
+}));
+
 import { LLAMA_CPP_PROVIDER_ID } from "./defaults.js";
 import { resolveLlamaCppCatalogArtifact } from "./model-catalog.js";
 
-export { GIB };
+export const GIB = 1024 ** 3;
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 export let tempRoot: string;
 export let modelPath: string;
 
 beforeEach(async () => {
-  for (const mock of Object.values(mocks)) {
-    mock.mockReset();
-  }
   vi.spyOn(os, "totalmem").mockReturnValue(16 * GIB);
   vi.spyOn(os, "hostname").mockReturnValue("gateway-host");
-  mocks.hardware.mockImplementation(async () => hardware(os.totalmem() / GIB));
+  mocks.hardware.mockReset().mockImplementation(async () => ({
+    platform: "darwin",
+    arch: "arm64",
+    accelerator: { kind: "metal" },
+    totalMemoryBytes: os.totalmem(),
+    availableMemoryBytes: os.totalmem(),
+    availableDiskBytes: 100 * GIB,
+    availableRuntimeDiskBytes: 100 * GIB,
+    sharedDisk: true,
+  }));
   tempRoot = await fs.realpath(tempDirs.make("llama-server-setup-"));
   modelPath = path.join(tempRoot, "model.gguf");
-  const command = path.join(tempRoot, "llama-server");
-  mocks.ensureModel.mockImplementation(async ({ source, download }) => {
+  mocks.ensureModel.mockReset().mockImplementation(async ({ source, download }) => {
     if (!download) {
       throw new Error("not cached");
     }
@@ -69,37 +76,48 @@ beforeEach(async () => {
       ? modelPath
       : path.join(tempRoot, "embedding.gguf");
   });
-  mocks.prepareServer.mockResolvedValue({
-    command,
+  mocks.prepareServer.mockReset().mockResolvedValue({
+    command: path.join(tempRoot, "llama-server"),
     baseUrl: "http://127.0.0.1:19432/v1",
     healthUrl: "http://127.0.0.1:19432/health",
     args: ["--host", "127.0.0.1", "--port", "19432"],
   });
-  mocks.removeProfiles.mockResolvedValue({ version: 1, profiles: {} });
-  mocks.ensureServerInstalled.mockImplementation(async ({ asset }) => ({ command, asset }));
+  mocks.removeProfiles.mockReset().mockResolvedValue({ version: 1, profiles: {} });
+  mocks.progressUpdate.mockReset();
+  mocks.downloadFetch.mockReset();
+  mocks.ensureServerInstalled.mockReset().mockImplementation(async ({ asset }) => ({
+    command: path.join(tempRoot, "llama-server"),
+    asset,
+  }));
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
-export function provider(overrides: Partial<ModelProviderConfig> = {}): ModelProviderConfig {
+export function config(): ProviderAppGuidedSetupContext["config"] {
   return {
-    baseUrl: "http://127.0.0.1:19432/v1",
-    params: { modelCacheDir: tempRoot },
-    models: [],
-    ...overrides,
+    models: {
+      providers: {
+        [LLAMA_CPP_PROVIDER_ID]: {
+          baseUrl: "http://127.0.0.1:19432/v1",
+          api: "openai-completions",
+          params: { modelCacheDir: tempRoot },
+          models: [],
+        },
+      },
+    },
   };
-}
-
-export function config(): ProviderAuthContext["config"] {
-  const providers = { [LLAMA_CPP_PROVIDER_ID]: provider({ api: "openai-completions" }) };
-  return { models: { providers } };
 }
 
 export function authContext(confirm: boolean): ProviderAuthContext {
-  const prompter = {
-    confirm: vi.fn(async () => confirm),
-    note: vi.fn(async () => {}),
-    progress: vi.fn(() => ({ update: mocks.progressUpdate, stop: vi.fn() })),
-  };
-  return { config: config(), prompter, runtime: {} } as unknown as ProviderAuthContext;
+  return {
+    config: config(),
+    prompter: {
+      confirm: vi.fn(async () => confirm),
+      note: vi.fn(async () => {}),
+      progress: vi.fn(() => ({ update: mocks.progressUpdate, stop: vi.fn() })),
+    },
+    runtime: {},
+  } as unknown as ProviderAuthContext;
 }

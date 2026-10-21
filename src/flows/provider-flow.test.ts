@@ -12,12 +12,15 @@ const { catalogChoices, manifestChoices, runtimeProviders } = vi.hoisted(() => (
   manifestChoices: vi.fn<ResolveManifestProviderAuthChoices>(() => []),
   runtimeProviders: vi.fn<ResolvePluginProviders>(() => []),
 }));
+// mock-isolation: Keep install discovery limited to this test's synthetic catalog.
 vi.mock("../plugins/provider-install-catalog.js", () => ({
   resolveProviderInstallCatalogEntries: catalogChoices,
 }));
+// mock-isolation: Supply manifest choices without loading installed plugin metadata.
 vi.mock("../plugins/provider-auth-choices.js", () => ({
   resolveManifestProviderAuthChoices: manifestChoices,
 }));
+// mock-isolation: Exercise setup flow selection without loading provider runtimes.
 vi.mock("../plugins/providers.runtime.js", () => ({
   resolvePluginProvidersCore: runtimeProviders,
 }));

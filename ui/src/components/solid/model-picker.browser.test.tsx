@@ -8,9 +8,9 @@ import { DecisionModelPicker, type DecisionModelPickerParams } from "./decision-
 import { ModelPicker, type ModelPickerParams } from "./model-picker.tsx";
 
 async function mountPicker<P extends object>(View: Component<P>, initial: P) {
-  const [params, setParams] = createSignal(initial);
+  const [params, setParams] = createSignal<P>(() => initial);
   const { container } = mountSolid(() => <View {...params()} />);
-  const query = <T extends Element>(selector: string) => container.querySelector<T>(selector)!;
+  const query = <T extends Element>(selector: string): T => container.querySelector<T>(selector)!;
   const update = async (patch: Partial<P>) => {
     setParams((current) => ({ ...current, ...patch }));
     flush();
@@ -37,6 +37,7 @@ it("renders provider details and keeps the picker owner through updates", async 
       showSelectedDetail: true,
       options: [
         { value: "", label: "Automatic" },
+        { value: "openai/other", label: "Other", provider: "openai", disabled: true },
         { value: "openai/selected", label: "Selected", provider: "openai", detail: "API" },
       ],
       onChange,
@@ -49,6 +50,11 @@ it("renders provider details and keeps the picker owner through updates", async 
   await openPicker(picker);
   const group = query('[role="group"][aria-label="OpenAI"]');
   expect(group.querySelector('[data-provider-icon="codex"]')).not.toBeNull();
+  expect(
+    [...group.querySelectorAll<HTMLElement>('[role="option"]')].map((row) => row.dataset.value),
+  ).toEqual(["openai/selected", "openai/other"]);
+  await choosePickerValue(picker, "openai/other");
+  expect(onChange).not.toHaveBeenCalled();
   await choosePickerValue(picker, "");
   expect(onChange).toHaveBeenCalledExactlyOnceWith("");
   await update({
@@ -90,7 +96,8 @@ it("keeps custom sentinels private and commits only on the configured event", as
 });
 
 it("retains the decision picker owner across catalog and disabled-state updates", async () => {
-  const { update, expectUpdated } = await mountPicker<DecisionModelPickerParams>(
+  const onChange = vi.fn();
+  const { picker, query, update, expectUpdated } = await mountPicker<DecisionModelPickerParams>(
     DecisionModelPicker,
     {
       id: "decision",
@@ -98,9 +105,16 @@ it("retains the decision picker owner across catalog and disabled-state updates"
       value: null,
       inherit: { model: "x/old" },
       disabled: false,
-      onChange: vi.fn(),
+      onChange,
     },
   );
+  expect(query(".picker-select__trigger").textContent).toContain("Use global default");
+  await choosePickerValue(picker, "");
+  expect(onChange).toHaveBeenLastCalledWith("");
+  await choosePickerValue(picker, "__openclaw_inherit_decision__");
+  expect(onChange).toHaveBeenLastCalledWith(null);
+  await choosePickerValue(picker, "x/old");
+  expect(onChange).toHaveBeenLastCalledWith("x/old");
   await update({
     models: [{ id: "new", name: "New", provider: "x", pluginId: "x" }],
     value: "x/new",

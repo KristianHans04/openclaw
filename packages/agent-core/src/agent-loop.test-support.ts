@@ -5,9 +5,10 @@ import { Type } from "typebox";
 import { makeProviderModel } from "../../ai/src/providers/provider-model.test-support.js";
 import { createAssistantOutput } from "../../ai/src/transports/assistant-output.js";
 import { runAgentLoop } from "./agent-loop.js";
+import type { Model } from "./llm.js";
 import type * as AgentTypes from "./types.js";
 
-export const model = makeProviderModel("test-api", "test-provider", "test-model", {
+export const model: Model = makeProviderModel("test-api", "test-provider", "test-model", {
   name: "Test Model",
   baseUrl: "https://example.test",
   reasoning: false,

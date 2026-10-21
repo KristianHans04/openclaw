@@ -35,9 +35,11 @@ const { channelTarget, loadArtifact, loadRegistry, loadManifest } = vi.hoisted((
   };
 });
 
+// mock-isolation: Fail immediately if configured-only lookup discovers real plugin manifests.
 vi.mock("../plugins/manifest-registry.js", () => ({
   loadPluginManifestRegistryCore: loadManifest,
 }));
+// mock-isolation: Supply secret-contract artifacts without loading bundled plugin code.
 vi.mock("../plugins/public-surface-loader.js", () => ({
   loadBundledPluginPublicArtifactModuleFromCandidatesSync: loadArtifact,
 }));
