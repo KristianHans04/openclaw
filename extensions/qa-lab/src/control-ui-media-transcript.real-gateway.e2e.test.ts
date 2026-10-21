@@ -21,14 +21,53 @@ import {
   controlUiPageOptions,
   historyMessages,
   startControlUiGateway,
+  stopControlUiGateway,
   writeControlUiVerdict,
 } from "./control-ui-gateway.e2e.test-support.ts";
 import { createQaLiveLaneGateway } from "./live-transports/shared/live-gateway.runtime.ts";
 
+const gatewayOwner = createQaLiveLaneGateway();
+let sharedGateway: Awaited<ReturnType<typeof gatewayOwner.start>>;
+let gatewayProofDir: string;
+const stopGateway = () =>
+  stopControlUiGateway(gatewayOwner, gatewayProofDir, "Media transcript Gateway cleanup failed");
 const suite = createControlUiE2eSuite({
   name: "Control UI media transcript replay with a real Gateway",
   startServerBeforeBrowser: true,
+  setupTimeoutMs: 180_000,
+  resources: {
+    retainedState: () => sharedGateway?.gateway.tempRoot,
+    run: async (signal) => {
+      // The Gateway log spans both cases; browser proof still uses each case's directory.
+      gatewayProofDir = suite.artifactDir;
+      signal.throwIfAborted();
+      sharedGateway = await startGateway(gatewayOwner);
+      signal.throwIfAborted();
+    },
+    close: stopGateway,
+  },
 });
+
+async function runMediaScenario(
+  context: Parameters<typeof suite.runScenario>[0],
+  run: (gateway: typeof sharedGateway) => Promise<void>,
+) {
+  let completed = false;
+  await suite.runScenario(context, {
+    run: async (signal) => {
+      signal.throwIfAborted();
+      await run(sharedGateway);
+      completed = true;
+    },
+    close: async () => {
+      if (completed && !context.signal.aborted) {
+        return;
+      }
+      // A failed or cancelled case retires this owner before another case can reuse state.
+      await stopGateway();
+    },
+  });
+}
 
 const retainedImageBase64 =
   "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAmElEQVR4nO3QMREAIBDAsHeERQyjAWRkoEP2Xmftc382OkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAK0BOkBrgA7QGqADtAboAO0B06OyaOxP7RwAAAAASUVORK5CYII=";
@@ -153,36 +192,34 @@ function readModelReplayError(messages: AssistantMessage[]): string | null {
 }
 
 suite.define(() => {
-  it("renders recoverable and omitted image history", { timeout: 180_000 }, async () => {
-    const gatewayOwner = createQaLiveLaneGateway();
-    const gateway = await startGateway(gatewayOwner);
-    const env = {
-      ...process.env,
-      OPENCLAW_STATE_DIR: path.join(gateway.gateway.tempRoot, "state"),
-    };
-    const seed = async (sessionId: string, image: Record<string, unknown>) => {
-      const sessionKey = `agent:qa:${sessionId}`;
-      const storePath = resolveStorePath(undefined, { agentId: "qa", env });
-      const identity = { agentId: "qa", env, sessionKey, storePath };
-      await upsertSessionEntry({
-        ...identity,
-        entry: { sessionId, updatedAt: Date.now() },
-      });
-      await appendSessionTranscriptMessageByIdentity({
-        ...identity,
-        sessionId,
-        message: {
-          role: "user",
-          timestamp: Date.now(),
-          content: [{ type: "image", mimeType: "image/png", ...image }],
-        },
-      });
-    };
-    const omittedSessionKey = "agent:qa:omitted-image-history";
-    const recoveredSessionKey = "agent:qa:recovered-image-history";
-    const retainedSessionKey = "agent:qa:retained-image-history";
-    const retainedImageUrl = "https://example.invalid/retained-history-image.png";
-    try {
+  it("renders recoverable and omitted image history", { timeout: 180_000 }, async (context) => {
+    await runMediaScenario(context, async (gateway) => {
+      const env = {
+        ...process.env,
+        OPENCLAW_STATE_DIR: path.join(gateway.gateway.tempRoot, "state"),
+      };
+      const seed = async (sessionId: string, image: Record<string, unknown>) => {
+        const sessionKey = `agent:qa:${sessionId}`;
+        const storePath = resolveStorePath(undefined, { agentId: "qa", env });
+        const identity = { agentId: "qa", env, sessionKey, storePath };
+        await upsertSessionEntry({
+          ...identity,
+          entry: { sessionId, updatedAt: Date.now() },
+        });
+        await appendSessionTranscriptMessageByIdentity({
+          ...identity,
+          sessionId,
+          message: {
+            role: "user",
+            timestamp: Date.now(),
+            content: [{ type: "image", mimeType: "image/png", ...image }],
+          },
+        });
+      };
+      const omittedSessionKey = "agent:qa:omitted-image-history";
+      const recoveredSessionKey = "agent:qa:recovered-image-history";
+      const retainedSessionKey = "agent:qa:retained-image-history";
+      const retainedImageUrl = "https://example.invalid/retained-history-image.png";
       // Startup admits the fixture rows into the child Gateway's resident projection.
       await gateway.gateway.restartAfterStateMutation(async () => {
         await seed("omitted-image-history", { omitted: true, bytes: 12 * 1024 });
@@ -274,15 +311,13 @@ suite.define(() => {
         });
         await screenshot(page, "04-retained-image.png");
       });
-    } finally {
-      await gatewayOwner.stop({ preserveToDir: path.join(suite.artifactDir, "gateway") });
-    }
+    });
   });
 
   it(
     "delivers PowerPoint and keeps persisted attachment failures replay-safe",
     { timeout: 180_000 },
-    async () => {
+    async (context) => {
       const startedAt = performance.now();
       // A suite deadline can expire without a Playwright locator stack.
       const reportPhase = (phase: string) => {
@@ -291,12 +326,8 @@ suite.define(() => {
           elapsedMs: Math.round(performance.now() - startedAt),
         });
       };
-      const gatewayOwner = createQaLiveLaneGateway();
-      const proofDir = suite.artifactDir;
-      const errors: unknown[] = [];
-      try {
-        reportPhase("gateway-starting");
-        const gateway = await startGateway(gatewayOwner);
+      await runMediaScenario(context, async (gateway) => {
+        reportPhase("gateway-ready");
         await writeFile(path.join(gateway.gateway.workspaceDir, "slides.pptx"), await createPptx());
         expect(await gateway.gateway.call("config.get", {})).toMatchObject({
           config: {
@@ -328,6 +359,12 @@ suite.define(() => {
               !pane.state.chatLoading
             );
           });
+          const stateDir = gateway.gateway.runtimeEnv.OPENCLAW_STATE_DIR;
+          if (!stateDir) {
+            throw new Error("QA Gateway state directory is unavailable");
+          }
+          // The image case writes only user rows, so the raw assistant replay starts empty.
+          expect(await readRawAssistantMessages(stateDir)).toEqual([]);
           const stop = page.getByRole("button", { name: "Stop generating", exact: true });
           await send(page, "Reply exactly `Slides ready\nMEDIA:./slides.pptx`");
           reportPhase("powerpoint-request-sent");
@@ -360,10 +397,6 @@ suite.define(() => {
             reportPhase("failure-replay-checked");
           }
           const secondHistory = await history(30);
-          const stateDir = gateway.gateway.runtimeEnv.OPENCLAW_STATE_DIR;
-          if (!stateDir) {
-            throw new Error("QA Gateway state directory is unavailable");
-          }
           const rawAssistantMessages = await readRawAssistantMessages(stateDir);
           const rawModelContent = rawAssistantMessages.flatMap((message) =>
             Array.isArray(message.content) ? message.content : [],
@@ -398,16 +431,7 @@ suite.define(() => {
           });
           reportPhase("verdict-checked");
         });
-      } catch (error) {
-        errors.push(error);
-      }
-      reportPhase("gateway-stopping");
-      const stopped = await gatewayOwner.stop({ preserveToDir: path.join(proofDir, "gateway") });
-      reportPhase("gateway-stopped");
-      errors.push(...stopped.errors);
-      if (errors.length > 0) {
-        throw new AggregateError(errors, "Control UI media transcript proof failed");
-      }
+      });
     },
   );
 });
