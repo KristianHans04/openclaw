@@ -61,6 +61,7 @@ export function controlUiStableChunkName(id: string): string | undefined {
   switch (controlUiBootManifestKey(id)) {
     case "node_modules/@solidjs/signals/dist/prod/core/verdict.js":
     case "node_modules/@solidjs/signals/dist/prod/core/action.js":
+    case "node_modules/@solidjs/signals/dist/dev/core/action.js":
     case "node_modules/@solidjs/signals/dist/prod/affects.js":
       // Solid initializes these through its shared runtime. Keep them apart
       // from the lazy Markdown modules in the measured shared boot group.
