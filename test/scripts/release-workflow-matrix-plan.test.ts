@@ -66,8 +66,12 @@ function requiredStep(job: WorkflowJob, name: string): WorkflowStep {
   );
 }
 
-function bashRun(command: string, env: NodeJS.ProcessEnv) {
-  return spawnSync("bash", ["--noprofile", "--norc", "-c", command], { encoding: "utf8", env });
+function bashRun(command: string, env: NodeJS.ProcessEnv, cwd?: string) {
+  return spawnSync("bash", ["--noprofile", "--norc", "-c", command], {
+    encoding: "utf8",
+    env,
+    cwd,
+  });
 }
 
 function runFixture(command: string, args: string[], env: NodeJS.ProcessEnv, cwd?: string) {
@@ -274,12 +278,14 @@ describe("scripts/plan-release-workflow-matrix.mjs", () => {
     const job = requiredJob(workflow(), "validate_release_live_cache");
     const step = requiredStep(job, stepName);
     for (const code of [0, 23]) {
+      const cwd = tempDirs.make("openclaw-live-cache-shell-replay-");
       const result = bashRun(
         `timeout() { while [[ "$1" == --* ]]; do shift; done; shift; "$@"; }
 node() { printf '%s\\n' "$*"; return "$HARNESS_EXIT"; }
 pnpm() { node "$@"; }
 ${expectDefined(step.run, "prompt-prefix command")}`,
         { PATH: process.env.PATH, HARNESS_EXIT: String(code) },
+        cwd,
       );
       expect({ stdout: result.stdout.trim(), status: result.status }, result.stderr).toEqual({
         stdout: args,
