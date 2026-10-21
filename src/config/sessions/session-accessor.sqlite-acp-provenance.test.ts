@@ -42,76 +42,56 @@ it("commits retained ACP sources with the entry lifecycle and clears them withou
       database.db
         .prepare("SELECT legacy_acp_migration_json FROM session_nodes WHERE session_key = ?")
         .get(sessionKey)?.legacy_acp_migration_json;
-
-    runOpenClawAgentWriteTransaction((owner) => {
+    const expectRetained = () => {
+      expect(JSON.parse(String(sources()))).toEqual([
+        expect.objectContaining({ lifecycleRevision: "next", sourceSha256: "b".repeat(64) }),
+      ]);
+      expect(readExactSessionEntryRow(database, sessionKey)?.entry).toMatchObject(next);
+    };
+    const writeNext = (owner: typeof database, entry = next) => {
       const previous = readExactSessionEntryRow(owner, sessionKey)!;
-      const queries = trackSqliteStatementExecutions(
-        requireNativeSqliteDatabase(owner.db),
-        ["provenanceReads", "provenanceUpdates"],
-        (sql) =>
-          /^select "legacy_acp_migration_json"/i.test(sql)
-            ? "provenanceReads"
-            : /^update "session_nodes" set "legacy_acp_migration_json"/i.test(sql)
-              ? "provenanceUpdates"
-              : null,
-      );
-      try {
-        writeSessionEntry(owner, sessionKey, next, {
-          canonicalPreviousEntry: previous.entry,
-          canonicalPreviousRow: previous.row,
-        });
-        expect(queries.counts).toEqual({ provenanceReads: 0, provenanceUpdates: 0 });
-      } finally {
-        queries.restore();
-      }
-    }, options);
-    expect(JSON.parse(String(sources()))).toEqual([
-      expect.objectContaining({ lifecycleRevision: "next", sourceSha256: "b".repeat(64) }),
-    ]);
-    expect(readExactSessionEntryRow(database, sessionKey)?.entry).toMatchObject(next);
+      writeSessionEntry(owner, sessionKey, entry, {
+        canonicalPreviousEntry: previous.entry,
+        canonicalPreviousRow: previous.row,
+      });
+    };
+    const withoutProvenanceQueries = (change: (owner: typeof database) => void) =>
+      runOpenClawAgentWriteTransaction((owner) => {
+        const queries = trackSqliteStatementExecutions(
+          requireNativeSqliteDatabase(owner.db),
+          ["provenanceReads", "provenanceUpdates"],
+          (sql) =>
+            /^select "legacy_acp_migration_json"/i.test(sql)
+              ? "provenanceReads"
+              : /^update "session_nodes" set "legacy_acp_migration_json"/i.test(sql)
+                ? "provenanceUpdates"
+                : null,
+        );
+        try {
+          change(owner);
+          expect(queries.counts).toEqual({ provenanceReads: 0, provenanceUpdates: 0 });
+        } finally {
+          queries.restore();
+        }
+      }, options);
+    withoutProvenanceQueries(writeNext);
+    expectRetained();
 
     expect(() =>
       runOpenClawAgentWriteTransaction((owner) => {
-        const previous = readExactSessionEntryRow(owner, sessionKey)!;
-        writeSessionEntry(
-          owner,
-          sessionKey,
-          { ...next, lifecycleRevision: "rolled-back" },
-          {
-            canonicalPreviousEntry: previous.entry,
-            canonicalPreviousRow: previous.row,
-          },
-        );
+        writeNext(owner, { ...next, lifecycleRevision: "rolled-back" });
         throw new Error("rollback lifecycle");
       }, options),
     ).toThrow("rollback lifecycle");
-    expect(JSON.parse(String(sources()))).toEqual([
-      expect.objectContaining({ lifecycleRevision: "next", sourceSha256: "b".repeat(64) }),
-    ]);
-    expect(readExactSessionEntryRow(database, sessionKey)?.entry).toMatchObject(next);
+    expectRetained();
 
-    runOpenClawAgentWriteTransaction((owner) => {
-      const queries = trackSqliteStatementExecutions(
-        requireNativeSqliteDatabase(owner.db),
-        ["provenanceReads", "provenanceUpdates"],
-        (sql) =>
-          /^select "legacy_acp_migration_json"/i.test(sql)
-            ? "provenanceReads"
-            : /^update "session_nodes" set "legacy_acp_migration_json"/i.test(sql)
-              ? "provenanceUpdates"
-              : null,
-      );
-      try {
-        clearSqliteSessionEntryPreservingWindows(owner, {
-          sessionKey,
-          sessionId: next.sessionId,
-          updatedAt: 3,
-        });
-        expect(queries.counts).toEqual({ provenanceReads: 0, provenanceUpdates: 0 });
-      } finally {
-        queries.restore();
-      }
-    }, options);
+    withoutProvenanceQueries((owner) => {
+      clearSqliteSessionEntryPreservingWindows(owner, {
+        sessionKey,
+        sessionId: next.sessionId,
+        updatedAt: 3,
+      });
+    });
     expect(sources()).toBeNull();
     expect(readExactSessionEntryRow(database, sessionKey)).toBeUndefined();
     expect(

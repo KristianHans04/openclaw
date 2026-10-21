@@ -18,10 +18,8 @@ const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-session-focused-rea
 it("does not parse unrelated blobs across focused child, candidate, and transcript reads", async () => {
   const storePath = path.join(tempDirs.make(), "sessions.json");
   const sessionKey = "agent:main:focused-session";
-  await upsertSessionEntryCore(
-    { agentId: "main", sessionKey, storePath },
-    { sessionId: "focused-session", updatedAt: 42 },
-  );
+  const scope = { agentId: "main", sessionKey, storePath };
+  await upsertSessionEntryCore(scope, { sessionId: "focused-session", updatedAt: 42 });
   for (const [childSessionKey, lineage] of [
     ["agent:main:focused-both-child", { spawnedBy: sessionKey }],
     ["agent:main:focused-parent-child", { parentSessionKey: sessionKey }],
@@ -31,11 +29,11 @@ it("does not parse unrelated blobs across focused child, candidate, and transcri
     ],
   ] as const) {
     await upsertSessionEntryCore(
-      { agentId: "main", sessionKey: childSessionKey, storePath },
+      { ...scope, sessionKey: childSessionKey },
       { ...lineage, sessionId: childSessionKey, updatedAt: 43 },
     );
     recordSessionParticipant(
-      { agentId: "main", sessionKey: childSessionKey, storePath },
+      { ...scope, sessionKey: childSessionKey },
       { identity: { type: "agent", id: childSessionKey }, promptedAt: 43 },
     );
   }
@@ -45,9 +43,7 @@ it("does not parse unrelated blobs across focused child, candidate, and transcri
   );
   const database = openOpenClawAgentDatabase({ agentId: "main", path: databasePath });
   // Admit the reader before injecting an unrelated corrupt row.
-  expect(loadSessionEntry({ agentId: "main", sessionKey, storePath })?.sessionId).toBe(
-    "focused-session",
-  );
+  expect(loadSessionEntry(scope)?.sessionId).toBe("focused-session");
   const unrelatedEntryJson = "{ unrelated, intentionally invalid JSON";
   database.db
     .prepare(
@@ -62,37 +58,27 @@ it("does not parse unrelated blobs across focused child, candidate, and transcri
     (sql) => (sql.includes('from "session_participants"') ? "participants" : null),
   );
   try {
-    const children = await listSessionChildEntriesReadOnly({
-      agentId: "main",
-      sessionKey,
-      storePath,
-    });
+    const children = await listSessionChildEntriesReadOnly(scope);
     expect(children.map((child) => child.sessionKey)).toEqual([
       "agent:main:focused-both-child",
       "agent:main:focused-parent-child",
       "agent:main:focused-spawned-child",
     ]);
-    expect(
-      children.map(({ sessionKey: childKey, entry }) => ({
-        sessionKey: childKey,
+    for (const { sessionKey: childKey, entry } of children) {
+      expect({
         participants: entry.participants,
         participantCount: entry.participantCount,
-      })),
-    ).toEqual(
-      children.map(({ sessionKey: childKey }) => ({
-        sessionKey: childKey,
+      }).toEqual({
         participants: [{ identity: { type: "agent", id: childKey } }],
         participantCount: 1,
-      })),
-    );
+      });
+    }
     expect(participantReads.counts.participants).toBeLessThanOrEqual(1);
-    expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(0);
-    expect(resolveSessionEntrySelection({ agentId: "main", sessionKey, storePath })).toMatchObject({
+    expect(resolveSessionEntrySelection(scope)).toMatchObject({
       existing: { sessionId: "focused-session" },
       legacyKeys: [],
       normalizedKey: sessionKey,
     });
-    expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(0);
     expect(
       resolveSessionEntryCandidateTarget({
         agentId: "main",
@@ -102,10 +88,8 @@ it("does not parse unrelated blobs across focused child, candidate, and transcri
     ).toMatchObject({ sessionKey, entry: { sessionId: "focused-session" }, persisted: true });
     expect(
       resolveSessionTranscriptReadTarget({
-        agentId: "main",
+        ...scope,
         sessionId: "focused-session",
-        sessionKey,
-        storePath,
       }),
     ).toMatchObject({ agentId: "main", sessionId: "focused-session", sessionKey });
     expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(0);
