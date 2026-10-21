@@ -12,15 +12,97 @@ import {
   type OpenClawTestState,
 } from "../../../src/test-utils/openclaw-test-state.ts";
 import { getFreePort } from "../../../src/test-utils/ports.ts";
-import { evaluateControlUiContext } from "../test-helpers/control-ui-e2e-context.ts";
 import { waitForControlUiGatewayReady } from "../test-helpers/control-ui-e2e-readiness.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import {
+  dragTimelineRange,
+  requestGateway,
+} from "./usage-sessions-owner-attribution.test-support.ts";
+
+let rangeState: OpenClawTestState | undefined;
+let rangeGateway: Promise<GatewayServer> | undefined;
+let rangeInitialization: Promise<{ state: OpenClawTestState; port: number }> | undefined;
+let rangeGatewayClose: Promise<void> | undefined;
+const closeRangeGateway = () =>
+  (rangeGatewayClose ??= (async () => {
+    // Join partial acquisition before releasing any process-wide fixture state.
+    await rangeInitialization?.catch(() => {});
+    await (await rangeGateway)?.close({ reason: "usage detail instance e2e cleanup" });
+  })());
+
+function initializeRangeGateway(signal: AbortSignal) {
+  if (rangeGatewayClose) {
+    throw new Error("Usage range Gateway is closed");
+  }
+  return (rangeInitialization ??= (async () => {
+    const port = await getFreePort();
+    signal.throwIfAborted();
+    const state = await createOpenClawTestState({
+      label: "usage-detail-instance",
+      env: {
+        OPENCLAW_SKIP_BROWSER_CONTROL_SERVER: "1",
+        OPENCLAW_SKIP_CANVAS_HOST: "1",
+        OPENCLAW_SKIP_CHANNELS: "1",
+        OPENCLAW_SKIP_CRON: "1",
+        OPENCLAW_SKIP_GMAIL_WATCHER: "1",
+        OPENCLAW_SKIP_PROVIDERS: "1",
+        OPENCLAW_TEST_MINIMAL_GATEWAY: "1",
+        VITEST: "1",
+      },
+    });
+    rangeState = state;
+    setLoggerOverride({
+      file: state.path("gateway.log"),
+      level: "silent",
+      consoleLevel: "silent",
+    });
+    signal.throwIfAborted();
+    await state.writeConfig({
+      agents: {
+        ownership: "explicit",
+        defaults: { workspace: state.workspaceDir },
+        entries: { main: {}, opus: {} },
+      },
+      gateway: {
+        mode: "local",
+        port,
+        bind: "loopback",
+        auth: { mode: "none" },
+        controlUi: { enabled: false },
+      },
+      plugins: { enabled: false },
+    });
+    const { startGatewayServer } = await import("../../../src/gateway/server.js");
+    const { ensureGatewayOwnerProfile } = await import("../../../src/state/user-profiles.js");
+    ensureGatewayOwnerProfile("Usage Proof", { env: state.env });
+    signal.throwIfAborted();
+    rangeGateway = startGatewayServer(port, {
+      auth: { mode: "none" },
+      bind: "loopback",
+      controlUiEnabled: false,
+      sidecarStartup: "defer",
+    });
+    await rangeGateway;
+    signal.throwIfAborted();
+    return { state, port };
+  })());
+}
 
 const suite = createControlUiE2eSuite({
   name: "Control UI usage sessions owner attribution",
   startServerBeforeBrowser: true,
   unavailableMessage: (executablePath) =>
     `Playwright Chromium is not available at ${executablePath}`,
+  resources: {
+    // Register ownership now; identity cases must finish before range state is acquired.
+    run: async () => {},
+    retainedState: () => rangeState?.root,
+    close: closeRangeGateway,
+    release: async () => {
+      await rangeState?.cleanup();
+      resetLogger();
+    },
+  },
 });
 
 const captureUiProof = process.env.OPENCLAW_CAPTURE_UI_PROOF === "1";
@@ -40,42 +122,6 @@ async function capture(page: Page, name: string) {
     fullPage: true,
     path: path.join(suite.artifactDir, name),
   });
-}
-
-async function dragTimelineRange(page: Page, fraction: number) {
-  const panel = page.locator(".session-detail-panel");
-  const handle = panel.locator(".chart-handle-right");
-  await handle.scrollIntoViewIfNeeded();
-  const handleBox = await handle.boundingBox();
-  const chartBox = await panel.locator(".timeseries-svg").boundingBox();
-  if (!handleBox || !chartBox) {
-    throw new Error("Timeline drag handles did not render");
-  }
-  const y = handleBox.y + handleBox.height / 2;
-  const x = chartBox.x + (chartBox.width * (30 + 366 * fraction)) / 400;
-  await page.mouse.move(handleBox.x + handleBox.width / 2, y);
-  await page.mouse.down();
-  const move = () => page.mouse.move(x, y, { steps: 8 });
-  await move();
-  return move;
-}
-
-async function requestGateway<T>(
-  page: Page,
-  methodName: string,
-  requestParams: Record<string, unknown>,
-) {
-  return await evaluateControlUiContext(
-    page,
-    async (context, { method, params }) => {
-      const client = context.gateway.snapshot.client;
-      if (!client) {
-        throw new Error("Usage proof has no connected Gateway client");
-      }
-      return await client.request<T>(method, params);
-    },
-    { method: methodName, params: requestParams },
-  );
 }
 
 suite.define(() => {
@@ -259,76 +305,29 @@ suite.define(() => {
   it.for([1, 2])(
     "clears ranges after session recreation (%s points)",
     async (pointCount, context) => {
-      let fixture: OpenClawTestState | undefined;
-      let gateway: Promise<GatewayServer> | undefined;
+      let completed = false;
       let restoreClock: (() => void) | undefined;
       await suite.runScenario(context, {
-        retainedState: () => fixture?.root,
         close: async () => {
-          await (await gateway)?.close({ reason: "usage detail instance e2e cleanup" });
+          if (!completed || context.signal.aborted) {
+            // Failed cases retire the shared Gateway before another case can use it.
+            await closeRangeGateway();
+          }
         },
         release: async () => {
           restoreClock?.();
-          await fixture?.cleanup();
-          resetLogger();
         },
         run: async (signal) => {
-          const port = await getFreePort();
+          const { state, port } = await initializeRangeGateway(signal);
           signal.throwIfAborted();
-          const state = await createOpenClawTestState({
-            label: "usage-detail-instance",
-            env: {
-              OPENCLAW_SKIP_BROWSER_CONTROL_SERVER: "1",
-              OPENCLAW_SKIP_CANVAS_HOST: "1",
-              OPENCLAW_SKIP_CHANNELS: "1",
-              OPENCLAW_SKIP_CRON: "1",
-              OPENCLAW_SKIP_GMAIL_WATCHER: "1",
-              OPENCLAW_SKIP_PROVIDERS: "1",
-              OPENCLAW_TEST_MINIMAL_GATEWAY: "1",
-              VITEST: "1",
-            },
-          });
-          fixture = state;
-          setLoggerOverride({
-            file: state.path("gateway.log"),
-            level: "silent",
-            consoleLevel: "silent",
-          });
-          signal.throwIfAborted();
-          await state.writeConfig({
-            agents: {
-              ownership: "explicit",
-              defaults: { workspace: state.workspaceDir },
-              entries: { main: {}, opus: {} },
-            },
-            gateway: {
-              mode: "local",
-              port,
-              bind: "loopback",
-              auth: { mode: "none" },
-              controlUi: { enabled: false },
-            },
-            plugins: { enabled: false },
-          });
-          const { startGatewayServer } = await import("../../../src/gateway/server.js");
           const { persistSessionTranscriptTurn } =
             await import("../../../src/config/sessions/session-accessor.js");
-          const { ensureGatewayOwnerProfile } = await import("../../../src/state/user-profiles.js");
-          ensureGatewayOwnerProfile("Usage Proof", { env: state.env });
-          signal.throwIfAborted();
-          gateway = startGatewayServer(port, {
-            auth: { mode: "none" },
-            bind: "loopback",
-            controlUiEnabled: false,
-            sidecarStartup: "defer",
-          });
-          await gateway;
           signal.throwIfAborted();
 
           await suite.withPage(
             { locale: "en-US", timezoneId: "UTC", serviceWorkers: "block", viewport },
             async ({ page }) => {
-              const key = "agent:opus:usage-instance-proof";
+              const key = `agent:opus:usage-instance-proof-${pointCount}`;
               const gatewayUrl = new URL(`ws://127.0.0.1:${port}`).href;
               const pageErrors: string[] = [];
               const overviewRequests = new Map<string, Record<string, unknown>>();
@@ -605,6 +604,7 @@ suite.define(() => {
               expect(pageErrors).toEqual([]);
             },
           );
+          completed = true;
         },
       });
     },
