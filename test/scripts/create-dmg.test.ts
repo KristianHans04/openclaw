@@ -321,9 +321,13 @@ describe.runIf(process.platform === "darwin")("create-dmg ownership boundaries",
 
       expect(result.status, result.stderr).toBe(status);
       const log = readFileSync(tools.hdiutilLog, "utf8");
+      const attachIndex = log.indexOf("attach ");
+      const creationLog = attachIndex === -1 ? log : log.slice(0, attachIndex);
       expect(log.match(/^create /gm)).toHaveLength(attempts);
-      expect(log.match(/^sleep /gm)).toHaveLength(2);
-      expect(result.stderr.match(/Resource busy/g)).toHaveLength(status === 0 ? 2 : 3);
+      expect(creationLog.match(/^sleep /gm)).toHaveLength(2);
+      expect(result.stderr.match(/^hdiutil: create failed - Resource busy$/gm)).toHaveLength(
+        status === 0 ? 2 : 3,
+      );
       expect(existsSync(output)).toBe(status === 0);
       if (status !== 0) {
         expect(log).not.toContain("attach ");
