@@ -105,7 +105,7 @@ beforeEach(() => {
     { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet" },
     { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
     { provider: "openai", id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
-    { provider: "google", id: "gemini-2.0-flash", name: "Gemini Flash" },
+    { provider: "google", id: "gemini-3.1-flash-lite-preview", name: "Gemini Flash" },
   ]);
   modelAuthLabelMocks.resolveModelAuthLabel.mockReset();
   modelAuthLabelMocks.resolveModelAuthLabel.mockReturnValue(undefined);
@@ -402,7 +402,7 @@ describe("handleModelsCommand", () => {
       { provider: "claude-cli", id: "claude-opus-4-7", name: "Claude Opus (CLI)" },
       { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
       { provider: "openai", id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
-      { provider: "google", id: "gemini-2.0-flash", name: "Gemini Flash" },
+      { provider: "google", id: "gemini-3.1-flash-lite-preview", name: "Gemini Flash" },
     ]);
     modelProviderAuthMocks.authenticatedProviders = new Set([
       "anthropic",
@@ -437,7 +437,7 @@ describe("handleModelsCommand", () => {
       { provider: "claude-cli", id: "claude-opus-4-7", name: "Claude Opus (CLI)" },
       { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
       { provider: "openai", id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
-      { provider: "google", id: "gemini-2.0-flash", name: "Gemini Flash" },
+      { provider: "google", id: "gemini-3.1-flash-lite-preview", name: "Gemini Flash" },
     ]);
     modelProviderAuthMocks.authenticatedProviders = new Set([
       "anthropic",

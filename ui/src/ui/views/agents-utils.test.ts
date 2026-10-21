@@ -16,11 +16,11 @@ describe("resolveEffectiveModelFallbacks", () => {
     const entryModel = undefined;
     const defaultModel = {
       primary: "openai/gpt-5-nano",
-      fallbacks: ["google/gemini-2.0-flash"],
+      fallbacks: ["google/gemini-3.1-flash-lite-preview"],
     };
 
     expect(resolveEffectiveModelFallbacks(entryModel, defaultModel)).toEqual([
-      "google/gemini-2.0-flash",
+      "google/gemini-3.1-flash-lite-preview",
     ]);
   });
 
@@ -31,7 +31,7 @@ describe("resolveEffectiveModelFallbacks", () => {
     };
     const defaultModel = {
       primary: "openai/gpt-5",
-      fallbacks: ["google/gemini-2.0-flash"],
+      fallbacks: ["google/gemini-3.1-flash-lite-preview"],
     };
 
     expect(resolveEffectiveModelFallbacks(entryModel, defaultModel)).toEqual(["openai/gpt-5-nano"]);
@@ -44,7 +44,7 @@ describe("resolveEffectiveModelFallbacks", () => {
     };
     const defaultModel = {
       primary: "openai/gpt-5",
-      fallbacks: ["google/gemini-2.0-flash"],
+      fallbacks: ["google/gemini-3.1-flash-lite-preview"],
     };
 
     expect(resolveEffectiveModelFallbacks(entryModel, defaultModel)).toStrictEqual([]);

@@ -35,7 +35,7 @@ function makeJob(overrides?: Record<string, unknown>) {
     payload: {
       kind: "agentTurn",
       message: "summarize",
-      model: "google/gemini-2.0-flash",
+      model: "google/gemini-3.1-flash-lite-preview",
     },
     ...overrides,
   } as never;
@@ -52,7 +52,7 @@ function makeParams(overrides?: Record<string, unknown>) {
   };
 }
 
-function makeSuccessfulRunResult(provider = "google", model = "gemini-2.0-flash") {
+function makeSuccessfulRunResult(provider = "google", model = "gemini-3.1-flash-lite-preview") {
   return {
     result: {
       payloads: [{ text: "summary done" }],
@@ -119,7 +119,7 @@ describe("runCronIsolatedAgentTurn — cron model override forwarding (#58065)",
     // Cron payload model override resolves to gemini
     resolveAllowedModelRefMock.mockImplementation(({ raw }: { raw: string }) => {
       if (raw.includes("gemini")) {
-        return { ref: { provider: "google", model: "gemini-2.0-flash" } };
+        return { ref: { provider: "google", model: "gemini-3.1-flash-lite-preview" } };
       }
       return { ref: { provider: "anthropic", model: "claude-opus-4-6" } };
     });
@@ -157,10 +157,10 @@ describe("runCronIsolatedAgentTurn — cron model override forwarding (#58065)",
     const result = await runCronIsolatedAgentTurn(makeParams());
 
     expect(result.status).toBe("ok");
-    // The cron payload specifies google/gemini-2.0-flash — that must be
+    // The cron payload specifies google/gemini-3.1-flash-lite-preview — that must be
     // what reaches runWithModelFallback, not the agent default (opus).
     expect(capturedProvider).toBe("google");
-    expect(capturedModel).toBe("gemini-2.0-flash");
+    expect(capturedModel).toBe("gemini-3.1-flash-lite-preview");
   });
 
   it("passes the cron payload model to the embedded agent runner", async () => {
@@ -179,7 +179,7 @@ describe("runCronIsolatedAgentTurn — cron model override forwarding (#58065)",
     expect(result.status).toBe("ok");
     const embeddedCall = firstMockArg(runEmbeddedPiAgentMock);
     expect(embeddedCall.provider).toBe("google");
-    expect(embeddedCall.model).toBe("gemini-2.0-flash");
+    expect(embeddedCall.model).toBe("gemini-3.1-flash-lite-preview");
   });
 
   it("forwards isolated cron execution phase updates from embedded runs", async () => {
@@ -191,7 +191,7 @@ describe("runCronIsolatedAgentTurn — cron model override forwarding (#58065)",
       onExecutionPhase?.({
         phase: "model_call_started",
         provider: "google",
-        model: "gemini-2.0-flash",
+        model: "gemini-3.1-flash-lite-preview",
         firstModelCallStarted: true,
       });
       return {
@@ -213,7 +213,7 @@ describe("runCronIsolatedAgentTurn — cron model override forwarding (#58065)",
         jobId: "model-fwd-job",
         phase: "model_call_started",
         provider: "google",
-        model: "gemini-2.0-flash",
+        model: "gemini-3.1-flash-lite-preview",
         firstModelCallStarted: true,
       }),
     ).toBe(true);
@@ -244,7 +244,7 @@ describe("runCronIsolatedAgentTurn — cron model override forwarding (#58065)",
       onExecutionPhase?.({
         phase: "model_call_started",
         provider: "google",
-        model: "gemini-2.0-flash",
+        model: "gemini-3.1-flash-lite-preview",
         firstModelCallStarted: true,
       });
       return {
@@ -417,7 +417,7 @@ describe("runCronIsolatedAgentTurn — cron model override forwarding (#58065)",
       payload: {
         kind: "agentTurn",
         message: "summarize",
-        model: "google/gemini-2.0-flash",
+        model: "google/gemini-3.1-flash-lite-preview",
         fallbacks: ["openai/gpt-4o"],
       },
     });

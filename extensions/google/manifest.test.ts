@@ -23,15 +23,15 @@ const RETIRED_GEMINI_CHAT_MODELS = [
   "gemini-1.5-flash",
   "gemini-1.5-flash-8b",
   "gemini-1.5-pro",
-  "gemini-2.0-flash-exp",
-  "gemini-2.0-flash-exp-image-generation",
-  "gemini-2.0-flash-live-001",
-  "gemini-2.0-flash-lite-preview",
-  "gemini-2.0-flash-lite-preview-02-05",
-  "gemini-2.0-flash-preview-image-generation",
-  "gemini-2.0-flash-thinking-exp",
-  "gemini-2.0-flash-thinking-exp-01-21",
-  "gemini-2.0-flash-thinking-exp-1219",
+  "gemini-3.1-flash-lite-preview-exp",
+  "gemini-3.1-flash-lite-preview-exp-image-generation",
+  "gemini-3.1-flash-lite-preview-live-001",
+  "gemini-3.1-flash-lite-preview-lite-preview",
+  "gemini-3.1-flash-lite-preview-lite-preview-02-05",
+  "gemini-3.1-flash-lite-preview-preview-image-generation",
+  "gemini-3.1-flash-lite-preview-thinking-exp",
+  "gemini-3.1-flash-lite-preview-thinking-exp-01-21",
+  "gemini-3.1-flash-lite-preview-thinking-exp-1219",
   "gemini-2.0-pro-exp",
   "gemini-2.0-pro-exp-02-05",
   "gemini-2.5-flash-exp-native-audio-thinking-dialog",
@@ -85,7 +85,7 @@ describe("google manifest model catalog", () => {
       ),
     );
 
-    expect(suppressionRefs).not.toContain("google/gemini-2.0-flash");
+    expect(suppressionRefs).not.toContain("google/gemini-3.1-flash-lite-preview");
     expect(suppressionRefs).not.toContain("google/gemini-2.5-flash");
     expect(suppressionRefs).not.toContain("google/gemini-2.5-flash-lite");
     expect(suppressionRefs).not.toContain("google/gemini-2.5-pro");

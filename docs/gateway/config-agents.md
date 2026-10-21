@@ -359,7 +359,7 @@ Time format in system prompt. Default: `auto` (OS preference).
       },
       imageModel: {
         primary: "openrouter/qwen/qwen-2.5-vl-72b-instruct:free",
-        fallbacks: ["openrouter/google/gemini-2.0-flash-vision:free"],
+        fallbacks: ["openrouter/google/gemini-3.1-flash-lite-preview-vision:free"],
       },
       imageGenerationModel: {
         primary: "openai/gpt-image-2",
