@@ -32,8 +32,8 @@ import {
 } from "../state/openclaw-state-db.js";
 import { shortenHomePath } from "../utils.js";
 import { ensureHeartbeatMonitorJobs } from "./doctor-heartbeat-cadence-migration.js";
-import { resolveHeartbeatConfig } from "./doctor-heartbeat-legacy.js";
-import { resolveHeartbeatSession } from "./doctor-heartbeat-session.js";
+import { resolveLegacyHeartbeatConfig } from "./doctor-heartbeat-legacy.js";
+import { resolveLegacyHeartbeatSession } from "./doctor-heartbeat-session.js";
 import {
   commitHeartbeatTaskMigrationInDatabase,
   convertStoredHeartbeatTask,
@@ -53,7 +53,7 @@ type HeartbeatTaskMigrationResult = { changes: string[]; warnings: string[] };
 function resolveHeartbeatTaskMigrationAgents(cfg: OpenClawConfig) {
   return listAgentIds(cfg).map((agentId) => ({
     agentId,
-    heartbeat: resolveHeartbeatConfig(cfg, agentId),
+    heartbeat: resolveLegacyHeartbeatConfig(cfg, agentId),
   }));
 }
 
@@ -310,7 +310,7 @@ export async function maybeMigrateHeartbeatTasksToCron(params: {
 
   for (const candidate of candidates) {
     const { agent, document, jobId, scratch } = candidate;
-    const session = resolveHeartbeatSession(
+    const session = resolveLegacyHeartbeatSession(
       params.cfg,
       agent.agentId,
       agent.heartbeat,

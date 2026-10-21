@@ -40,7 +40,7 @@ const DEFAULT_VISIBILITY: ResolvedHeartbeatVisibility = {
 };
 
 /** Resolves heartbeat visibility for a channel, applying account > channel > defaults precedence. */
-export function resolveHeartbeatVisibility(params: {
+export function resolveLegacyHeartbeatVisibility(params: {
   cfg: OpenClawConfig;
   channel: string;
   accountId?: string;
@@ -99,7 +99,7 @@ type HeartbeatAgent = {
   heartbeat?: HeartbeatConfig;
 };
 
-export function resolveHeartbeatConfig(
+export function resolveLegacyHeartbeatConfig(
   cfg: OpenClawConfig,
   agentId?: string,
 ): HeartbeatConfig | undefined {
@@ -112,7 +112,7 @@ export function resolveHeartbeatConfig(
 }
 
 /** Resolve the cadence owned by the effective heartbeat configuration. */
-export function resolveHeartbeatIntervalMs(
+export function resolveLegacyHeartbeatIntervalMs(
   cfg: OpenClawConfig,
   overrideEvery?: string,
   heartbeat?: HeartbeatConfig,
@@ -130,33 +130,33 @@ export function resolveHeartbeatIntervalMs(
   }
 }
 
-function resolveHeartbeatAgentsInBatch(cfg: OpenClawConfig): HeartbeatAgent[] {
+function resolveLegacyHeartbeatAgentsInBatch(cfg: OpenClawConfig): HeartbeatAgent[] {
   const explicitAgents = listAgentEntries(cfg).filter((entry) => entry.heartbeat);
   if (explicitAgents.length > 0) {
     return explicitAgents
       .map((entry) => {
         const agentId = normalizeAgentId(entry.id);
-        return { agentId, heartbeat: resolveHeartbeatConfig(cfg, agentId) };
+        return { agentId, heartbeat: resolveLegacyHeartbeatConfig(cfg, agentId) };
       })
       .filter((agent) => agent.agentId);
   }
   const configuredAgentId = normalizeOptionalString(cfg.agents?.defaults?.heartbeat?.agentId);
   if (configuredAgentId) {
     const agentId = normalizeAgentId(configuredAgentId);
-    return [{ agentId, heartbeat: resolveHeartbeatConfig(cfg, agentId) }];
+    return [{ agentId, heartbeat: resolveLegacyHeartbeatConfig(cfg, agentId) }];
   }
   if (cfg.agents?.defaults?.heartbeat) {
     return listAgentIds(cfg).map((agentId) => ({
       agentId,
-      heartbeat: resolveHeartbeatConfig(cfg, agentId),
+      heartbeat: resolveLegacyHeartbeatConfig(cfg, agentId),
     }));
   }
   const agentId = tryResolveAmbientOwnerAgentId(cfg);
-  return agentId ? [{ agentId, heartbeat: resolveHeartbeatConfig(cfg, agentId) }] : [];
+  return agentId ? [{ agentId, heartbeat: resolveLegacyHeartbeatConfig(cfg, agentId) }] : [];
 }
 
-export function resolveHeartbeatAgents(cfg: OpenClawConfig): HeartbeatAgent[] {
-  return withAgentRosterFactsBatch(cfg, () => resolveHeartbeatAgentsInBatch(cfg));
+export function resolveLegacyHeartbeatAgents(cfg: OpenClawConfig): HeartbeatAgent[] {
+  return withAgentRosterFactsBatch(cfg, () => resolveLegacyHeartbeatAgentsInBatch(cfg));
 }
 
 /** Retire only the standalone acknowledgment; preserve every other prompt byte. */

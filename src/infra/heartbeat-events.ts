@@ -1,4 +1,4 @@
-import type { CronEvent } from "../cron/service.js";
+import type { CronEvent } from "../cron/types.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { notifyListeners } from "../shared/listeners.js";
 

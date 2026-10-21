@@ -111,7 +111,7 @@ export function resolveLegacyHeartbeatSessionKey(
     : mainSession();
 }
 
-export function resolveHeartbeatSession(
+export function resolveLegacyHeartbeatSession(
   cfg: OpenClawConfig,
   agentId: string,
   heartbeat?: HeartbeatConfig,

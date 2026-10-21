@@ -5,7 +5,7 @@ import { isHeartbeatTaskCronJob } from "../cron/heartbeat-task.js";
 import type { DefaultProactiveJobReceipt } from "../cron/proactive-job-receipt.types.js";
 import type { CronStoredJob } from "../cron/types.js";
 import type { DoctorCronJob } from "./doctor-heartbeat-jobs.js";
-import { resolveHeartbeatAgents } from "./doctor-heartbeat-legacy.js";
+import { resolveLegacyHeartbeatAgents } from "./doctor-heartbeat-legacy.js";
 
 export function isGeneratedHeartbeatMonitor(job: DoctorCronJob): boolean {
   return job.payload.kind === "heartbeat" && job.declarationKey === `heartbeat:${job.agentId}`;
@@ -64,7 +64,7 @@ export function planDoctorHeartbeatMonitors(
   legacyFileAgentIds: readonly string[] = [],
 ) {
   const configuredAgentIds = new Set(listAgentIds(cfg));
-  const heartbeatAgents = resolveHeartbeatAgents(cfg);
+  const heartbeatAgents = resolveLegacyHeartbeatAgents(cfg);
   const enrolledAgentIds = new Set(heartbeatAgents.map((agent) => agent.agentId));
   // Implicit cadence controls existing work but alone must not provision a job.
   const agentIds = new Set([

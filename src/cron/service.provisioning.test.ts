@@ -15,13 +15,13 @@ import {
   setupCronServiceSuite,
   writeCronStoreSnapshot,
 } from "./service.test-harness.js";
-import type { CronEvent, CronServiceDeps } from "./service/state.js";
+import type { CronServiceDeps } from "./service/state.js";
 import { onTimer } from "./service/timer.test-support.js";
 import { publishCronJobsStoreMutation } from "./store.js";
 import { cronStoreKey } from "./store/key.js";
 import { loadCronStoreFromDatabase } from "./store/load.kernel.js";
 import { saveCronStoreInDatabase } from "./store/save.kernel.js";
-import type { CronJob } from "./types.js";
+import type { CronEvent, CronJob } from "./types.js";
 
 const { logger, makeStorePath } = setupCronServiceSuite({ prefix: "cron-provisioning-" });
 

@@ -3,7 +3,7 @@ import { resolveAmbientOwnerAgentId } from "../../../agents/agent-scope-config.j
 import { findLegacyConfigIssues } from "../../../config/legacy.js";
 import type { OpenClawConfigWithLegacyRoster } from "../../../config/legacy.roster.js";
 import type { OpenClawConfig } from "../../../config/types.js";
-import { resolveHeartbeatAgents } from "../../doctor-heartbeat-legacy.js";
+import { resolveLegacyHeartbeatAgents } from "../../doctor-heartbeat-legacy.js";
 import { applyLegacyDoctorMigrations } from "./legacy-config-compat.js";
 import { migrateLegacyConfig } from "./legacy-config-migrate.js";
 import { prepareLegacyConfigMigrationRuntime } from "./legacy-config-migrate.test-support.js";
@@ -21,7 +21,7 @@ const migrate = (raw: unknown) =>
   applyLegacyDoctorMigrations(raw, { sourceConfigBeforeMigrations: raw });
 const config = (agents: NonNullable<OpenClawConfigWithLegacyRoster["agents"]>) => ({ agents });
 const heartbeatIds = (cfg: OpenClawConfigWithLegacyRoster) =>
-  resolveHeartbeatAgents(cfg).map(({ agentId }) => agentId);
+  resolveLegacyHeartbeatAgents(cfg).map(({ agentId }) => agentId);
 function expectOwner(cfg: OpenClawConfig, agentId: string) {
   expect(resolveAmbientOwnerAgentId(cfg)).toBe(agentId);
   expect(cfg.agents?.defaults?.systemAgent).toEqual({ agentId });

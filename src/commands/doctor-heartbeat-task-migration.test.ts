@@ -26,7 +26,7 @@ import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths
 import { captureEnv } from "../test-utils/env.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { ensureHeartbeatMonitorJobs } from "./doctor-heartbeat-cadence-migration.js";
-import { resolveHeartbeatSession } from "./doctor-heartbeat-session.js";
+import { resolveLegacyHeartbeatSession } from "./doctor-heartbeat-session.js";
 import {
   collectHeartbeatTaskMigrationFindings,
   maybeMigrateHeartbeatTasksToCron,
@@ -109,7 +109,7 @@ tasks:
     expectedRevision: 0,
     options: { env },
   });
-  const session = resolveHeartbeatSession(
+  const session = resolveLegacyHeartbeatSession(
     cfg,
     agentId,
     cfg.agents?.defaults?.heartbeat,
@@ -263,11 +263,11 @@ describe("heartbeat scratch task cron migration", () => {
       anchorMs: fixture.nowMs + 30 * 60_000,
     });
     expect(
-      resolveHeartbeatSession(fixture.cfg, "research", undefined, undefined, fixture.env).entry
-        ?.heartbeatTaskState,
+      resolveLegacyHeartbeatSession(fixture.cfg, "research", undefined, undefined, fixture.env)
+        .entry?.heartbeatTaskState,
     ).toBeUndefined();
     expect(
-      resolveHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
+      resolveLegacyHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
         ?.heartbeatTaskState,
     ).toEqual({ inbox: fixture.nowMs - 10 * 60_000 });
   });
@@ -460,7 +460,7 @@ describe("heartbeat scratch task cron migration", () => {
     expect(scratch?.content).toContain("# Keep alerts concise");
     expect(scratch?.content).not.toContain("tasks:");
     expect(
-      resolveHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
+      resolveLegacyHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
         ?.heartbeatTaskState,
     ).toBeUndefined();
 
@@ -534,7 +534,7 @@ tasks:
     );
     expect(jobs).toEqual([existingSnapshot]);
     expect(
-      resolveHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
+      resolveLegacyHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
         ?.heartbeatTaskState,
     ).toEqual({ inbox: fixture.nowMs - 30 * 60_000 });
   });
@@ -582,7 +582,7 @@ tasks:
     expect(committedJobs).toHaveLength(2);
     expect(readScratch(fixture).scratch?.content).not.toContain("tasks:");
     expect(
-      resolveHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
+      resolveLegacyHeartbeatSession(fixture.cfg, "main", undefined, undefined, fixture.env).entry
         ?.heartbeatTaskState,
     ).toEqual({ inbox: fixture.nowMs - 30 * 60_000 });
 

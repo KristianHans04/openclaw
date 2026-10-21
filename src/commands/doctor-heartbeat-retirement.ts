@@ -21,7 +21,7 @@ import { decodeDoctorHeartbeatJobRows } from "./doctor-heartbeat-jobs.js";
 import {
   migrateHeartbeatPrompt,
   projectRetiredHeartbeatConfig,
-  resolveHeartbeatConfig,
+  resolveLegacyHeartbeatConfig,
   validateLegacyHeartbeatConfig,
 } from "./doctor-heartbeat-legacy.js";
 import { resolveHeartbeatAutomationModel } from "./doctor-heartbeat-model.js";
@@ -139,7 +139,7 @@ export async function retireHeartbeatWithDoctor(
   }
   if (
     [...monitors.keys()].some((agentId) => {
-      const prompt = resolveHeartbeatConfig(cfg, agentId)?.prompt;
+      const prompt = resolveLegacyHeartbeatConfig(cfg, agentId)?.prompt;
       return prompt !== undefined && migrateHeartbeatPrompt(prompt) !== prompt;
     })
   ) {

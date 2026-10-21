@@ -5,7 +5,11 @@ import { makeCronJob } from "../delivery.test-helpers.js";
 import { createNoopLogger } from "../service.test-harness.js";
 import type { CronJob, CronPacing } from "../types.js";
 import { recomputeNextRunsForMaintenance } from "./jobs-scheduling.test-support.js";
-import { createCronServiceState, type DeferredCronNotifications } from "./state.js";
+import {
+  createCronServiceState,
+  type CronServiceDeps,
+  type DeferredCronNotifications,
+} from "./state.js";
 import { runPostPersistCronNotifications } from "./store.js";
 import type { CronJobRunResult } from "./timer-execution-timeout.js";
 import { authorCronRunCompletion } from "./timer-job-runner.js";
@@ -22,6 +26,7 @@ function makeState() {
     log: createNoopLogger(),
     nowMs: () => ENDED_AT,
     enqueueSystemEvent: vi.fn(),
+    enqueueSessionEvent: vi.fn<NonNullable<CronServiceDeps["enqueueSessionEvent"]>>(),
     requestHeartbeat: vi.fn(),
     runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
   });
@@ -89,12 +94,12 @@ describe("cron dynamic cadence", () => {
         atMs: ENDED_AT,
         consecutiveErrors: 1,
       });
-      expect(state.deps.enqueueSystemEvent).not.toHaveBeenCalled();
-      expect(state.deps.requestHeartbeat).not.toHaveBeenCalled();
+      expect(state.deps.enqueueSessionEvent).not.toHaveBeenCalled();
       expect(deferredNotifications).toHaveLength(1);
       await runPostPersistCronNotifications(state, structuredClone(deferredNotifications));
-      expect(state.deps.enqueueSystemEvent).toHaveBeenCalledOnce();
-      expect(state.deps.requestHeartbeat).toHaveBeenCalledOnce();
+      expect(state.deps.enqueueSessionEvent).toHaveBeenCalledOnce();
+      expect(state.deps.enqueueSystemEvent).not.toHaveBeenCalled();
+      expect(state.deps.requestHeartbeat).not.toHaveBeenCalled();
     },
   );
 

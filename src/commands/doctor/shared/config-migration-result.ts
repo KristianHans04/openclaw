@@ -73,9 +73,9 @@ export async function retainHeartbeatMigrationInput(
     }
   }
   if (source) {
-    const { resolveHeartbeatAgents } = await import("../../doctor-heartbeat-legacy.js");
+    const { resolveLegacyHeartbeatAgents } = await import("../../doctor-heartbeat-legacy.js");
     const { resolveHeartbeatAutomationModel } = await import("../../doctor-heartbeat-model.js");
-    for (const { agentId, heartbeat } of resolveHeartbeatAgents(candidate)) {
+    for (const { agentId, heartbeat } of resolveLegacyHeartbeatAgents(candidate)) {
       const entry = candidate.agents?.entries?.[agentId];
       const fallback = resolveHeartbeatAutomationModel(candidate, agentId).fallback;
       if (entry && heartbeat) {

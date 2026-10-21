@@ -4,7 +4,6 @@ import { DEFAULT_HEARTBEAT_ACK_MAX_CHARS } from "../auto-reply/heartbeat.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { tryResolveCronJobEffectiveAgentId } from "../cron/agent-id.js";
 import type { CronJob } from "../cron/types.js";
-import type { ProactiveDeliveryPolicy } from "./outbound/targets.js";
 
 export type HeartbeatSummary = {
   enabled: boolean;
@@ -15,7 +14,6 @@ export type HeartbeatSummary = {
   model?: string;
   session?: string;
   ackMaxChars: number;
-  deliveryPolicy?: ProactiveDeliveryPolicy;
 };
 
 function resolveHeartbeatSummaryJobs(
@@ -53,14 +51,5 @@ export function projectHeartbeatSummary(job?: CronJob): HeartbeatSummary {
       ? job.sessionTarget.slice(8)
       : job?.sessionKey,
     ackMaxChars: DEFAULT_HEARTBEAT_ACK_MAX_CHARS,
-    deliveryPolicy: job?.delivery
-      ? {
-          target: job.delivery.target ?? job.delivery.channel,
-          channel: job.delivery.channel,
-          to: job.delivery.to,
-          accountId: job.delivery.accountId,
-          directPolicy: job.delivery.directPolicy,
-        }
-      : undefined,
   };
 }

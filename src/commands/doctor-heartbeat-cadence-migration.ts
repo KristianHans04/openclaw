@@ -27,6 +27,10 @@ import {
 import type { CronStoredJob as CronJob } from "../cron/types.js";
 import type { HealthFinding } from "../flows/health-checks.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import {
+  resolveHeartbeatPhaseMs,
+  resolveHeartbeatSchedulerSeed,
+} from "../infra/heartbeat-schedule.js";
 import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
 import {
@@ -35,10 +39,10 @@ import {
   type DoctorCronJob,
 } from "./doctor-heartbeat-jobs.js";
 import {
-  resolveHeartbeatAgents,
-  resolveHeartbeatConfig,
-  resolveHeartbeatIntervalMs,
-  resolveHeartbeatVisibility,
+  resolveLegacyHeartbeatAgents,
+  resolveLegacyHeartbeatConfig,
+  resolveLegacyHeartbeatIntervalMs,
+  resolveLegacyHeartbeatVisibility,
   migrateHeartbeatPrompt,
   validateLegacyHeartbeatConfig,
 } from "./doctor-heartbeat-legacy.js";
@@ -49,10 +53,6 @@ import {
   resolveDoctorHeartbeatReceiptJob,
   selectDoctorHeartbeatMonitor,
 } from "./doctor-heartbeat-monitors.js";
-import {
-  resolveHeartbeatPhaseMs,
-  resolveHeartbeatSchedulerSeed,
-} from "./doctor-heartbeat-schedule.js";
 import { resolveLegacyHeartbeatSessionKey } from "./doctor-heartbeat-session.js";
 
 const CHECK_ID = "core/doctor/heartbeat-cadence-migration";
@@ -86,7 +86,7 @@ function legacyAlertsEnabled(cfg: OpenClawConfig, target: string, accountId?: st
       const accounts =
         isRecord(config) && isRecord(config.accounts) ? Object.keys(config.accounts) : [];
       return (accountId ? [accountId] : accounts.length ? accounts : [undefined]).map(
-        (id) => resolveHeartbeatVisibility({ cfg, channel, accountId: id }).showAlerts,
+        (id) => resolveLegacyHeartbeatVisibility({ cfg, channel, accountId: id }).showAlerts,
       );
     }),
   );
@@ -98,7 +98,7 @@ function legacyAlertsEnabled(cfg: OpenClawConfig, target: string, accountId?: st
   return values.has(true);
 }
 
-function migrateActiveHours(heartbeat: ReturnType<typeof resolveHeartbeatConfig>) {
+function migrateActiveHours(heartbeat: ReturnType<typeof resolveLegacyHeartbeatConfig>) {
   const active = heartbeat?.activeHours;
   // The previous evaluator treated incomplete windows as unrestricted.
   if (!active?.start || !active.end) {
@@ -125,7 +125,7 @@ function convertMonitor(
   env: NodeJS.ProcessEnv,
   enrolled: boolean,
 ): CronJob {
-  const heartbeat = resolveHeartbeatConfig(cfg, agentId);
+  const heartbeat = resolveLegacyHeartbeatConfig(cfg, agentId);
   const { model } = resolveHeartbeatAutomationModel(cfg, agentId);
   // A persisted monitor already resolved provider defaults such as OAuth's 1h
   // cadence. Only an authored cadence supersedes that accepted schedule.
@@ -134,8 +134,8 @@ function convertMonitor(
       ? ((previous?.schedule.kind === "every"
           ? previous.schedule.everyMs
           : resolveDefaultProactiveCadenceMs(cfg, agentId, env)) ??
-        resolveHeartbeatIntervalMs(cfg, undefined, heartbeat))
-      : resolveHeartbeatIntervalMs(cfg, undefined, heartbeat);
+        resolveLegacyHeartbeatIntervalMs(cfg, undefined, heartbeat))
+      : resolveLegacyHeartbeatIntervalMs(cfg, undefined, heartbeat);
   const job: CronJob = previous
     ? {
         ...structuredClone(previous),
@@ -398,7 +398,7 @@ export function hasPendingHeartbeatCadenceMigration(
   const storePath = resolveCronJobsStorePathFromConfig(cfg, env);
   const loaded = readDoctorHeartbeatJobs(storePath, env);
   const configured = new Set(
-    resolveHeartbeatAgents(cfg)
+    resolveLegacyHeartbeatAgents(cfg)
       .filter((agent) => agent.heartbeat !== undefined)
       .map((agent) => agent.agentId),
   );

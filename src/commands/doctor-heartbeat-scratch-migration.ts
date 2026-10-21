@@ -32,7 +32,7 @@ import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-sta
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
 import { shortenHomePath } from "../utils.js";
 import { ensureHeartbeatMonitorJobs } from "./doctor-heartbeat-cadence-migration.js";
-import { resolveHeartbeatAgents } from "./doctor-heartbeat-legacy.js";
+import { resolveLegacyHeartbeatAgents } from "./doctor-heartbeat-legacy.js";
 import { noteDoctorMigrationResult } from "./doctor-migration-notes.js";
 
 const LEGACY_HEARTBEAT_FILENAME = "HEARTBEAT.md";
@@ -395,7 +395,7 @@ export async function collectHeartbeatScratchMigrationFindings(
     fixHint: `Run ${formatCliCommand("openclaw doctor --fix")} to migrate HEARTBEAT.md into cron scratch.`,
   } as const;
   const findings: HealthFinding[] = [];
-  const migrationAgents = resolveHeartbeatAgents(cfg);
+  const migrationAgents = resolveLegacyHeartbeatAgents(cfg);
   for (const agent of migrationAgents) {
     const heartbeatPath = path.join(
       resolveAgentWorkspaceDir(cfg, agent.agentId, env),
@@ -437,7 +437,7 @@ export async function maybeMigrateHeartbeatFilesToScratch(params: {
   const storePath = resolveCronJobsStorePathFromConfig(params.cfg, env);
   const changes: string[] = [];
   const warnings: string[] = [];
-  const migrationAgents = resolveHeartbeatAgents(params.cfg);
+  const migrationAgents = resolveLegacyHeartbeatAgents(params.cfg);
   if (!params.shouldRepair) {
     for (const agent of migrationAgents) {
       try {

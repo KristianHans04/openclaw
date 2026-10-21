@@ -13,7 +13,7 @@ import {
   createCronServiceWithStateForTest,
   setupCronServiceSuite,
 } from "./service.test-harness.js";
-import type { CronEvent, CronServiceDeps } from "./service/state.js";
+import type { CronServiceDeps } from "./service/state.js";
 import {
   DEFAULT_STARTUP_DEFERRED_MISSED_AGENT_JOB_DELAY_MS,
   MIN_REFIRE_GAP_MS,
@@ -23,7 +23,7 @@ import { loadCronStore, saveCronStore } from "./store.js";
 import { cronStoreKey } from "./store/key.js";
 import { inspectActiveCronRunReceipt } from "./store/run-receipt-store.test-support.js";
 import { parseCronScheduledRunId } from "./store/run-request-id.js";
-import type { CronJob } from "./types.js";
+import type { CronEvent, CronJob } from "./types.js";
 
 const { logger, makeStorePath } = setupCronServiceSuite({
   prefix: "cron-one-shot-schedule-ownership-",

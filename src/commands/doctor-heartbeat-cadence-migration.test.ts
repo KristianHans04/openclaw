@@ -31,6 +31,10 @@ import {
   loadDeviceIdentityIfPresent,
   loadOrCreateDeviceIdentity,
 } from "../infra/device-identity.js";
+import {
+  resolveHeartbeatPhaseMs,
+  resolveHeartbeatSchedulerSeed,
+} from "../infra/heartbeat-schedule.js";
 import { executeSqliteQuerySync } from "../infra/kysely-sync.js";
 import { withPluginMetadataSnapshotScope } from "../plugins/current-plugin-metadata-snapshot.js";
 import { createPluginMetadataSnapshotFixture } from "../plugins/plugin-metadata.test-support.js";
@@ -51,10 +55,6 @@ import {
 } from "./doctor-heartbeat-cadence-migration.js";
 import type { DoctorCronJob } from "./doctor-heartbeat-jobs.js";
 import { retireHeartbeatWithDoctor } from "./doctor-heartbeat-retirement.js";
-import {
-  resolveHeartbeatPhaseMs,
-  resolveHeartbeatSchedulerSeed,
-} from "./doctor-heartbeat-schedule.js";
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>

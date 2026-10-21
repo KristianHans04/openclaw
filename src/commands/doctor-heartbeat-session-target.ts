@@ -13,14 +13,17 @@ import {
   toAgentStoreSessionKey,
 } from "../routing/session-key.js";
 import { isSubagentSessionKey } from "../sessions/session-key-utils.js";
-import { resolveHeartbeatAgents, resolveHeartbeatIntervalMs } from "./doctor-heartbeat-legacy.js";
+import {
+  resolveLegacyHeartbeatAgents,
+  resolveLegacyHeartbeatIntervalMs,
+} from "./doctor-heartbeat-legacy.js";
 
 /** Warn without rewriting an operator's legacy session or delivery target. */
 export async function describeHeartbeatSessionTargetIssues(cfg: OpenClawConfig): Promise<string[]> {
   const warnings: string[] = [];
   const sessionScope = cfg.session?.scope ?? "per-sender";
-  for (const { agentId, heartbeat: heartbeatConfig } of resolveHeartbeatAgents(cfg)) {
-    if (!heartbeatConfig || !resolveHeartbeatIntervalMs(cfg, undefined, heartbeatConfig)) {
+  for (const { agentId, heartbeat: heartbeatConfig } of resolveLegacyHeartbeatAgents(cfg)) {
+    if (!heartbeatConfig || !resolveLegacyHeartbeatIntervalMs(cfg, undefined, heartbeatConfig)) {
       continue;
     }
     const configuredSession = normalizeOptionalString(heartbeatConfig.session);
@@ -29,7 +32,7 @@ export async function describeHeartbeatSessionTargetIssues(cfg: OpenClawConfig):
     }
     const normalizedSession = configuredSession.toLowerCase();
     // `main` / `global` resolve to the agent main session via
-    // `resolveHeartbeatSession`; missing entries fall back to the same key
+    // `resolveLegacyHeartbeatSession`; missing entries fall back to the same key
     // and are repaired elsewhere — don't double-warn here.
     if (
       normalizedSession === "main" ||

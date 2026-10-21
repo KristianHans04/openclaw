@@ -25,7 +25,7 @@ import {
 import type { DeferredHookWake } from "./service/wake.js";
 import type { CronJob, CronJobCreate, CronJobPatch, CronStoredJob } from "./types.js";
 
-export type { CronEvent } from "./service/state.js";
+export type { CronEvent } from "./types.js";
 
 /** Public cron service facade that owns mutable scheduler state and delegates to locked ops. */
 export class CronService implements CronServiceContract {

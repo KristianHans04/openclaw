@@ -367,7 +367,7 @@ export async function prepareStatusSummary(
           storePath: resolveSessionStorePathCore(cfg.session?.store, { agentId: agent.id }),
           sessionKey,
           target: summary.target,
-          policy: summary.deliveryPolicy,
+          policy: job?.delivery,
         };
       }
       const status: HeartbeatStatus = {

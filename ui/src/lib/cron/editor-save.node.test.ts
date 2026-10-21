@@ -228,7 +228,16 @@ describe("automation save editor ownership", () => {
 
   it("clears retained owner routing when disabled delivery is re-enabled for a channel", async () => {
     const stored: CronStoredJob = {
-      ...createCronJob({ id: "disabled-owner", name: "Evening notes" }),
+      id: "disabled-owner",
+      name: "Evening notes",
+      enabled: true,
+      createdAtMs: 0,
+      updatedAtMs: 0,
+      schedule: { kind: "cron", expr: "0 * * * *" },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "run" },
+      state: {},
       delivery: {
         mode: "none",
         target: "owner",

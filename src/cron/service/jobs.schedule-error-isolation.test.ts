@@ -5,6 +5,7 @@ import type { CronJob } from "../types.js";
 import { recomputeNextRunsForMaintenance } from "./jobs-scheduling.test-support.js";
 import {
   createCronServiceState,
+  type CronServiceDeps,
   type CronServiceState,
   type DeferredCronNotifications,
 } from "./state.js";
@@ -18,6 +19,7 @@ function createMockState(jobs: CronJob[]): CronServiceState {
     nowMs: () => Date.now(),
     log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     enqueueSystemEvent: vi.fn(),
+    enqueueSessionEvent: vi.fn<NonNullable<CronServiceDeps["enqueueSessionEvent"]>>(),
     requestHeartbeat: vi.fn(),
     runIsolatedAgentJob: vi.fn(),
     onEvent: vi.fn(),
@@ -102,7 +104,7 @@ describe("cron schedule error isolation", () => {
 
     const deferredNotifications: DeferredCronNotifications = [];
     recomputeNextRunsForMaintenance(state, { recomputeExpired: true, deferredNotifications });
-    expect(state.deps.enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(state.deps.enqueueSessionEvent).not.toHaveBeenCalled();
     await runPostPersistCronNotifications(state, structuredClone(deferredNotifications));
 
     // After 3rd error, job should be disabled
@@ -122,11 +124,11 @@ describe("cron schedule error isolation", () => {
       },
       "cron: auto-disabled job after repeated schedule errors",
     );
-    expect(state.deps.enqueueSystemEvent).toHaveBeenCalledWith(
+    expect(state.deps.enqueueSessionEvent).toHaveBeenCalledWith(
       expect.stringContaining("openclaw automations enable bad-job"),
       expect.objectContaining({ contextKey: "cron:bad-job:auto-disabled" }),
     );
-    const notification = vi.mocked(state.deps.enqueueSystemEvent).mock.calls[0]?.[0];
+    const notification = vi.mocked(state.deps.enqueueSessionEvent!).mock.calls[0]?.[0];
     expect(notification).toContain("Check automation history for details.");
     expect(notification).not.toContain("invalid configuration format");
   });

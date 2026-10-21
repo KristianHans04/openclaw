@@ -1,7 +1,6 @@
 import type { AdmittedRunContext } from "../../agents/admitted-run-context.js";
 import type { ExecutionIdentityAdmissionFacts } from "../../audit/execution-identity-admission.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
-import type { NormalizeReplySkipReason } from "../../auto-reply/reply/normalize-reply-skip-reason.js";
 import type { SessionEventTarget } from "../../auto-reply/reply/session-event-contract.js";
 import type { SessionEntryCurrentCheck } from "../../config/sessions/session-entry-current.types.js";
 import type { SessionCreatedActor } from "../../config/sessions/session-entry-provenance.js";
@@ -21,24 +20,20 @@ import type { CronJobScratchState } from "../scratch-contract.js";
 import type { CronStreamExecApproval, CronStreamExecPolicy } from "../stream-exec-authority.js";
 import type { QuarantinedCronConfigJob } from "../types-shared.js";
 import type {
-  CronCompletionStatus,
   CronWebhookDeliveryOutcome,
   CronTriggerEvaluationResult,
   CronAgentExecutionPhaseUpdate,
   CronAgentExecutionStarted,
   CronFailureNotificationDelivery,
   CronFailureNotificationDetail,
-  CronDeliveryStatus,
-  CronDeliveryTrace,
+  CronEvent,
   CronJob,
   CronNextCheckProposal,
   CronJobCreate,
   CronJobPatch,
-  CronRunDiagnostics,
   CronRunDeliveryResult,
   CronMessageChannel,
   CronRunOutcome,
-  CronRunStatus,
   CronRunTelemetry,
   CronStoredJob,
   CronStoreFile,
@@ -52,31 +47,6 @@ import type {
   CronNotificationRouting,
   ResolvedFailureAlert,
 } from "./notification-intents.js";
-
-export type CronEvent = {
-  jobId: string;
-  action: "added" | "updated" | "removed" | "started" | "finished" | "scheduled";
-  /** Snapshot of the job at the time of the event. Present for all actions where the job is accessible. */
-  job?: CronJob;
-  runAtMs?: number;
-  durationMs?: number;
-  status?: CronRunStatus;
-  completionStatus?: CronCompletionStatus;
-  error?: string;
-  summary?: string;
-  diagnostics?: CronRunDiagnostics;
-  delivered?: boolean;
-  deliveryStatus?: CronDeliveryStatus;
-  deliveryError?: string;
-  deliverySuppressionReason?: NormalizeReplySkipReason;
-  failureNotificationDelivery?: CronFailureNotificationDelivery;
-  delivery?: CronDeliveryTrace;
-  sessionId?: string;
-  sessionKey?: string;
-  runId?: string;
-  nextRunAtMs?: number;
-  triggerFired?: boolean;
-} & CronRunTelemetry;
 
 /** Transient internal context delivered beside, but never projected into, a CronEvent. */
 type CronEventContext = {

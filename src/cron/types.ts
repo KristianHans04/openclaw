@@ -15,6 +15,7 @@ import type { SessionCreatedActor } from "../config/sessions/session-entry-prove
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { CronAuthenticatedChannelRequester } from "../gateway/cron-creator-authority-grant.types.js";
 import type { HookExternalContentSource } from "../security/external-content.js";
+import type { CronCompletionStatus } from "./completion-status.js";
 import type { CronRuntimeAuthority } from "./runtime-authority.js";
 import type {
   CronScheduledToolCallerOrigin,
@@ -141,6 +142,32 @@ export type CronDeliveryPreview = CronDeliveryPreviewWire;
 
 /** Model/provider/usage telemetry attached to cron run results and logs. */
 export type CronRunTelemetry = Pick<CronRunLogWireEntry, "model" | "provider" | "usage">;
+
+/** Scheduler lifecycle event projected to Gateway clients and notification adapters. */
+export type CronEvent = {
+  jobId: string;
+  action: "added" | "updated" | "removed" | "started" | "finished" | "scheduled";
+  /** Snapshot of the job at the time of the event. Present for all actions where the job is accessible. */
+  job?: CronJob;
+  runAtMs?: number;
+  durationMs?: number;
+  status?: CronRunStatus;
+  completionStatus?: CronCompletionStatus;
+  error?: string;
+  summary?: string;
+  diagnostics?: CronRunDiagnostics;
+  delivered?: boolean;
+  deliveryStatus?: CronDeliveryStatus;
+  deliveryError?: string;
+  deliverySuppressionReason?: NormalizeReplySkipReason;
+  failureNotificationDelivery?: CronFailureNotificationDelivery;
+  delivery?: CronDeliveryTrace;
+  sessionId?: string;
+  sessionKey?: string;
+  runId?: string;
+  nextRunAtMs?: number;
+  triggerFired?: boolean;
+} & CronRunTelemetry;
 
 /** Severity level for persisted cron run diagnostics. */
 export type CronRunDiagnosticSeverity = CronRunDiagnostic["severity"];

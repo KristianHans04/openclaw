@@ -4,6 +4,7 @@ import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { isCronWithinActiveHours } from "../cron/active-hours.js";
 import { resolveCronJobConfigRevision } from "../cron/config-revision.js";
 import { normalizeCronJobCreate } from "../cron/normalize.js";
 import { CronService } from "../cron/service.js";
@@ -14,6 +15,7 @@ import { applyClawAddPlanStateless } from "./add-stateless.js";
 import { projectClawAddScheduledJobs } from "./gateway-disclosure.js";
 import { buildClawAddPlan } from "./lifecycle.js";
 import { readClawManifestFile } from "./reader.js";
+import { parseClawOpenClawProfile } from "./schema.js";
 
 it.each([
   { every: "5m", changed: "none" },
@@ -224,6 +226,77 @@ it.each([
       } finally {
         cron.stop();
         await cron.waitForIdle();
+      }
+    });
+  },
+);
+
+it.each([
+  {
+    name: "start only",
+    activeHours: { start: "22:00" },
+    expectedHours: undefined,
+    allowed: [true, true],
+  },
+  {
+    name: "end only",
+    activeHours: { end: "06:00" },
+    expectedHours: undefined,
+    allowed: [true, true],
+  },
+  {
+    name: "complete overnight window",
+    activeHours: { start: "22:00", end: "06:00", timezone: "UTC" },
+    expectedHours: { start: "22:00", end: "06:00", timezone: "UTC" },
+    allowed: [false, true],
+  },
+])(
+  "preserves portable active-hours admission for $name",
+  async ({ activeHours, expectedHours, allowed }) => {
+    await withOpenClawTestState({ label: "claw-portable-active-hours" }, async (fixture) => {
+      const packageRoot = fixture.statePath("package");
+      await mkdir(packageRoot, { recursive: true });
+      await writeFile(
+        path.join(packageRoot, "claw.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          agent: { id: "portable", name: "Portable" },
+          workspace: { bootstrapFiles: { "HEARTBEAT.md": { source: "HEARTBEAT.md" } } },
+        }),
+      );
+      await writeFile(
+        path.join(packageRoot, "HEARTBEAT.md"),
+        "# Checklist\nCheck active incidents.\ntasks:\n- name: Summary\n  interval: 15m\n  prompt: Prepare a summary.\n",
+      );
+      const source = await readClawManifestFile(path.join(packageRoot, "claw.json"));
+      if (!source.ok) {
+        throw new Error(JSON.stringify(source.diagnostics));
+      }
+      const profile = parseClawOpenClawProfile({
+        schemaVersion: 1,
+        agent: { heartbeat: { every: "5m", activeHours } },
+      });
+      if (!profile.ok) {
+        throw new Error(JSON.stringify(profile.diagnostics));
+      }
+      const plan = await buildClawAddPlan({
+        manifest: source.manifest,
+        source: source.source,
+        openClawProfile: profile.profile,
+        context: {
+          config: { agents: { entries: { main: {} } }, plugins: { enabled: false } },
+          workspace: fixture.statePath("added-workspace"),
+        },
+      });
+      const jobs = plan.actions.flatMap((action) => (action.automation ? [action.automation] : []));
+      expect(jobs).toHaveLength(2);
+      for (const job of jobs) {
+        expect(job.activeHours).toEqual(expectedHours);
+        expect(
+          [Date.UTC(2026, 0, 1, 12), Date.UTC(2026, 0, 1, 23)].map((nowMs) =>
+            isCronWithinActiveHours(job.activeHours, nowMs, "UTC"),
+          ),
+        ).toEqual(allowed);
       }
     });
   },

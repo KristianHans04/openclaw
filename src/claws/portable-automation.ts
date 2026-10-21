@@ -38,13 +38,16 @@ export function planClawPortableAutomation(params: {
   monitor.id = "$portable-heartbeat";
   monitor.enabled = everyMs > 0;
   monitor.sessionTarget = heartbeat.isolatedSession ? "isolated" : monitor.sessionTarget;
-  monitor.activeHours = heartbeat.activeHours
-    ? {
-        start: heartbeat.activeHours.start ?? "00:00",
-        end: heartbeat.activeHours.end ?? "24:00",
-        ...(heartbeat.activeHours.timezone ? { timezone: heartbeat.activeHours.timezone } : {}),
-      }
-    : undefined;
+  const activeHours = heartbeat.activeHours;
+  // Incomplete legacy windows were unrestricted.
+  monitor.activeHours =
+    activeHours?.start && activeHours.end
+      ? {
+          start: activeHours.start,
+          end: activeHours.end,
+          ...(activeHours.timezone ? { timezone: activeHours.timezone } : {}),
+        }
+      : undefined;
   if (monitor.payload.kind === "agentTurn") {
     monitor.payload.timeoutSeconds =
       heartbeat.timeoutSeconds ??

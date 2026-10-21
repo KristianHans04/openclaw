@@ -58,6 +58,7 @@ export function configureLiveGatewayBenchmark(
       },
     },
   };
+  config.cron = { enabled: false };
   config.tools = { deny: ["*"] };
 }
 
@@ -136,6 +137,7 @@ export function createLiveGatewayEvidence(agentIds: string[], turnsPerSession: n
       );
       const result = await rpc<{
         config: {
+          cron?: { enabled?: boolean };
           agents?: {
             defaults?: {
               model?: { primary?: string };
@@ -154,7 +156,8 @@ export function createLiveGatewayEvidence(agentIds: string[], turnsPerSession: n
       const defaults = config.agents?.defaults;
       const entries = config.agents?.entries;
       need(
-        config.plugins?.entries?.["memory-core"]?.config?.dreaming?.enabled === false &&
+        config.cron?.enabled === false &&
+          config.plugins?.entries?.["memory-core"]?.config?.dreaming?.enabled === false &&
           defaults?.model?.primary === LIVE_GATEWAY_MODEL &&
           defaults.utilityModel === LIVE_GATEWAY_MODEL &&
           defaults.maxConcurrent === agentIds.length &&
@@ -170,10 +173,6 @@ export function createLiveGatewayEvidence(agentIds: string[], turnsPerSession: n
           ),
         "Live model, roster, token cap, or fixture configuration mismatch",
       );
-      const heartbeat = await rpc<{ ok: boolean; enabled: boolean }>("set-heartbeats", {
-        enabled: false,
-      });
-      need(heartbeat.ok && !heartbeat.enabled, "Live heartbeat disable failed");
     },
     register(runId: string, sessionKey: string, index: number): string {
       const agentId = sessionKey.split(":")[1] ?? "";
