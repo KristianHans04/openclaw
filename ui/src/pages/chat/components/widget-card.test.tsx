@@ -112,7 +112,9 @@ describe("widget-card", () => {
         disconnect() {}
       },
     );
-    onTestFinished(() => vi.unstubAllGlobals());
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
     const preview = {
       ...canvasPreview,
       title: "Synthetic video",
