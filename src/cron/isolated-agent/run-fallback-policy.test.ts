@@ -42,7 +42,7 @@ describe("resolveCronFallbacksOverride", () => {
         job: makeJob({
           kind: "agentTurn",
           message: "summarize",
-          model: "google/gemini-2.0-flash",
+          model: "google/gemini-3.1-flash-lite-preview",
         }),
       }),
     ).toEqual(["openai/gpt-5.4", "google/gemini-3-pro"]);
@@ -56,7 +56,7 @@ describe("resolveCronFallbacksOverride", () => {
         job: makeJob({
           kind: "agentTurn",
           message: "summarize",
-          model: "google/gemini-2.0-flash",
+          model: "google/gemini-3.1-flash-lite-preview",
         }),
       }),
     ).toStrictEqual([]);
@@ -70,7 +70,7 @@ describe("resolveCronFallbacksOverride", () => {
         job: makeJob({
           kind: "agentTurn",
           message: "summarize",
-          model: "google/gemini-2.0-flash",
+          model: "google/gemini-3.1-flash-lite-preview",
           fallbacks: [],
         }),
       }),

@@ -581,7 +581,7 @@ describe("large model lists (OpenRouter-scale)", () => {
     // Realistic OpenRouter model IDs
     const models = [
       "anthropic/claude-3-5-sonnet-20241022",
-      "google/gemini-2.0-flash-thinking-exp:free",
+      "google/gemini-3.1-flash-lite-preview-thinking-exp:free",
       "deepseek/deepseek-r1-distill-llama-70b",
       "meta-llama/llama-3.3-70b-instruct:nitro",
       "nousresearch/hermes-3-llama-3.1-405b:extended",

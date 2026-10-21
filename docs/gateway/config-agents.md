@@ -355,7 +355,7 @@ date context. Falls back to the host timezone.
       utilityModel: "openai/gpt-5.4-mini",
       imageModel: {
         primary: "openrouter/qwen/qwen-2.5-vl-72b-instruct:free",
-        fallbacks: ["openrouter/google/gemini-2.0-flash-vision:free"],
+        fallbacks: ["openrouter/google/gemini-3.1-flash-lite-preview-vision:free"],
       },
       mediaModels: {
         image: {
