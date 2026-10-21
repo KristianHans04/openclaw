@@ -31,6 +31,7 @@ import { NODE_CLAUDE_SKILLS_CAPABILITY } from "../../infra/node-claude-skill-pro
 import { NODE_AGENT_CLI_CLAUDE_RUN_COMMAND } from "../../infra/node-commands.js";
 import { peekSystemEvents, resetSystemEventsForTest } from "../../infra/system-events.js";
 import { resolveNodeHostGatewayPlatformIdentity } from "../../node-host/gateway-platform-identity.js";
+import { preparePluginMetadataMachineStateAsync } from "../../plugins/installed-plugin-index-record-state.js";
 import { withPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
 import { tryBeginGatewayRootWorkAdmission } from "../../process/gateway-work-admission.js";
 import { createDeferredCore } from "../../shared/deferred.js";
@@ -118,6 +119,8 @@ beforeAll(async () => {
   });
   await fs.writeFile(configPath, JSON.stringify(cfg));
   openOpenClawStateDatabase();
+  // Gateway startup prepares these machine facts before any request can reach model selection.
+  await preparePluginMetadataMachineStateAsync({ env: process.env });
 });
 beforeEach(() => {
   vi.stubEnv("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);

@@ -477,12 +477,11 @@ test("dedupes hook retries even when trusted-proxy client IP changes", async () 
     "utf-8",
   );
 
-  await withGatewayServer(async ({ port }) => {
+  await withHooksServer(async (post) => {
     mockIsolatedRunOk();
     const send = async (clientIp: string) =>
       (await (
-        await postHook(
-          port,
+        await post(
           "agent",
           { message: "Do it", name: "Email", wakeMode: "next-heartbeat" },
           { headers: { "Idempotency-Key": "hook-idem-forwarded", "X-Forwarded-For": clientIp } },
@@ -501,12 +500,17 @@ test("dedupes hook retries even when trusted-proxy client IP changes", async () 
 
 test("dispatches agent hooks when the process clock is outside the Date range", async () => {
   await withHooksServer(async (post) => {
-    mockIsolatedRunOk(true);
+    cronIsolatedRun.mockClear();
     {
-      using _ = vi.spyOn(Date, "now").mockReturnValue(8_640_000_000_000_001);
+      using clock = vi.spyOn(Date, "now").mockReturnValue(8_640_000_000_000_001);
+      cronIsolatedRun.mockImplementationOnce(async () => {
+        // Job construction is the invalid-clock boundary; terminal scheduling uses real time.
+        clock.mockRestore();
+        return { status: "ok", summary: "done" };
+      });
       await post("agent", { message: "Bad clock", wakeMode: "next-heartbeat" });
-      await waitForSystemEvent();
     }
+    await waitForSystemEvent();
 
     const call = cronRunCall();
     expect(call.job).toMatchObject({ createdAtMs: 0, state: { nextRunAtMs: 0 } });
