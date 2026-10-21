@@ -128,7 +128,7 @@ suite.define(() => {
     { width: 390, height: 844, native: false, narrowColumn: false },
     { width: 1524, height: 864, native: true, narrowColumn: false },
   ])(
-    "groups the Claws heading and keeps search reachable at $width×$height (native: $native, narrow: $narrowColumn)",
+    "keeps the Claws heading and discovery search reachable at $width×$height (native: $native, narrow: $narrowColumn)",
     async ({ width, height, native, narrowColumn }) => {
       const config = { gateway: { controlUi: { experimental: { claws: true } } } };
       const { page, gateway, toolbar } = await openPage(
@@ -183,13 +183,13 @@ suite.define(() => {
       if (native) {
         expect(heading.y).toBeGreaterThanOrEqual(toolbar.y + toolbar.height);
       }
-      const search = header.getByRole("searchbox", { name: "Search Claws", exact: true });
+      const search = page.getByRole("searchbox", { name: "Search Claws", exact: true });
       const { box, introBox } = await search.evaluate((element) => {
         const bounds = (target: Element): Box => {
           const rect = target.getBoundingClientRect();
           return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
         };
-        const introElement = element.closest(".content-header")!.querySelector(".page-subtitle")!;
+        const introElement = document.querySelector(".claws-catalog-header .page-subtitle")!;
         return { box: bounds(element), introBox: bounds(introElement) };
       });
       expect(box.x).toBeGreaterThanOrEqual(0);
