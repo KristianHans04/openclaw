@@ -252,14 +252,14 @@ function SessionsTable(props: SessionsProps) {
       {props.selectedKeys.size > 0 ? (
         <div class="data-table-bulk-bar">
           <span>{t("sessionsView.selected", { count: String(props.selectedKeys.size) })}</span>
-          <button class="btn btn--sm" onClick={props.onDeselectAll}>
+          <button class="btn btn--sm" onClick={() => props.onDeselectAll()}>
             {t("common.unselect")}
           </button>
           <button
             class="btn btn--sm danger"
             disabled={props.loading || Boolean(props.deleteSelectedDisabledReason)}
             title={props.deleteSelectedDisabledReason ?? undefined}
-            onClick={props.onDeleteSelected}
+            onClick={() => props.onDeleteSelected()}
           >
             <Icon name="trash" /> {t("sessionsView.deleteSelected")}
           </button>
@@ -314,7 +314,7 @@ function SessionsTable(props: SessionsProps) {
                       <span>{emptyStateMessage()}</span>
                     </div>
                     {emptyBecauseFiltered() ? (
-                      <button class="btn btn--sm" onClick={props.onClearFilters}>
+                      <button class="btn btn--sm" onClick={() => props.onClearFilters()}>
                         {t("sessionsView.showAll")}
                       </button>
                     ) : undefined}
@@ -361,7 +361,7 @@ function SessionsTable(props: SessionsProps) {
               </For>
             </select>
             {props.result?.hasMore && props.result.nextOffset != null ? (
-              <button disabled={props.loading} onClick={props.onLoadMore}>
+              <button disabled={props.loading} onClick={() => props.onLoadMore()}>
                 {t("chat.selectors.loadMoreRosterSessions")}
               </button>
             ) : undefined}

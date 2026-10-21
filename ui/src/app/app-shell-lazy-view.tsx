@@ -1,5 +1,5 @@
-import { Dynamic, type JSX as SolidJSX } from "@solidjs/web";
-import { createMemo, onSettled, Show } from "solid-js";
+import type { JSX as SolidJSX } from "@solidjs/web";
+import { createMemo, Errored, lazy, Loading, Show } from "solid-js";
 import type { RouteId } from "../app-routes.ts";
 import type { CommandPaletteElement } from "../components/command-palette-contract.ts";
 import { LazyElementModal } from "../components/solid/lazy-view-error.tsx";
@@ -17,8 +17,8 @@ import {
   DEBUG_OVERLAY_ELEMENT,
   KEYBOARD_SHORTCUTS_ELEMENT,
 } from "./lazy-custom-element.ts";
-import type { LazyRenderer } from "./lazy-renderer.ts";
 import { normalizeChatSendShortcut } from "./settings.ts";
+import { isStaleChunkImportError } from "./stale-chunk-reload.ts";
 
 /** Unported elements receive properties explicitly until their own lanes land. */
 export type ShellElementAttributes<T extends HTMLElement = HTMLElement> =
@@ -52,9 +52,6 @@ export interface ShellLazyOverlayHost extends DebugOverlayFrameHost, ShellNewSes
   readonly elements: ShellOwnedElements;
   readonly commandPaletteElement: OptionalCustomElement;
   readonly commandPaletteLoading: CommandPaletteLoadingState;
-  readonly debugOverlayFrame: LazyRenderer<
-    typeof import("../pages/debug/debug-overlay-frame.ts").renderPendingDebugOverlay
-  >;
   closePendingPalette(): void;
   readonly lazyCustomElements: LazyCustomElementRequests;
   handleCommandPaletteSlashCommand(command: string): void;
@@ -70,19 +67,22 @@ export function ShellLazyOverlays(props: {
   custodianPanelAvailable: boolean;
   nativeEmbed: boolean;
 }): SolidJSX.Element {
+  const DebugFrame = lazy(() => import("../pages/debug/debug-overlay-frame.ts"), {
+    export: "renderPendingDebugOverlay",
+  });
   const state = createMemo(() => {
     void props.revision;
-    const lazy = props.host.lazyCustomElements.visibleState;
+    const lazyState = props.host.lazyCustomElements.visibleState;
     return {
-      lazy,
+      lazy: lazyState,
       paletteLoading:
         props.host.commandPaletteLoading.active() &&
-        (!lazy || (lazy.status === "loading" && lazy.element === props.host.commandPaletteElement)),
-      pendingDebug: lazy?.element === DEBUG_OVERLAY_ELEMENT ? lazy : undefined,
+        (!lazyState ||
+          (lazyState.status === "loading" &&
+            lazyState.element === props.host.commandPaletteElement)),
+      pendingDebug: lazyState?.element === DEBUG_OVERLAY_ELEMENT ? lazyState : undefined,
       paletteDefined: isOptionalElementDefined(props.host.commandPaletteElement),
       debugDefined: isOptionalElementDefined(DEBUG_OVERLAY_ELEMENT),
-      debugRenderer: props.host.debugOverlayFrame.renderer(),
-      debugFrameFailed: props.host.debugOverlayFrame.failed(),
       debugMode: props.host.pendingDebugOverlayMode,
       shortcutsDefined: isOptionalElementDefined(KEYBOARD_SHORTCUTS_ELEMENT),
       sendShortcut: normalizeChatSendShortcut(props.host.context?.theme.settings.chatSendShortcut),
@@ -90,34 +90,38 @@ export function ShellLazyOverlays(props: {
   });
   return (
     <>
-      <Show when={state().pendingDebug && !state().debugRenderer && !state().debugFrameFailed}>
-        {(_pending) => {
-          onSettled(() => props.host.debugOverlayFrame.load());
-          return null;
-        }}
-      </Show>
       <Show
         when={state().paletteLoading}
         fallback={
           <Show
-            when={state().pendingDebug && state().debugRenderer}
+            when={state().pendingDebug}
             fallback={
-              <Show when={!state().pendingDebug || state().debugFrameFailed}>
-                <LazyElementModal
-                  state={state().lazy}
-                  onRetry={() => props.host.lazyCustomElements.retry()}
-                  onClose={() => props.host.lazyCustomElements.close()}
-                />
-              </Show>
+              <LazyElementModal
+                state={state().lazy}
+                onRetry={() => props.host.lazyCustomElements.retry()}
+                onClose={() => props.host.lazyCustomElements.close()}
+              />
             }
           >
-            {(renderer) => (
-              <Dynamic
-                component={renderer()}
-                host={props.host}
-                state={state().pendingDebug!}
-                mode={state().debugMode}
-              />
+            {(pending) => (
+              <Errored
+                fallback={(error, reset) => (
+                  <LazyElementModal
+                    state={{
+                      status: "error",
+                      element: pending().element,
+                      error: error(),
+                      stale: isStaleChunkImportError(error()),
+                    }}
+                    onRetry={reset}
+                    onClose={() => props.host.lazyCustomElements.close()}
+                  />
+                )}
+              >
+                <Loading>
+                  <DebugFrame host={props.host} state={pending()} mode={state().debugMode} />
+                </Loading>
+              </Errored>
             )}
           </Show>
         }

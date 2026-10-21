@@ -40,7 +40,6 @@ import {
   refreshShellView,
 } from "./app-host-solid.test-support.ts";
 import type { ApplicationContext, ApplicationGatewaySnapshot } from "./context.ts";
-import { createLazyRenderer } from "./lazy-renderer.ts";
 import { ShellLayoutBoundary } from "./shell-layout-traits-solid.tsx";
 
 type PairingSidebar = AppSidebarElement;
@@ -61,12 +60,44 @@ function outboxes(sessionKey: string, total: number, draft: boolean) {
   };
 }
 
-function deferredRenderer<Renderer>(shell: object, property: string) {
-  const loading = createDeferred<Renderer>();
-  const retrying = createDeferred<Renderer>();
+function deferredRenderer(settings: boolean) {
+  const loading = createDeferred<Record<string, () => Text>>();
+  const retrying = createDeferred<Record<string, () => Text>>();
   const load = vi.fn(() => retrying.promise).mockImplementationOnce(() => loading.promise);
-  Object.defineProperty(shell, property, { value: createLazyRenderer(load) });
-  return { loading, retrying, load };
+  const mock = () => {
+    if (settings) {
+      vi.doMock("../components/settings-sidebar-shell.tsx", load);
+    } else {
+      vi.doMock("../pages/devices/view-pairing.tsx", load);
+    }
+  };
+  const unmock = () => {
+    if (settings) {
+      vi.doUnmock("../components/settings-sidebar-shell.tsx");
+    } else {
+      vi.doUnmock("../pages/devices/view-pairing.tsx");
+    }
+  };
+  const module = {
+    [settings ? "ShellSettingsSidebar" : "DevicePairSetup"]: () =>
+      document.createTextNode(settings ? "Settings ready" : "Pairing ready"),
+  };
+  mock();
+  onTestFinished(() => {
+    unmock();
+    loading.resolve(module);
+    retrying.resolve(module);
+  });
+  return {
+    loading,
+    retrying,
+    load,
+    module,
+    retry: () => {
+      unmock();
+      mock();
+    },
+  };
 }
 
 setupSidebarTest();
@@ -472,9 +503,7 @@ describe("application shell pairing access", () => {
       auth: settings ? { role: "operator" } : admin,
       setupCode: settings ? undefined : "pair-mobile-secret",
     });
-    const property = settings ? "settingsSidebar" : "devicePairSetup";
-    type Renderer = NonNullable<ReturnType<(typeof shell)[typeof property]["renderer"]>>;
-    const { loading, retrying, load } = deferredRenderer<Renderer>(shell, property);
+    const { loading, retrying, load, module, retry } = deferredRenderer(settings);
     if (settings) {
       shell.routeState = {
         routeId: "profile",
@@ -487,32 +516,33 @@ describe("application shell pairing access", () => {
     const message = settings
       ? "Settings navigation could not load."
       : "Could not load the pairing dialog";
+    await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
     if (failed) {
       loading.reject(new Error(`${surface} chunk unavailable`));
       await waitForSolid(() => expect(container.textContent).toContain(message));
     }
-    const target = container.querySelector<HTMLElement>(
-      settings ? ".settings-sidebar" : ".device-pair-setup",
-    );
+    const target = () =>
+      container.querySelector<HTMLElement>(settings ? ".settings-sidebar" : ".device-pair-setup");
     if (failed) {
-      expect(target?.textContent).toContain(message);
+      expect(target()?.textContent).toContain(message);
       if (settings) {
-        expect(target?.getAttribute("aria-busy")).toBeNull();
+        expect(target()?.getAttribute("aria-busy")).toBeNull();
       }
       const actions = [
-        ...(target?.querySelectorAll<HTMLButtonElement>(
+        ...(target()?.querySelectorAll<HTMLButtonElement>(
           settings ? "button" : ".device-pair-setup__footer button",
         ) ?? []),
       ];
       if (!settings) {
         expect(actions.map((button) => button.textContent?.trim())).toEqual(["Retry", "Close"]);
       }
+      retry();
       actions.find((button) => button.textContent?.trim() === "Retry")?.click();
-      await waitForSolid(() => expect(target?.getAttribute("aria-busy")).toBe("true"));
+      await waitForSolid(() => expect(target()?.getAttribute("aria-busy")).toBe("true"));
     } else {
-      expect(target?.getAttribute("aria-busy")).toBe("true");
+      expect(target()?.getAttribute("aria-busy")).toBe("true");
       if (settings) {
-        const skeleton = target?.querySelector<HTMLElement>(
+        const skeleton = target()?.querySelector<HTMLElement>(
           '.settings-sidebar__loading[role="status"][aria-busy="true"]',
         );
         expect(skeleton?.getAttribute("aria-label")).toBe("Loading…");
@@ -527,16 +557,16 @@ describe("application shell pairing access", () => {
           expect(skeleton?.querySelectorAll(selector)).toHaveLength(expectedItems);
         }
       } else {
-        expect(target?.textContent).toContain("Loading…");
+        expect(target()?.textContent).toContain("Loading…");
         expect(load).toHaveBeenCalledOnce();
       }
     }
-    if (settings) {
-      expect(load).toHaveBeenCalledTimes(failed ? 2 : 1);
-      (failed ? retrying : loading).resolve(() => document.createTextNode("Settings ready"));
-      await waitForSolid(() => expect(container.textContent).toContain("Settings ready"));
-      expect(container.querySelector(".settings-sidebar__loading")).toBeNull();
-    }
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(failed ? 2 : 1));
+    (failed ? retrying : loading).resolve(module);
+    await waitForSolid(() =>
+      expect(container.textContent).toContain(settings ? "Settings ready" : "Pairing ready"),
+    );
+    expect(target()).toBeNull();
   });
 
   it("shows a visible accessible error when a mobile setup code cannot be copied", async () => {
