@@ -4490,6 +4490,13 @@ facts without constructing an in-memory schema or creating persistent stores.
 Doctor repairs and agent migrations retain their existing owners. Updates
 use the same schemas, migration rules, stored bytes, and strict drift refusals.
 
+SQLite memory publication retains committed index facts on its worker connection.
+Metadata and ordinary source writes publish their postimages without repeating
+corpus-wide semantic-chunk and invalidated-source probes. The existing `memory-index`
+write token invalidates unknown writes. Clearing a possibly last matching row,
+vector changes, schema admission, and database replacement reread once; PostgreSQL
+keeps its lease/revision-owned reader. No counters or schema changes are required.
+
 The exported `OpenClawAgentSqliteWorkerStore` type retains its `run` and `close`
 contract for existing adapters. The factory's inferred return type additionally
 provides the typed single-command `execute` method.
