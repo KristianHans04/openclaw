@@ -24,11 +24,9 @@ export function ShellLayoutBoundary(props: { traits: ShellLayoutTraits; children
     // Publish before descendants' settled setup and measurement effects.
     createEffect(
       () => props.traits,
-      (traits) => {
-        scope.owner.record(token, scope.host, traits);
-        return () => scope.owner.clear(token);
-      },
+      (traits) => scope.owner.record(token, scope.host, traits),
     );
+    onCleanup(() => scope.owner.clear(token));
   }
   return <>{props.children}</>;
 }

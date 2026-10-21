@@ -62,6 +62,9 @@ function SessionHistory(props: PluginSessionSummaryProps, scope: SummaryScope) {
     scope.gateway.connectionRevision === scope.revision &&
     props.session?.sessionKey === scope.session.sessionKey &&
     props.session?.agentId === scope.session.agentId;
+  onCleanup(() => {
+    alive = false;
+  });
   const store = sessionProgressCardsForGateway(scope.gateway);
   const progress = projectProgressCard(() => ({
     store,
@@ -121,8 +124,9 @@ function SessionHistory(props: PluginSessionSummaryProps, scope: SummaryScope) {
     }
   };
   const refreshes = createSessionEventRefreshCoordinator({ active: true, refresh });
-  onSettled(() => {
-    const unsubscribe = scope.gateway.subscribeEvents((event) => {
+  onCleanup(() => refreshes.dispose());
+  onCleanup(
+    scope.gateway.subscribeEvents((event) => {
       if (event.event !== "sessions.changed" && event.event !== "session.message") {
         return;
       }
@@ -142,13 +146,10 @@ function SessionHistory(props: PluginSessionSummaryProps, scope: SummaryScope) {
       ) {
         refreshes.schedule();
       }
-    });
+    }),
+  );
+  onSettled(() => {
     refreshes.scheduleRetry(0);
-    return () => {
-      alive = false;
-      unsubscribe();
-      refreshes.dispose();
-    };
   });
   const messages = createMemo(() =>
     (history()?.messages ?? []).slice(-20).flatMap((message) => {
