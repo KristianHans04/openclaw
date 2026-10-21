@@ -28,6 +28,8 @@ export type ColdLoadProbeInput = {
   ownerProbes?: boolean;
   latencyMs: number;
   methodLatencyMs?: Record<string, number>;
+  sidebarQueryLatencyMs?: Record<string, number>;
+  omitHelloSelfPresence?: boolean;
   connectNotBeforeMs?: number;
   frameGapMs: number;
   events: Array<{ event: string; payload: unknown }>;

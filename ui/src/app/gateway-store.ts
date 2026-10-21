@@ -97,7 +97,7 @@ export function createApplicationGateway(
   const selfProfile = createGatewaySelfProfile({
     getSnapshot: () => snapshot,
     getConnection: () => connection,
-    publish: (selfUser) => setSnapshot({ selfUser }),
+    publish: (selfUser) => setSnapshot({ selfUser, selfProfileLoadFailed: false }),
     resourceBasePath: options.resourceBasePath,
   });
   const canvasSurface = createGatewayCanvasSurfaceLease(
@@ -188,6 +188,7 @@ export function createApplicationGateway(
       pluginCapabilities: null,
       canvasPluginSurfaceUrl: null,
       selfUser: undefined,
+      selfProfileLoadFailed: false,
       lastError: null,
       lastErrorCode: null,
       lastErrorAuthReason: null,
@@ -204,7 +205,7 @@ export function createApplicationGateway(
     const hello = snapshot.hello;
     void selfProfile.load().catch((error: unknown) => {
       if (isCurrentHello(requestClient, hello)) {
-        setSnapshot({ lastError: formatUiError(error) });
+        setSnapshot({ lastError: formatUiError(error), selfProfileLoadFailed: true });
       }
     });
   };

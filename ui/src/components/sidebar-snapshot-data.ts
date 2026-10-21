@@ -1,3 +1,4 @@
+import { isSessionParticipantIdentity } from "../../../packages/gateway-protocol/src/compiled/sender-identity.js";
 import { isIncognitoSessionKey } from "../../../src/shared/incognito-session-key.js";
 import type { SidebarSessionSection } from "../lib/sessions/grouping.ts";
 import { bootRosterSchema } from "../lib/sessions/session-boot-roster-schema.ts";
@@ -14,6 +15,13 @@ const userFields = {
   identity: json.optional(identity),
 };
 const user = json.object(userFields);
+const actor = json.object({
+  type: json.enumeration(["human", "agent", "system"]),
+  id: optionalText,
+  label: optionalText,
+  avatarUrl: optionalText,
+  identity: json.optional(json.checked(isSessionParticipantIdentity)),
+});
 const sessionFields = {
   key: json.refine(text, (key) => !isIncognitoSessionKey(key)),
   label: text,
@@ -33,6 +41,19 @@ const sessionFields = {
   category: optionalText,
   boardFace: json.optional(json.enumeration(["chat", "dashboard"])),
   incognito: json.optional(json.literal(false)),
+  owner: json.optional(json.object({ actor, assignedAt: json.optional(json.number) })),
+  archivedBy: json.optional(actor),
+  participants: json.optional(
+    json.array(
+      json.object({
+        identity: json.checked(isSessionParticipantIdentity),
+        label: optionalText,
+        avatarUrl: optionalText,
+      }),
+      4,
+    ),
+  ),
+  participantCount: json.optional(json.number),
 };
 export type SidebarSnapshotSession = json.SnapshotObject<typeof sessionFields> & {
   children: SidebarSnapshotSession[];
@@ -56,6 +77,7 @@ export const sidebarSnapshotSchema = json.object({
   navigationView: json.enumeration(["pages", "sessions", "online"]),
   pages: json.array(session),
   pageScopeId: json.nullable(text),
+  ownershipVisibility: json.optional(json.object({ filters: json.boolean, avatars: json.boolean })),
   pinnedSessions: json.array(session),
   entries: json.array(
     json.refine(
@@ -74,6 +96,7 @@ export const sidebarSnapshotSchema = json.object({
           type: json.enumeration(["human", "agent", "system"]),
           id: text,
           label: optionalText,
+          avatarUrl: optionalText,
           identity: json.optional(identity),
         }),
       ),

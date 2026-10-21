@@ -144,6 +144,26 @@ export function sidebarSessionListQuery(owner: SidebarSessionQueryOwner, agentId
   } as const;
 }
 
+export function sidebarSessionListReady(
+  owner: SidebarSessionListOwner,
+  filtered: boolean,
+): boolean {
+  const sessions = owner.context?.sessions;
+  if (!sessions) {
+    return false;
+  }
+  if (filtered) {
+    const snapshot = sessions.listSnapshot(owner.sessionListQuery(owner.expandedAgentId()));
+    return snapshot.readSucceeded === true || snapshot.error !== null;
+  }
+  return (
+    !sessions.presentation.resultCached &&
+    (owner.sessionMutationError !== null ||
+      sessions.state.error !== null ||
+      (owner.sessionsResult !== null && owner.sessionsAgentId === owner.expandedAgentId()))
+  );
+}
+
 export function publishSidebarSessionList(
   owner: SidebarSessionListOwner,
   snapshot: SessionListSnapshot,

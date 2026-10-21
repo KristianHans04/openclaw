@@ -65,6 +65,37 @@ afterEach(() => {
 
 describe("Gateway self-profile ownership", () => {
   it.each([false, true])(
+    "recovers failed profile reads without declaring the connection profileless (identified: %s)",
+    async (identified) => {
+      gateway.start();
+      if (identified) {
+        current().request.mockResolvedValue({ profile });
+        current().testOptions.onHello?.(hello());
+        await gateway.loadSelfProfile();
+      }
+      const pending = createDeferred<{ profile: UserProfile }>();
+      current().request.mockReturnValue(pending.promise);
+      if (identified) {
+        current().testOptions.onEvent?.(
+          createGatewayEvent("sessions.changed", { reason: "profile-identity" }),
+        );
+      } else {
+        current().testOptions.onHello?.(hello());
+      }
+      const selfAtStart = gateway.snapshot.selfUser;
+      const read = gateway.loadSelfProfile();
+      pending.reject(new Error("Profile temporarily unavailable"));
+      await expect(read).rejects.toThrow("Profile temporarily unavailable");
+      expect(gateway.snapshot.selfUser).toEqual(selfAtStart);
+      expect(gateway.snapshot.selfProfileLoadFailed).toBe(true);
+      current().request.mockResolvedValue({ profile });
+      await gateway.loadSelfProfile();
+      expect(gateway.snapshot.selfProfileLoadFailed).toBe(false);
+      expect(gateway.snapshot.selfUser?.id).toBe(profile.id);
+    },
+  );
+
+  it.each([false, true])(
     "retains only resolved profileless identity through same-connection drops (retry: %s)",
     async (willRetry) => {
       expect(gateway.snapshot.selfUser).toBeUndefined();

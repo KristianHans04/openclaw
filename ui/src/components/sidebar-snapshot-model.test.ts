@@ -67,6 +67,29 @@ it("admits the sidebar after the live roster grows beyond the boot window", () =
   expect(saved?.roster?.result.sessions).toEqual(sessions.slice(0, 200));
 });
 
+it("retains row attribution and avatar URLs without assignment authority", () => {
+  const actor = {
+    type: "human" as const,
+    id: "profile-riley",
+    label: "Riley",
+    identity: { type: "profile" as const, id: "profile-riley" },
+    avatarUrl: "/api/users/profile-riley/avatar?v=1",
+  };
+  const row = {
+    ...displayRow("agent:main:visible", "Project"),
+    owner: { actor, assignedAt: 1, assignedBy: actor },
+    participants: [{ identity: actor.identity, label: "Riley", avatarUrl: actor.avatarUrl }],
+    participantCount: 1,
+  };
+  const saved = parseSidebarSnapshot({ ...model, sessions: snapshotSessions([row]) });
+  expect(saved).not.toBeNull();
+  const restored = restoreSnapshotSession(saved!.sessions[0]!, "");
+  expect(restored.owner).toEqual({ actor, assignedAt: 1 });
+  expect(restored.participants).toEqual(row.participants);
+  expect(restored.participantCount).toBe(1);
+  expect(restored.pinnable).toBe(false);
+});
+
 it("keeps display data without persisting authority, executable plugins, or watched sessions", () => {
   const plugin = { key: "reports/main", pluginId: "reports", id: "main", label: "Reports" };
   const card = { id: "main", name: "Harbor", mainKey: "agent:main:main" };

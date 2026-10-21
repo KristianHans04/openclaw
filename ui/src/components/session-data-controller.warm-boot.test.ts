@@ -15,6 +15,7 @@ import { createContext, createGatewayHarness, TWO_AGENTS } from "../test-helpers
 import { createTestGatewayClient } from "../test-helpers/gateway-client.ts";
 import { sidebarBootSnapshot } from "../test-helpers/sidebar-boot-snapshot.test-support.ts";
 import { createSessionDataHost } from "./session-data-controller.test-support.ts";
+import { sidebarSessionListReady } from "./session-data-events.ts";
 import { SessionDataOwner } from "./session-data.ts";
 
 afterEach(() => vi.restoreAllMocks());
@@ -22,6 +23,48 @@ afterEach(() => vi.restoreAllMocks());
 function row(key: string, updatedAt: number, extra: Partial<GatewaySessionRow> = {}) {
   return { key: `agent:main:${key}`, kind: "direct" as const, updatedAt, ...extra };
 }
+
+it("waits for the selected membership query instead of an unrelated canonical result", async () => {
+  const filtered = createDeferred<SessionsListResult>();
+  const requested = createDeferred();
+  const gateway = createGatewayHarness(
+    createTestGatewayClient(async (method, params) => {
+      if (method === "sessions.list") {
+        if (params && typeof params === "object" && "involvingMe" in params) {
+          requested.resolve();
+          return filtered.promise;
+        }
+        return sessionsResult([row("other", 1)], 1);
+      }
+      if (method === "sessions.subscribe") return { subscribed: true };
+      if (method === "sessions.groups.list") return { groups: [], sectionOrder: [] };
+      throw new Error(`Unexpected Gateway request: ${method}`);
+    }),
+  );
+  const sessions = createTestSessionCapability(gateway.gateway);
+  const context = createContext(gateway.gateway, sessions, TWO_AGENTS);
+  const owner = new SessionDataOwner(
+    createSessionDataHost(context, {
+      sessionCatalogRowsVisible: false,
+      sidebarSessionOwnerFilter: () => ({ ownerId: null, involvingMe: true }),
+    }),
+    () => undefined,
+  );
+  try {
+    owner.connect();
+    const refresh = owner.refreshSidebarSessions();
+    await requested.promise;
+    await sessions.refresh();
+    expect(sidebarSessionListReady(owner, true)).toBe(false);
+    filtered.resolve(sessionsResult([row("mine", 2)], 2));
+    await refresh;
+    expect(sidebarSessionListReady(owner, true)).toBe(true);
+    expect(owner.sessionsResult?.sessions.map(({ key }) => key)).toEqual(["agent:main:mine"]);
+  } finally {
+    owner.disconnect();
+    sessions.dispose();
+  }
+});
 
 it("applies the saved roster filter before its first read and releases it with the data owner", async () => {
   const rows = [row("mine", 1), row("other", 2)];

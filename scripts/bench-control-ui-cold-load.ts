@@ -220,6 +220,9 @@ const { values } = parseArgs({
     "init-script": { type: "string", multiple: true, default: [] },
     "sidebar-list-churn": { type: "boolean", default: false },
     "sidebar-live-churn": { type: "boolean", default: false },
+    "sidebar-avatars": { type: "boolean", default: false },
+    "sidebar-expanded": { type: "boolean", default: false },
+    "omit-hello-self-presence": { type: "boolean", default: false },
     "session-event-churn": { type: "boolean", default: false },
     "session-event-duration-ms": { type: "string", default: "30000" },
     "session-event-ancestor-refs": { type: "boolean", default: false },
@@ -238,6 +241,7 @@ const { values } = parseArgs({
     runs: { type: "string", default: "3" },
     "latency-ms": { type: "string", default: "35" },
     "method-latency-ms": { type: "string", multiple: true, default: [] },
+    "sidebar-query-latency-ms": { type: "string", multiple: true, default: [] },
     face: { type: "string", default: "dashboard" },
     "short-route": { type: "boolean", default: false },
     "full-uuid-route": { type: "boolean", default: false },
@@ -307,19 +311,25 @@ if (
   throw new Error("history-validator-delay-ms requires warm-reload and a delay from 0 to 10000");
 }
 const methodLatencyMs: Record<string, number> = {};
-for (const value of values["method-latency-ms"]) {
-  const [method, delay, ...extra] = value.split("=");
-  const milliseconds = Number(delay);
-  if (
-    !method ||
-    delay === undefined ||
-    extra.length ||
-    !Number.isFinite(milliseconds) ||
-    milliseconds < 0
-  ) {
-    throw new Error("Expected method-latency-ms method=nonnegative-milliseconds");
+const sidebarQueryLatencyMs: Record<string, number> = {};
+for (const [entries, target] of [
+  [values["method-latency-ms"], methodLatencyMs],
+  [values["sidebar-query-latency-ms"], sidebarQueryLatencyMs],
+] as const) {
+  for (const value of entries) {
+    const [method, delay, ...extra] = value.split("=");
+    const milliseconds = Number(delay);
+    if (
+      !method ||
+      delay === undefined ||
+      extra.length ||
+      !Number.isFinite(milliseconds) ||
+      milliseconds < 0
+    ) {
+      throw new Error("Expected method-latency-ms method=nonnegative-milliseconds");
+    }
+    target[method] = milliseconds;
   }
-  methodLatencyMs[method] = milliseconds;
 }
 const face = values.face;
 if (face !== "chat" && face !== "dashboard") {
@@ -466,6 +476,7 @@ const fixture = createControlUiTeamScaleFixture({
   liveRun: values["live-events"] || values["streaming-reply"],
   sidebarListChurn: values["sidebar-list-churn"],
   sidebarLiveChurn: values["sidebar-live-churn"],
+  sidebarAvatars: values["sidebar-avatars"],
   sessionEventChurn: values["session-event-churn"],
   sessionEventDurationMs,
   sessionEventAncestorRefs: values["session-event-ancestor-refs"],
@@ -594,7 +605,7 @@ try {
       return asset ? route.fulfill({ status: 200, ...asset }) : route.fallback();
     });
   }
-  if (values["sidebar-live-churn"] || values["closed-menu-members"]) {
+  if (values["sidebar-live-churn"] || values["sidebar-avatars"] || values["closed-menu-members"]) {
     await page.route("**/api/users/*/avatar?*", async (route) => {
       const asset = fixture.assets.get(new URL(route.request().url()).pathname);
       if (!asset) {
@@ -642,7 +653,7 @@ try {
     ? `\n(${installRotatingBoardTickets.toString()})(${JSON.stringify(fixture.board)}, window.openclawControlUiE2eGateway);`
     : "";
   await page.addInitScript({
-    content: `;(() => { if (window !== window.top) return; const __name = (fn) => fn; (${installWidgetReadiness.toString()})(); ${createControlUiMockGatewayInitScript(prepared.scenario)}\n${rigProbeScript}\nwindow.__teamScaleSidebarLists = { apply: (mutation) => window.__teamScaleMutate(mutation) }; window.openclawControlUiE2eGateway.setRequestHandler("sessions.list", async ({ params, respond }) => respond(await window.__teamScaleList(params))); window.openclawControlUiE2eGateway.setRequestHandler("cron.list", async ({ params, respond }) => respond(await window.__teamScaleCronList(params)));\n${boardTickets}\n${createColdLoadProbeInitScript({ latencyMs, methodLatencyMs, connectNotBeforeMs, frameGapMs, events: fixture.events, liveEvents: fixture.liveEvents, liveHistory: fixture.liveHistory, ownerProbes: !cpuProfile && !values["session-event-churn"] })}\n${streamingReply ? createStreamingReplyProbeInitScript() : ""}\n${extraInitScripts.join("\n")}\n${warmProbes} })();`,
+    content: `;(() => { if (window !== window.top) return; const __name = (fn) => fn; (${installWidgetReadiness.toString()})(); ${createControlUiMockGatewayInitScript(prepared.scenario)}\n${rigProbeScript}\nwindow.__teamScaleSidebarLists = { apply: (mutation) => window.__teamScaleMutate(mutation) }; window.openclawControlUiE2eGateway.setRequestHandler("sessions.list", async ({ params, respond }) => respond(await window.__teamScaleList(params))); window.openclawControlUiE2eGateway.setRequestHandler("cron.list", async ({ params, respond }) => respond(await window.__teamScaleCronList(params)));\n${boardTickets}\n${createColdLoadProbeInitScript({ latencyMs, methodLatencyMs, sidebarQueryLatencyMs, omitHelloSelfPresence: values["omit-hello-self-presence"], connectNotBeforeMs, frameGapMs, events: fixture.events, liveEvents: fixture.liveEvents, liveHistory: fixture.liveHistory, ownerProbes: !cpuProfile && !values["session-event-churn"] })}\n${streamingReply ? createStreamingReplyProbeInitScript() : ""}\n${extraInitScripts.join("\n")}\n${warmProbes} })();`,
   });
   const url = values["full-uuid-route"]
     ? new URL(
@@ -751,6 +762,38 @@ try {
     await page.locator('[data-navigation-view="online"]').click();
   }
   await settle();
+  if (values["sidebar-expanded"]) {
+    await page
+      .locator(".sidebar-session-content .sidebar-session-pagination__button")
+      .filter({ hasText: "Show more" })
+      .first()
+      .click();
+    // The saved marker may still describe the previous write until capture runs.
+    await page.waitForFunction(async () => {
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        const request = indexedDB.open("openclaw-chat-snapshots");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        const records = await new Promise<
+          Array<{ model: { sections: Array<{ visibleLimit: number }> } }>
+        >((resolve, reject) => {
+          const request = database
+            .transaction("sidebarSnapshots")
+            .objectStore("sidebarSnapshots")
+            .getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        return records.some(({ model }) =>
+          model.sections.some(({ visibleLimit }) => visibleLimit > 10),
+        );
+      } finally {
+        database.close();
+      }
+    });
+  }
   if (values["chat-dashboard-route"] || (face === "dashboard" && values["dashboard-widget"])) {
     // Save the operator's dashboard-first layout through its normal action.
     await page.locator("button.chat-pane__layout-trigger:not([inert] *)").first().click();
@@ -1540,6 +1583,9 @@ try {
         comparisonBundleDirs,
         fixture: fixture.counts,
         sidebarView,
+        sidebarAvatars: values["sidebar-avatars"],
+        sidebarExpanded: values["sidebar-expanded"],
+        omitHelloSelfPresence: values["omit-hello-self-presence"],
         streamingReply: values["streaming-reply"],
         sessionSwitch: values["session-switch"],
         sidebarListChurn: values["sidebar-list-churn"],
@@ -1562,6 +1608,7 @@ try {
           : undefined,
         latencyMs,
         methodLatencyMs,
+        sidebarQueryLatencyMs,
         connectNotBeforeMs,
         dashboardWidget: values["dashboard-widget"],
         face,

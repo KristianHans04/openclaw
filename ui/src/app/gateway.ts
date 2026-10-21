@@ -53,6 +53,7 @@ export type ApplicationGatewaySnapshot = {
   lastErrorAuthReason?: string | null;
   /** This connection owns identity: undefined is unresolved; null is resolved profileless. */
   selfUser?: AuthenticatedUser | null;
+  selfProfileLoadFailed?: boolean;
 };
 
 export type ApplicationGatewayConnection = {

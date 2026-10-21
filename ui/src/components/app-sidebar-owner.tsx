@@ -96,6 +96,10 @@ export class AppSidebarOwner extends AppSidebarSessionNavigationElement implemen
 
   restoreSidebarSnapshot(model: SidebarSnapshotModel): void {
     this.sidebarSnapshot = model;
+    this.sessionOwnershipVisibility = model.ownershipVisibility ?? {
+      filters: false,
+      avatars: false,
+    };
     this.navigationView = model.navigationView;
     this.sessionOrganizer.collapsedSessionSections = new Set(model.collapsedSections);
     const rows = [...model.sessions, ...model.sections.flatMap((section) => section.rows)];
@@ -113,6 +117,11 @@ export class AppSidebarOwner extends AppSidebarSessionNavigationElement implemen
     const snapshot = this.sidebarSnapshot;
     if (snapshot) {
       this.pinnedSessions.seed(snapshot.pinnedSessions);
+      this.sessionData.visibleSessionLimits = new Map(
+        snapshot.sections.map((section) => [section.id, section.visibleLimit]),
+      );
+      this.rosterVisibleSessionLimits = new Map(this.sessionData.visibleSessionLimits);
+      this.sessionProjection.restoreMembership(snapshot.sections);
     }
     this.sidebarPluginSnapshot =
       snapshot && this.context.plugins.registryStatus !== "complete"

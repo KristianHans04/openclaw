@@ -55,6 +55,15 @@ export function createSidebarSnapshot(host: SidebarSnapshotHost) {
     publish?.();
   }
 
+  function settled(): boolean {
+    return (
+      (!scope?.profileId ||
+        gateway?.snapshot.selfUser !== undefined ||
+        gateway?.snapshot.selfProfileLoadFailed === true) &&
+      host.sidebarSnapshotSettled()
+    );
+  }
+
   function connect(): void {
     store.connect();
     cleanup = [
@@ -103,7 +112,7 @@ export function createSidebarSnapshot(host: SidebarSnapshotHost) {
               return;
             }
             pending = false;
-            if (model && matchesAgent(model) && !host.sidebarSnapshotSettled()) {
+            if (model && matchesAgent(model) && !settled()) {
               host.restoreSidebarSnapshot(model);
               serialized = JSON.stringify(model);
               saved = true;
@@ -130,7 +139,7 @@ export function createSidebarSnapshot(host: SidebarSnapshotHost) {
     if (host.sidebarSnapshot && !matchesAgent(host.sidebarSnapshot)) {
       clearDisplay();
     }
-    if (pending && host.sidebarSnapshotSettled()) {
+    if (pending && settled()) {
       generation += 1;
       pending = false;
       notify();
@@ -145,14 +154,18 @@ export function createSidebarSnapshot(host: SidebarSnapshotHost) {
         ? {
             gatewayScope: gatewayCredentialScope(gateway.connection.gatewayUrl),
             recoveryScope,
-            profileId: snapshot.selfUser?.id ?? null,
+            // Hello can precede users.self; only a resolved identity can replace the admitted profile.
+            profileId:
+              snapshot.selfUser === undefined
+                ? (scope?.profileId ?? null)
+                : (snapshot.selfUser?.id ?? null),
           }
         : null;
       if (JSON.stringify(next) !== JSON.stringify(scope)) {
         replaceScope(next);
       }
     }
-    if (host.sidebarSnapshot && host.sidebarSnapshotSettled()) {
+    if (host.sidebarSnapshot && settled()) {
       // Release before rendering so a failed refresh cannot leave cached controls painted.
       host.releaseSidebarSnapshot();
       saved = false;
@@ -186,8 +199,9 @@ export function createSidebarSnapshot(host: SidebarSnapshotHost) {
       !cleanup.length ||
       pending ||
       !scope ||
+      (gateway?.snapshot.selfProfileLoadFailed && gateway.snapshot.selfUser === undefined) ||
       host.sidebarSnapshot ||
-      !host.sidebarSnapshotSettled()
+      !settled()
     ) {
       return;
     }

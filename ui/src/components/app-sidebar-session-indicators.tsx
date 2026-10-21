@@ -86,7 +86,9 @@ export function renderSidebarSessionIndicators(
   // A self filter already identifies solo ownership. Keep shared rows and
   // archive attribution visible; the participant count includes unshown faces.
   const selfUser = createMemo(() => host().sessionDataContext?.gateway.snapshot.selfUser);
-  const selfProfileId = createMemo(() => selfUser()?.identity?.id ?? selfUser()?.id);
+  const selfProfileId = createMemo(
+    () => selfUser()?.identity?.id ?? selfUser()?.id ?? host().sidebarSnapshot?.footer?.id,
+  );
   const ownerRepeatedByFilter = createMemo(() => {
     const actor = ownerActor();
     return (

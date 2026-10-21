@@ -285,6 +285,28 @@ it("keeps the unread badge on an idle child with an icon", () => {
   expect(dom.query('.session-glyph__badge[aria-label="Unread"]')).not.toBeNull();
 });
 
+it("keeps a cached self-owned row avatar hidden until live identity resolves", () => {
+  const { host, container, dom } = createHost("chip", {
+    ownerId: "riley",
+    footer: { id: "riley", name: "Riley" },
+    ownershipVisibility: { filters: true, avatars: true },
+  });
+  const session = projectSidebarSession({
+    key: "agent:main:self-owned",
+    owner: {
+      actor: {
+        type: "human",
+        id: "riley",
+        identity: { type: "profile", id: "riley" },
+        label: "Riley",
+      },
+    },
+    participantCount: 0,
+  });
+  mountSolid(() => <RecentSession host={host} session={session} />, { container });
+  expect(dom.query("openclaw-session-owner-chip")).toBeNull();
+});
+
 it("keeps an idle child owner's glyph hidden until the run starts", () => {
   const { dom, session, setCurrent } = mountRow(
     {

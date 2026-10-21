@@ -37,6 +37,10 @@ export function snapshotSessions(
         category: row.category,
         archived: row.archived,
         boardFace: row.boardFace,
+        owner: row.owner,
+        archivedBy: row.archivedBy,
+        participants: row.participants,
+        participantCount: row.participantCount,
         childrenDisplayMode: display?.childrenDisplayMode,
         // Parent attention can summarize private descendants even after their rows are omitted.
         snapshotSubtitle: containsIncognito(row.children) ? undefined : display?.snapshotSubtitle,

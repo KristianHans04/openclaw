@@ -618,6 +618,14 @@ export class SidebarSessionProjection {
     }
   }
 
+  restoreMembership(sections: SidebarVisibleSections["sections"]): void {
+    this.resetMembership();
+    this.previousInput = null;
+    for (const section of sections) {
+      this.stickySections.set(section.id, new Set(section.rows.map((row) => row.key)));
+    }
+  }
+
   invalidate(): void {
     this.subtitleDeadline = Infinity;
     this.revision += 1;

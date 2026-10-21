@@ -73,7 +73,10 @@ export function createGatewaySelfProfile(options: {
           // Refresh our timestamp fallback without replacing a precise presence/upload revision.
           avatarUrl,
         };
-        if (!sameSelfUser(options.getSnapshot().selfUser, selfUser)) {
+        if (
+          !sameSelfUser(options.getSnapshot().selfUser, selfUser) ||
+          options.getSnapshot().selfProfileLoadFailed
+        ) {
           options.publish(selfUser);
         }
         // Publishing identity can synchronously stop or replace the connection.

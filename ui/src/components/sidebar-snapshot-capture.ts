@@ -9,6 +9,7 @@ import { resolveSidebarOnline, sidebarOnlineOrder } from "./app-sidebar-online.t
 import { readSidebarBrandPresentation, type AppSidebarRenderHost } from "./app-sidebar-render.tsx";
 import type { SidebarVisibleSections } from "./app-sidebar-session-projection.ts";
 import type { SidebarRecentSession } from "./app-sidebar-session-types.ts";
+import { hasSidebarListFilter, sidebarSessionListReady } from "./session-data-events.ts";
 import { resolveSidebarSessionRowSubtitle } from "./session-row-subtitle.ts";
 import {
   parseSidebarSnapshot,
@@ -51,11 +52,7 @@ export function isSidebarSnapshotSettled(host: AppSidebarRenderHost): boolean {
       roster.involvingMe === host.sidebarSessionOwnerFilter().involvingMe
     );
   }
-  return (
-    !host.sessionData.sessionsLoading &&
-    (Boolean(host.sessionData.sessionMutationError ?? context.sessions.state.error) ||
-      (Boolean(host.sessionData.sessionsResult) && !context.sessions.presentation.resultCached))
-  );
+  return sidebarSessionListReady(host.sessionData, hasSidebarListFilter(host));
 }
 
 export function captureSidebarSnapshotModel(
@@ -114,6 +111,7 @@ export function captureSidebarSnapshotModel(
       presentation,
     ),
     pageScopeId: context.agentSelection.state.scopeId,
+    ownershipVisibility: host.sessionOwnershipVisibility,
     pinnedSessions: snapshotSessions(
       zone.sidebarEntries.flatMap((value) => {
         const entry = parseSidebarEntry(value);
