@@ -82,8 +82,10 @@ describe("resolveApiKeyForProfile cross-agent refresh coordination (#26322)", ()
       const original = expired();
       const historical =
         peerGeneration === "matching" ? original : { version: AUTH_STORE_VERSION, profiles: {} };
-      saveAuthProfileStore(original, fx.mainDir);
+      // Seed history before shared inheritance can suppress the local copy.
       saveAuthProfileStore(historical, agentDir);
+      saveAuthProfileStore(original, fx.mainDir);
+      expect(loadPersistedAuthProfileStore(agentDir)).toEqual(historical);
       await closeOpenClawAgentDatabaseByPathAsync(
         resolveAuthProfileDatabasePath(agentDir),
         agentId,
