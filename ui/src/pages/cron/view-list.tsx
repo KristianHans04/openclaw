@@ -1,5 +1,15 @@
 import type { JSX } from "@solidjs/web";
-import { createProjection, Errored, For, isPending, latest, Loading, Reveal } from "solid-js";
+import {
+  createMemo,
+  createProjection,
+  Errored,
+  For,
+  isPending,
+  latest,
+  Loading,
+  Reveal,
+  Show,
+} from "solid-js";
 import { isSystemMonitorDeclaration } from "../../../../src/cron/system-owned-declaration.js";
 import type { CronJobsEnabledFilter, CronJob } from "../../api/types.ts";
 import { AgentRowChip } from "../../components/agent-row-chip.tsx";
@@ -31,6 +41,7 @@ const ENABLED_TABS: Array<{
   { value: "disabled", labelKey: "cron.tabs.paused" },
 ];
 export function ListView(props: CronProps) {
+  const scope = createMemo(() => props.reads?.scope() ?? true);
   const hasAdvancedJobsFilters = () =>
     props.jobsScheduleKindFilter !== "all" ||
     props.jobsLastStatusFilter !== "all" ||
@@ -68,10 +79,10 @@ export function ListView(props: CronProps) {
             </div>
           )}
         >
-          <Reveal order="together">
+          <Reveal order="natural">
             <div class="cron-overview-header">
               <AdminRequired {...props} />
-              <Loading on={latest(() => props.reads?.scope())}>
+              <Loading on={latest(scope)}>
                 <SchedulerStatus {...props} />
               </Loading>
               <ErrorBanner error={props.listError} /> <ErrorBanner error={props.error} />
@@ -92,9 +103,19 @@ export function ListView(props: CronProps) {
               ) : (
                 <>
                   <SettingsSection>
-                    <Loading on={latest(() => props.reads?.scope())} fallback={<JobsLoading />}>
-                      <JobsTable {...props} hasAnyJobsFilters={hasAnyJobsFilters()} />
-                    </Loading>
+                    <Show when={latest(scope)} keyed>
+                      {(_scope) => (
+                        <Loading
+                          fallback={
+                            <JobsTableFrame canManage={props.canManage} busy>
+                              <JobsLoading />
+                            </JobsTableFrame>
+                          }
+                        >
+                          <JobsTable {...props} hasAnyJobsFilters={hasAnyJobsFilters()} />
+                        </Loading>
+                      )}
+                    </Show>
                   </SettingsSection>
                   {showStarterAutomations() ? <Suggestions {...props} /> : undefined}
                 </>
@@ -237,8 +258,11 @@ function JobsTable(
     (props.reads ? isPending(props.reads.jobs) : props.loading) || props.jobsLoadingMore;
   const jobs = createProjection(
     () => {
-      // A pending probe is not a data/error read; consume readiness here too.
-      props.reads?.jobs();
+      // First readiness and errors still reach the boundary; established rows
+      // remain visible while the owner revalidates their snapshot.
+      if (props.reads) {
+        latest(props.reads.jobs);
+      }
       return (props.reads ? props.reads.rows() : props.jobs).toSorted(
         (left, right) =>
           Number(isCronJobActiveFailure(right)) - Number(isCronJobActiveFailure(left)),
@@ -248,17 +272,7 @@ function JobsTable(
     { key: "id" },
   );
   return (
-    <div
-      class={["cron-table", { "cron-table--read-only": !props.canManage }]}
-      aria-busy={tableBusy() ? "true" : undefined}
-    >
-      <div class="cron-table__head">
-        <span>{t("cron.jobs.name")}</span>
-        <span>{t("cron.jobs.schedule")}</span>
-        <span>{t("cron.jobs.nextRun")}</span>
-        <span>{t("cron.jobs.lastRun")}</span>
-        {props.canManage ? <span aria-hidden="true" /> : undefined}
-      </div>
+    <JobsTableFrame canManage={props.canManage} busy={tableBusy()}>
       {jobs.length === 0 ? (
         initialPending() ? (
           <div
@@ -292,6 +306,23 @@ function JobsTable(
         loadingMore={props.jobsLoadingMore}
         onLoadMore={props.onLoadMoreJobs}
       />
+    </JobsTableFrame>
+  );
+}
+function JobsTableFrame(props: { canManage: boolean; busy: boolean; children: JSX.Element }) {
+  return (
+    <div
+      class={["cron-table", { "cron-table--read-only": !props.canManage }]}
+      aria-busy={props.busy ? "true" : undefined}
+    >
+      <div class="cron-table__head">
+        <span>{t("cron.jobs.name")}</span>
+        <span>{t("cron.jobs.schedule")}</span>
+        <span>{t("cron.jobs.nextRun")}</span>
+        <span>{t("cron.jobs.lastRun")}</span>
+        {props.canManage ? <span aria-hidden="true" /> : undefined}
+      </div>
+      {props.children}
     </div>
   );
 }
@@ -309,7 +340,12 @@ function JobRow(
     <div
       class={["cron-table__row", { "cron-table__row--paused": !props.job.enabled }]}
       data-test-id={`cron-row-${props.job.id}`}
-      onClick={() => props.onSelectJob(props.job)}
+      onClick={() => {
+        const job = props.jobs.find((entry) => entry.id === props.job.id);
+        if (job) {
+          props.onSelectJob(job);
+        }
+      }}
     >
       <button type="button" class="cron-table__name">
         <JobStateIndicator job={props.job} />
@@ -377,7 +413,16 @@ function JobRow(
             <Icon name="play" />
           </button>
           {systemOwned() ? undefined : <EnabledSwitch {...props} job={props.job} compact />}
-          <JobMenu {...props} job={props.job} />
+          <JobMenu
+            {...props}
+            job={props.job}
+            onClone={() => {
+              const job = props.jobs.find((entry) => entry.id === props.job.id);
+              if (job) {
+                props.onClone(job);
+              }
+            }}
+          />
         </span>
       ) : undefined}
     </div>

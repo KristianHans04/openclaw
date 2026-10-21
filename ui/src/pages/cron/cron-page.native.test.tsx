@@ -35,7 +35,7 @@ it("loads the empty automation suggestions when its Solid route host is attached
   }
 });
 
-it("reveals the admitted jobs and scheduler status together without duplicate reads", async () => {
+it("reveals admitted jobs without waiting for scheduler status or duplicating reads", async () => {
   const job = createCronViewJob("coordinated");
   const status = createDeferred<{ enabled: boolean; jobs: number; triggersEnabled: boolean }>();
   const list = createDeferred<ReturnType<typeof cronListResponse>>();
@@ -45,12 +45,14 @@ it("reveals the admitted jobs and scheduler status together without duplicate re
   });
   const { page } = mountCronPage(request);
   try {
-    await waitForSolid(() =>
-      expect(page.querySelector('[data-test-id="cron-jobs-loading"]')).not.toBeNull(),
-    );
+    await waitForSolid(() => {
+      expect(page.querySelector('[data-test-id="cron-jobs-loading"]')).not.toBeNull();
+      expect(page.querySelector(".cron-table")?.getAttribute("aria-busy")).toBe("true");
+    });
     list.resolve(cronListResponse([job]));
-    await page.settle();
-    expect(page.querySelector('[data-test-id="cron-row-coordinated"]')).toBeNull();
+    await waitForSolid(() =>
+      expect(page.querySelector('[data-test-id="cron-row-coordinated"]')).not.toBeNull(),
+    );
     status.resolve({ enabled: false, jobs: 1, triggersEnabled: true });
     await waitForSolid(() => {
       expect(page.querySelector('[data-test-id="cron-row-coordinated"]')).not.toBeNull();
@@ -250,6 +252,7 @@ it.each(["replacement", "reconnect"] as const)(
         gateway.emitSnapshot({ phase: "connected" });
       }
       await waitForSolid(() => {
+        expect(page.cron.cronJobs[0]?.name).toBe("Current Gateway");
         expect(page.textContent).toContain("Current Gateway");
         expect(page.cron.cronJobs[0]?.enabled).toBe(true);
         expect(page.querySelector<HTMLInputElement>(selector)?.checked).toBe(true);

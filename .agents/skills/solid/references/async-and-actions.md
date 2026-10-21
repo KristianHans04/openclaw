@@ -54,7 +54,7 @@ const presentation = createMemo(() => {
         })
       : Promise.resolve(state.cronJobs);
   });
-  return { state, epoch, retired: presentationLifetime.promise, jobsRead };
+  return { state, epoch, jobsRead };
 });
 
 // In the existing imperative owner refresh path, outside the computation:
@@ -116,6 +116,9 @@ under the same boundary.
 
 Keep an ordinary data read as well: `isPending` treats an errored expression
 as not pending, so using only that probe can hide a failure from `Errored`.
+For a retained list, `latest(jobsRead)` consumes the data/error while serving
+the last resolved value during revalidation. An uninitialized read still
+suspends into `Loading`; `latest` does not invent an initial value.
 An already-rendered sibling also needs the correct scope dependency; otherwise
 it can hold an earlier scope outside the newly re-armed slot. Promise-shaped
 initial snapshots let first readiness participate in the same async model.
@@ -155,6 +158,7 @@ const [saving, setSaving] = createOptimistic(false);
 const presentMutation = action(function* (
   view: ReturnType<typeof presentation>,
   pending: Promise<unknown>,
+  retired: Promise<void>,
   expected: Pick<CronJob, "id" | "enabled">,
 ) {
   try {
@@ -168,10 +172,10 @@ const presentMutation = action(function* (
       affects(view.jobsRead);
     }
     // Consume the admitted operation even if its presentation retired.
-    yield Promise.race([pending, view.retired]);
+    yield Promise.race([pending, retired]);
     if (isCurrentPresentation(view)) {
-      yield refresh(view.jobsRead);
-      if (isCurrentPresentation(view)) yield refresh(view.jobs);
+      // The admitted operation already reconciled the Gateway snapshot.
+      void refresh(view.jobs);
     }
   } catch (error) {
     if (isCurrentPresentation(view)) {
@@ -181,23 +185,30 @@ const presentMutation = action(function* (
   }
 });
 
-function toggle(job: CronJob, enabled: boolean) {
+async function toggle(job: CronJob, enabled: boolean) {
   const view = presentation();
   if (!isCurrentPresentation(view) || !canManageCron() || cron.cronBusy) return;
   const current = cron.cronJobs.find((row) => row.id === job.id);
   if (!current) return;
   const pending = runCronTask((state) => toggleCronJob(state, current, enabled));
-  return presentMutation(view, pending, { id: current.id, enabled });
+  const retired = presentationLifetime.promise;
+  // Let the owner's publication land before the action joins this tick.
+  await Promise.resolve();
+  return presentMutation(view, pending, retired, { id: current.id, enabled });
 }
 ```
 
 Start the plain owner's operation before the presentation action. Cron's
 existing synchronous scope-change paths call `retirePresentation()` before
-publishing a new owner or connection epoch; page teardown resolves the current
+publishing a new owner, connection epoch, or panel/route intent; page teardown resolves the current
 lifetime too. A pending presentation races this retirement against its admitted
 operation. It may finish presenting before that retired operation settles; the
 plain owner still records the actual write outcome. `Promise.race` consumes
 late rejection as well as resolution.
+
+Capture the current retirement promise per action, before its first yield or
+microtask. Do not cache it in the state/epoch bundle: panel navigation can retire
+presentation without replacing either, and later actions need the new lifetime.
 
 This retirement must come from the synchronous scope owner. Solid parks old
 reactive cleanup while an action is pending, so resolving from the presentation
@@ -242,6 +253,10 @@ success or failure.
 Keep that optimistic dependency live in mixed owner/presentation affordances:
 cron uses `saving() || owner.cronBusy`. Reading the plain busy fact first can
 short-circuit the optimistic read just when the mutation begins.
+Keep the flag out of aggregate props memos. Cron passes it as a separate JSX
+prop: `<CronView {...viewProps()} busy={page.saving() || viewProps().busy} />`.
+Only consumers of `busy` should join its optimistic presentation lane;
+unrelated form and route props follow the ordinary owner snapshot.
 
 `refresh` takes the actual Solid accessor or derived-store root. A wrapper
 such as `refresh(() => jobsRead())` is not refreshable. A bare refresh asks
@@ -325,14 +340,15 @@ startup even though cron stayed lazy. The chunking owner keeps these small
 runtime modules separate. Do not fix grouping by importing private package
 internals or by increasing the startup budget.
 
-## Reveal sibling regions together
+## Reveal sibling regions
 
 Cron's scheduler status and jobs list come from separate owner reads. Put
-their sibling readiness boundaries under one `Reveal` to coordinate reveal:
+their sibling readiness boundaries under one `Reveal`. Cron preserves natural
+readiness: a held scheduler-status request must not hide a completed jobs list.
 
 ```tsx
 <Errored fallback={readError}>
-  <Reveal order="together">
+  <Reveal order="natural">
     <Loading>
       <SchedulerStatus status={statusRead()} />
     </Loading>
@@ -343,11 +359,25 @@ their sibling readiness boundaries under one `Reveal` to coordinate reveal:
 </Errored>
 ```
 
-`together` waits for both siblings; the default `sequential` reveals them in
+`natural` reveals each ready sibling independently. Use `together` only when
+the page's contract requires both; the default `sequential` reveals them in
 registration order, and `collapsed` suppresses later sequential fallbacks.
 Choose based on the existing page's behavior. Put `Errored` **outside** the
 group: an intervening `Errored` or nested `Loading` breaks membership in the
 outer `Reveal`. Do not coordinate unrelated slots merely to use the API.
+
+Key the table consumer to its presentation scope with `Show keyed`. `Loading`
+retains its children during revalidation; an existing `createProjection` over
+a retired optimistic store must not survive a Gateway scope replacement.
+The keyed boundary changes only for owner/connection identity, so ordinary
+query refreshes retain the rows and their DOM identity.
+
+Keep the table structure and its `aria-busy` in both pending and ready states;
+the fallback must preserve that accessible shell. Narrow a shared
+props dependency with `createMemo(() => props.reads.scope())` before using it
+in `on={latest(scope)}`. `on` tracks dependency changes rather than comparing
+the returned scope, so reading a changing aggregate props memo directly can
+re-arm the fallback on every list refresh and discard retained rows.
 
 ## Proof when adopting a recipe
 

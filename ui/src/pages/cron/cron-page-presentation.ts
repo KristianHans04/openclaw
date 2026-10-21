@@ -91,7 +91,6 @@ export function createCronPresentation(deps: CronPresentationDeps) {
     return {
       state,
       epoch,
-      retired: presentationLifetime.promise,
       jobsRead,
       statusRead,
       jobs,
@@ -128,6 +127,7 @@ export function createCronPresentation(deps: CronPresentationDeps) {
   const presentMutation = action(function* (
     view: ReturnType<typeof presentation>,
     pending: Promise<unknown>,
+    retired: Promise<void>,
     expected?: Pick<CronJob, "id" | "enabled">,
   ) {
     try {
@@ -145,13 +145,10 @@ export function createCronPresentation(deps: CronPresentationDeps) {
         }
       }
       // Retiring this presentation never cancels the owner's admitted write.
-      yield Promise.race([pending, view.retired]);
+      yield Promise.race([pending, retired]);
       // Admission/publication belong to the owner, outside this transaction.
       if (isCurrentPresentation(view)) {
-        yield refresh(view.jobsRead);
-        if (isCurrentPresentation(view)) {
-          yield refresh(view.jobs);
-        }
+        void refresh(view.jobs);
       }
     } catch (error) {
       reportActionError(view, error);
@@ -256,7 +253,16 @@ export function createCronPresentation(deps: CronPresentationDeps) {
     resetModels,
     runTask: runCronTask,
     read: runCronRead,
-    mutate: presentMutation,
+    async mutate(
+      view: ReturnType<typeof presentation>,
+      pending: Promise<unknown>,
+      expected?: Pick<CronJob, "id" | "enabled">,
+    ) {
+      const retired = presentationLifetime.promise;
+      // Let the owner's synchronous publication land before opening an action.
+      await Promise.resolve();
+      return presentMutation(view, pending, retired, expected);
+    },
     reportError: reportActionError,
     saving: () => presentation().saving(),
     reads: {

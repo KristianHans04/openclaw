@@ -59,7 +59,7 @@ export function buildCronViewProps(page: ReturnType<typeof createCronPage>) {
       page.cron().cronRunsError ??
       page.deliveryDirectory.error ??
       page.modelSuggestionsError(),
-    busy: page.saving() || page.cron().cronBusy,
+    busy: page.cron().cronBusy,
     form: page.cron().cronForm,
     heartbeatScratch: canManage ? page.heartbeatScratch() : "",
     channels: channels.channelsSnapshot?.channelMeta?.length

@@ -57,7 +57,7 @@ export function CronPageContent(props: { page: ReturnType<typeof createCronPage>
       />
       <CronRunTranscriptView transcript={props.page.runTranscript} revision={revision} />
       <SettingsWorkspace>
-        <CronView {...viewProps()} />
+        <CronView {...viewProps()} busy={props.page.saving() || viewProps().busy} />
       </SettingsWorkspace>
     </>
   );

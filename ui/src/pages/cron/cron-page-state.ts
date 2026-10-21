@@ -304,6 +304,7 @@ export function createCronPage(context: () => ApplicationContext, host: () => HT
     if (search === routeSearch) {
       return;
     }
+    presentation.retire();
     routeSearch = search;
     runTranscript.close();
     cron.cronError = null;
@@ -327,6 +328,7 @@ export function createCronPage(context: () => ApplicationContext, host: () => HT
     const mode = editingJobId ? "job" : cron.cronCreateOpen ? "create" : "overview";
     const panelKey = `${mode}:${editingJobId ?? ""}`;
     if (panelKey !== lastPanelKey) {
+      presentation.retire();
       lastPanelKey = panelKey;
       runTranscript.close();
       setDetailTab(editingJobId && cron.cronRunsRunId ? "history" : "settings");
@@ -650,23 +652,10 @@ export function createCronPage(context: () => ApplicationContext, host: () => HT
     onRefresh: () => void refreshCron(),
     onSubmit: () => submitForm(),
     onSubmitRunNow: () => submitForm(true),
-    onSelectJob: (job: CronJob, runId: string | null = null) => {
-      const selected = cron.cronJobs.find((entry) => entry.id === job.id);
-      if (selected) {
-        selectJob(selected, runId);
-      }
-    },
+    onSelectJob: selectJob,
     onOpenCreate: openCreate,
     onClosePanel: closePanel,
-    onClone: (job: CronJob) => {
-      const selected =
-        cron.cronEditingJob?.id === job.id
-          ? cron.cronEditingJob
-          : cron.cronJobs.find((entry) => entry.id === job.id);
-      if (selected) {
-        cloneJob(selected);
-      }
-    },
+    onClone: cloneJob,
     onToggle: (job: CronJob, enabled: boolean) => toggle(job, enabled),
     onRun: (job: CronJob, mode?: "force" | "due") =>
       runCronAdminTask((cronState) => runCronJob(cronState, job.id, mode ?? "force")),
