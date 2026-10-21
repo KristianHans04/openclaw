@@ -17,31 +17,21 @@ afterEach(() => {
 
 function mountCaret(value: string, container?: HTMLElement) {
   let menu!: MenuHandle;
-  let textarea!: HTMLTextAreaElement;
-  render(
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.cssText = "width:240px;height:64px;font-size:16px;line-height:20px;margin:80px";
+  const view = render(
     () => (
-      <>
-        <textarea
-          ref={(element) => (textarea = element)}
-          value={value}
-          style={{
-            width: "240px",
-            height: "64px",
-            "font-size": "16px",
-            "line-height": "20px",
-            margin: "80px",
-          }}
-        />
-        <Menu
-          id="caret-menu"
-          label="Suggestions"
-          items={[{ id: "result", label: "Result" }]}
-          ref={(handle) => (menu = handle)}
-        />
-      </>
+      <Menu
+        id="caret-menu"
+        label="Suggestions"
+        items={[{ id: "result", label: "Result" }]}
+        ref={(handle) => (menu = handle)}
+      />
     ),
     container ? { container } : undefined,
   );
+  view.container.prepend(textarea);
   flush();
   return { menu, textarea };
 }

@@ -29,17 +29,16 @@ it("keeps controlled selection authoritative through rejection, acceptance, and 
     <>
       <Tabs items={items()} active={active()} ariaLabel="Example" onSelect={onSelect} />
       <TabPanel id="a-panel" tabId="a-tab" active={active() === "a"}>
-        Alpha content
+        A
       </TabPanel>
       <TabPanel id="b-panel" tabId="b-tab" active={active() === "b"}>
-        Beta content
+        B
       </TabPanel>
     </>
   ));
   flush();
   const beta = view.getByRole("tab", { name: "Beta" });
-  expect(beta.classList.contains("custom-tab")).toBe(true);
-  expect(beta.classList.contains("emphasized")).toBe(true);
+  expect([...beta.classList]).toEqual(expect.arrayContaining(["custom-tab", "emphasized"]));
   fireEvent.click(beta);
   expect(view.getByRole("tab", { selected: true })).toHaveProperty("id", "a-tab");
   expect(view.getByRole("tabpanel")).toHaveProperty("id", "a-panel");
@@ -75,9 +74,7 @@ it("preserves controlled selection and manual focus through reorder and activati
     <Tabs
       items={items()}
       active={active()}
-      onSelect={(value) => {
-        setActive(value);
-      }}
+      onSelect={(value) => void setActive(value)}
       activation={manual() ? "manual" : "auto"}
       ariaLabel="Controlled"
     />

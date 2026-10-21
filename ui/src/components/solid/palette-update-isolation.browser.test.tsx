@@ -60,8 +60,7 @@ it("keeps palette keyboard editing and catalog work scoped across result navigat
     createContext(harness.gateway, async () => null),
   );
   onTestFinished(() => provider.remove());
-  // One native edit has a defined undo target; browsers may split a typing
-  // burst into several undo groups depending on scheduling.
+  // One native edit keeps a deterministic undo target.
   palette.openPalette({
     value: "needl",
     selectionStart: 5,
@@ -74,8 +73,7 @@ it("keeps palette keyboard editing and catalog work scoped across result navigat
   await userEvent.keyboard("{End}e");
   expect(input.value).toBe("needle");
   await expect.poll(() => palette.textContent).toContain("Needle 0 model 000");
-  // Settled rows remain visible while typing is debounced; only the active
-  // descendant establishes that ArrowDown is admitted as result navigation.
+  // Rows can be stale during debounce; wait for keyboard navigation admission.
   await expect.poll(() => input.getAttribute("aria-activedescendant")).toBeTruthy();
   await palette.updateComplete;
   const rows = [...palette.querySelectorAll('[role="option"]')];
