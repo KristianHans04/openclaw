@@ -58,11 +58,6 @@ export const controlUiLocaleConfigHintsChunkPrefix = "locale-config-hints-";
 export function controlUiStableChunkName(id: string): string | undefined {
   const normalized = normalizeModuleId(id);
 
-  if (normalized.endsWith("/@solidjs/signals/dist/prod/core/action.js")) {
-    // Lazy action consumers must not lend their shared chat chunk to the initial Solid runtime.
-    return "solid-actions-runtime";
-  }
-
   switch (controlUiBootManifestKey(id)) {
     case "node_modules/@solidjs/signals/dist/prod/core/action.js":
     case "node_modules/@solidjs/signals/dist/dev/core/action.js":
