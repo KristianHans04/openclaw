@@ -7,6 +7,7 @@ import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
 import { syncSelectedSessionMessageSubscription } from "./chat-history-subscription.ts";
 import { loadChatHistory } from "./chat-history.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { createRefreshChatPane, nativeHistoryMessage } from "./chat-pane-history.test-support.ts";
 import * as paneTest from "./chat-pane.test-support.ts";
 
@@ -64,7 +65,7 @@ it("reports each transcript loading edge from the load owner", async () => {
   const pending = responses.map(({ promise }) => promise);
   const client = paneTest.createGatewayBrowserClientFixture({ request: () => pending.shift() });
   const context = {
-    ...paneTest.createInitializationContext(),
+    ...createInitializationContext(),
     sessions: paneTest.createSessionCapabilityFixture({
       state: { agentId: "main" },
       reconcile: vi.fn(),

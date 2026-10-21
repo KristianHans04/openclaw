@@ -21,11 +21,11 @@ import {
 } from "../../test-helpers/gateway-methods.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import { QUEUED_EDIT_RETENTION_CHANGE_EVENT } from "./chat-page-retained-sessions.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { createMountedPanes } from "./chat-pane-mounted.test-support.ts";
 import { ChatPaneRuntime } from "./chat-pane-render.ts";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createPaneTestHost,
   getPaneTestRuntime,
   createTestChatPane,

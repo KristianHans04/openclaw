@@ -22,12 +22,12 @@ import {
 import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { isExpiredIncognitoSession } from "./chat-history-state.ts";
 import { loadChatHistory } from "./chat-history.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { ChatPaneRuntime } from "./chat-pane-render.ts";
 import { consumePaneSessionHandoff } from "./chat-pane-shared.ts";
 import { subscribeChatPaneSnapshotInvalidation } from "./chat-pane-startup-subscriptions.ts";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createSessionCapabilityFixture,
   createSessionContext,
   createTestChatPane,

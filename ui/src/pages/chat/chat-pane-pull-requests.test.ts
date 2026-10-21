@@ -32,9 +32,9 @@ import {
 } from "./chat-github-publication.test-support.ts";
 import { resetChatHistoryProjection } from "./chat-history-state.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createRenderTestChatPane,
   createTestChatPane,
 } from "./chat-pane.test-support.ts";

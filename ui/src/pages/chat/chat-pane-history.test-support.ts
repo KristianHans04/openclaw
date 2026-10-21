@@ -5,8 +5,8 @@ import {
   createGatewayHarness,
   createTestSessionCapability,
 } from "../../lib/sessions/session-capability.test-support.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import {
-  createInitializationContext,
   createRenderTestChatPane,
   createTestChatPane as createBaseTestChatPane,
   nativeHistoryMessage,

@@ -7,10 +7,10 @@ import { transactionComplete } from "../../lib/chat/control-ui-database.runtime.
 import { createTestSessionCapability } from "../../lib/sessions/session-capability.test-support.ts";
 import { createGatewayRequestMock } from "../../test-helpers/gateway-client.ts";
 import { loadChatHistory, resumePendingChatHistoryLoad } from "./chat-history.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { ChatPaneRuntime } from "./chat-pane-render.ts";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createPaneTestHost,
   getPaneTestRuntime,
   nativeHistoryMessage,

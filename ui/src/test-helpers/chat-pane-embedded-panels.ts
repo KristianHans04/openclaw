@@ -1,6 +1,7 @@
 import { onTestFinished, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import type { SessionWorkspaceGetResult, SessionWorkspaceListResult } from "../api/types.ts";
+import { createInitializationContext } from "../pages/chat/chat-pane-context.test-support.ts";
 import { sidebarPanelDefinitions } from "../pages/chat/chat-pane-embedded-panels.ts";
 import type { SidebarPanelDefinitionParams } from "../pages/chat/chat-pane-embedded-types.ts";
 import { createChatPaneRails } from "../pages/chat/chat-pane-rails.ts";
@@ -8,7 +9,6 @@ import { renderSidebarRegion } from "../pages/chat/chat-pane-sidebar-layout.ts";
 import { SidebarRegionView } from "../pages/chat/chat-pane-sidebar-view.tsx";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createSessionCapabilityFixture,
 } from "../pages/chat/chat-pane.test-support.ts";
 import type { ChatPageHost } from "../pages/chat/chat-state-host.ts";

@@ -11,12 +11,10 @@ import { createApplicationContextProvider } from "../../test-helpers/application
 import { createMockBoardProvider } from "../../test-helpers/board-provider.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { createMountedPanes } from "./chat-pane-mounted.test-support.ts";
 import { ChatPaneRuntime } from "./chat-pane-render.ts";
-import {
-  createGatewayBrowserClientFixture,
-  createInitializationContext,
-} from "./chat-pane.test-support.ts";
+import { createGatewayBrowserClientFixture } from "./chat-pane.test-support.ts";
 import { ChatPaneView, type ChatPaneElement, type ChatPaneProps } from "./chat-pane.tsx";
 import {
   installTranscriptDomMocks,

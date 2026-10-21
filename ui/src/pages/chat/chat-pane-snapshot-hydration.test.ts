@@ -9,9 +9,9 @@ import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { flush } from "../../test-helpers/solid-settle.ts";
 import type { ChatHistoryResult } from "./chat-history-snapshot.ts";
 import { loadChatHistory } from "./chat-history.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { ChatPaneRuntime } from "./chat-pane-render.ts";
 import {
-  createInitializationContext,
   createPaneTestHost,
   getPaneTestRuntime,
   createGatewayBrowserClientFixture,

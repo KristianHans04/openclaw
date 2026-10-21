@@ -15,12 +15,12 @@ import {
 } from "../../test-helpers/modal-dialog.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { flush, waitForSolid } from "../../test-helpers/solid-settle.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import {
   resolveChatPanePlacement,
   resolveChatPaneWorkerPresentation,
 } from "./chat-pane-placement.ts";
 import {
-  createInitializationContext,
   createRenderTestChatPane,
   activePlacementSession,
   createGatewayBrowserClientFixture,

@@ -3,10 +3,10 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { flush } from "../../test-helpers/solid-settle.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { nativeHistoryMessage } from "./chat-pane-history.test-support.ts";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createRenderTestChatPane,
   type TestChatPane,
 } from "./chat-pane.test-support.ts";

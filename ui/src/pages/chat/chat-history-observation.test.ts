@@ -23,13 +23,10 @@ import { rewindChatHistory, switchChatHistoryBranch } from "./chat-history-actio
 import type { ChatHistoryResponse } from "./chat-history-snapshot.ts";
 import { getChatHistoryLoadState } from "./chat-history-state.ts";
 import { loadChatHistory } from "./chat-history.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { createMountedPanes, refreshPane } from "./chat-pane-mounted.test-support.ts";
 import { subscribeChatPaneSnapshotInvalidation } from "./chat-pane-startup-subscriptions.ts";
-import {
-  createInitializationContext,
-  createRenderTestChatPane,
-  nativeHistoryMessage,
-} from "./chat-pane.test-support.ts";
+import { createRenderTestChatPane, nativeHistoryMessage } from "./chat-pane.test-support.ts";
 import { createPageState } from "./chat-state-page.ts";
 import {
   refreshChatMetadata,

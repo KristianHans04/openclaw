@@ -14,9 +14,9 @@ import { projectOwner } from "../../../lib/reactive/projection.ts";
 import { createApplicationContextProvider } from "../../../test-helpers/application-context.ts";
 import { mountSolid } from "../../../test-helpers/mount-solid.ts";
 import { flush, waitForSolid } from "../../../test-helpers/solid-settle.ts";
+import { createInitializationContext } from "../chat-pane-context.test-support.ts";
 import {
   activePlacementSession,
-  createInitializationContext,
   createSessionCapabilityFixture,
   createTestChatPane,
 } from "../chat-pane.test-support.ts";

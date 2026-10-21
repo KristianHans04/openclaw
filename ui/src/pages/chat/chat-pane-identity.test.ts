@@ -15,10 +15,10 @@ import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { waitForSolid } from "../../test-helpers/solid-settle.ts";
 import { setChatHistoryLoad } from "./chat-history-state.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { consumePaneSessionHandoff } from "./chat-pane-shared.ts";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createRenderTestChatPane,
   createSessionCapabilityFixture,
   createSessionContext,

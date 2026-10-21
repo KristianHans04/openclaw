@@ -20,11 +20,11 @@ import {
   synchronizeInitialChatSnapshotConnection,
 } from "./chat-history-state.ts";
 import { loadChatHistory } from "./chat-history.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { ChatPaneRuntime } from "./chat-pane-render.ts";
 import {
   createGatewayBrowserClientFixture,
   createPaneHeaderWorkspaceFixture,
-  createInitializationContext,
   createPaneTestHost,
   getPaneTestRuntime,
   nativeHistoryMessage,

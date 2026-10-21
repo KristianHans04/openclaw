@@ -20,6 +20,7 @@ import {
 } from "../../components/session-panel-toggle-buffer.ts";
 import { mountSolid } from "../../test-helpers/mount-solid.ts";
 import { flush as flushSolid } from "../../test-helpers/solid-settle.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import { sidebarPanelDefinitions } from "./chat-pane-embedded-panels.ts";
 import {
   createChatPaneSessionPanelToggles,
@@ -27,10 +28,7 @@ import {
 } from "./chat-pane-session-panel-toggle.ts";
 import { renderSidebarRegion } from "./chat-pane-sidebar-layout.ts";
 import { SidebarRegionView } from "./chat-pane-sidebar-view.tsx";
-import {
-  createGatewayBrowserClientFixture,
-  createInitializationContext,
-} from "./chat-pane.test-support.ts";
+import { createGatewayBrowserClientFixture } from "./chat-pane.test-support.ts";
 import type { ChatPageHost } from "./chat-state-host.ts";
 import { createPageState } from "./chat-state-page.ts";
 import { isSidebarSlotVisible } from "./sidebar-layout.ts";

@@ -5,9 +5,9 @@ import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import type { PresenceEntry } from "../../api/types.ts";
 import type { ApplicationContext } from "../../app/context.ts";
 import { settleLitElement } from "../../test-helpers/lit-settle.ts";
+import { createInitializationContext } from "./chat-pane-context.test-support.ts";
 import {
   createGatewayBrowserClientFixture,
-  createInitializationContext,
   createRenderTestChatPane,
   connectPaneTestView,
   type TestChatPane,

@@ -25,7 +25,7 @@ it("shows a failed recovery module only for the owner still awaiting it", async 
     await release.promise;
     throw new Error("Synthetic recovery module unavailable");
   });
-  const { createInitializationContext } = await import("./chat-pane.test-support.ts");
+  const { createInitializationContext } = await import("./chat-pane-context.test-support.ts");
   const { PaneOutboxRecovery } = await import("./chat-outbox-recovery.tsx");
   const host = createPageState(
     createInitializationContext(),

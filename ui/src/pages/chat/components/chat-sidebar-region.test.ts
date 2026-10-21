@@ -10,8 +10,8 @@ import {
   type ControlUiPluginOwner,
 } from "../../../plugins/control-ui-runtime.ts";
 import { waitForSolid } from "../../../test-helpers/solid-settle.ts";
+import { createInitializationContext } from "../chat-pane-context.test-support.ts";
 import { sidebarPanelDefinitions } from "../chat-pane-embedded-panels.ts";
-import { createInitializationContext } from "../chat-pane.test-support.ts";
 import { createPageState } from "../chat-state-page.ts";
 import { createChatProps } from "../chat-view.test-helpers.ts";
 import {
