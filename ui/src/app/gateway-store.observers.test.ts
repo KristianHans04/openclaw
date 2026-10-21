@@ -78,7 +78,7 @@ describe("createApplicationGateway connection ownership", () => {
       // Authentication is unrelated to whether this peer negotiated catalog publication.
       vi.stubGlobal("crypto", undefined);
       const plan = await buildBrowserGatewayConnectPlan({
-        opts: current().opts,
+        opts: current().testOptions,
         connectNonce: "catalog-challenge",
         connectChallengeTs: 1_800_000_000_000,
         generation: 1,
@@ -87,7 +87,7 @@ describe("createApplicationGateway connection ownership", () => {
         selectAuth: () => ({}),
       });
       expect(plan.params.modelCatalog).toEqual(advertised ? scope : undefined);
-      current().opts.onHello?.(HELLO);
+      current().testOptions.onHello?.(HELLO);
       current().request.mockResolvedValue(catalog);
       const read = loadModelCatalog(gateway.snapshot.client!, scope).catch(
         (error: unknown) => error,
@@ -97,7 +97,7 @@ describe("createApplicationGateway connection ownership", () => {
         advertised ? [] : [["models.list", { ...scope, view: "configured" }]],
       );
       if (advertised) {
-        current().opts.onEvent?.(
+        current().testOptions.onEvent?.(
           createGatewayEvent("models.snapshot", { target: scope, scope, catalog }),
         );
       }
@@ -114,7 +114,7 @@ describe("createApplicationGateway connection ownership", () => {
     vi.stubGlobal("crypto", undefined);
     const plan = (serverCapabilities: string[]) =>
       buildBrowserGatewayConnectPlan({
-        opts: current().opts,
+        opts: current().testOptions,
         connectNonce: "catalog-challenge",
         connectChallengeTs: 1_800_000_000_000,
         generation: 1,
@@ -123,15 +123,15 @@ describe("createApplicationGateway connection ownership", () => {
         selectAuth: () => ({}),
       });
     await plan([GATEWAY_SERVER_CAPS.MODEL_CATALOG_SNAPSHOT]);
-    current().opts.onHello?.(HELLO);
-    current().opts.onEvent?.(
+    current().testOptions.onHello?.(HELLO);
+    current().testOptions.onEvent?.(
       createGatewayEvent("models.snapshot", { target: scope, scope, catalog }),
     );
     expect(await loadModelCatalog(gateway.snapshot.client!, scope)).toEqual(catalog);
 
-    current().opts.onClose?.({ code: 1006, reason: "reconnect", willRetry: true });
+    current().testOptions.onClose?.({ code: 1006, reason: "reconnect", willRetry: true });
     expect((await plan([])).params.modelCatalog).toBeUndefined();
-    current().opts.onHello?.(HELLO);
+    current().testOptions.onHello?.(HELLO);
     current().request.mockResolvedValue(catalog);
     const read = loadModelCatalog(gateway.snapshot.client!, scope).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(0);
