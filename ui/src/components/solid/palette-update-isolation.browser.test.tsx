@@ -1,17 +1,29 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { expect, it, onTestFinished, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import { loadModelCatalog } from "../../lib/model-catalog-store.ts";
 import { createContext, createGateway, mountPalette } from "../command-palette.test-support.ts";
 import "../command-palette.tsx";
 import "../../styles.css";
 
-const disposals: (() => void)[] = [];
-afterEach(() =>
-  disposals
-    .splice(0)
-    .toReversed()
-    .forEach((dispose) => dispose()),
-);
+function shortcut() {
+  const event = new KeyboardEvent("keydown", {
+    key: "k",
+    code: "KeyK",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  document.dispatchEvent(event);
+  return event;
+}
+
+function expectSelection(input: HTMLTextAreaElement) {
+  expect(input).toMatchObject({
+    selectionStart: 1,
+    selectionEnd: 4,
+    selectionDirection: "backward",
+  });
+}
 
 it("keeps palette keyboard editing and catalog work scoped across result navigation and publication", async () => {
   let namesRead = 0;
@@ -47,7 +59,7 @@ it("keeps palette keyboard editing and catalog work scoped across result navigat
   const { palette, provider } = await mountPalette(
     createContext(harness.gateway, async () => null),
   );
-  disposals.push(() => provider.remove());
+  onTestFinished(() => provider.remove());
   // One native edit has a defined undo target; browsers may split a typing
   // burst into several undo groups depending on scheduling.
   palette.openPalette({
@@ -75,11 +87,7 @@ it("keeps palette keyboard editing and catalog work scoped across result navigat
   await userEvent.keyboard("{ArrowDown}");
   await palette.updateComplete;
   const navigationReads = namesRead;
-  expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
-    1,
-    4,
-    "backward",
-  ]);
+  expectSelection(input);
   expect(input.getAttribute("aria-activedescendant")).not.toBe(beforeActive);
   expect([...palette.querySelectorAll('[role="option"]')]).toEqual(rows);
   expect(modelRequests).toBe(beforeRequests);
@@ -96,36 +104,17 @@ it("keeps palette keyboard editing and catalog work scoped across result navigat
   expect(modelRequests).toBeGreaterThan(beforeRequests);
   expect(palette.querySelector("textarea")).toBe(input);
   expect(document.activeElement).toBe(input);
-  expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([
-    1,
-    4,
-    "backward",
-  ]);
+  expectSelection(input);
   expect(nativeWrites).not.toHaveBeenCalled();
   input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
   nativeWrites.mockRestore();
   await userEvent.keyboard("{Control>}z{/Control}");
   expect(input.value).toBe("needl");
   palette.remove();
-  const retiredShortcut = new KeyboardEvent("keydown", {
-    key: "k",
-    code: "KeyK",
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true,
-  });
-  document.dispatchEvent(retiredShortcut);
-  expect(retiredShortcut.defaultPrevented).toBe(false);
+  expect(shortcut().defaultPrevented).toBe(false);
   provider.append(palette);
   await palette.updateComplete;
-  const restoredShortcut = new KeyboardEvent("keydown", {
-    key: "k",
-    code: "KeyK",
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true,
-  });
-  document.dispatchEvent(restoredShortcut);
+  const restoredShortcut = shortcut();
   await palette.updateComplete;
   expect(restoredShortcut.defaultPrevented).toBe(true);
   expect(palette.isOpen).toBe(true);

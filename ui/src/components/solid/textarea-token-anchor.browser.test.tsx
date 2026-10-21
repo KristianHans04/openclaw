@@ -22,9 +22,7 @@ function mountCaret(value: string, container?: HTMLElement) {
     () => (
       <>
         <textarea
-          ref={(element) => {
-            textarea = element;
-          }}
+          ref={(element) => (textarea = element)}
           value={value}
           style={{
             width: "240px",
@@ -38,9 +36,7 @@ function mountCaret(value: string, container?: HTMLElement) {
           id="caret-menu"
           label="Suggestions"
           items={[{ id: "result", label: "Result" }]}
-          ref={(handle) => {
-            menu = handle;
-          }}
+          ref={(handle) => (menu = handle)}
         />
       </>
     ),
@@ -48,6 +44,19 @@ function mountCaret(value: string, container?: HTMLElement) {
   );
   flush();
   return { menu, textarea };
+}
+
+async function openCaret(menu: MenuHandle, textarea: HTMLTextAreaElement, offset = 6) {
+  const current = (anchor = createTextareaTokenAnchor(() => anchor?.close()));
+  current.updateNative(menu.overlay, textarea, offset);
+  await expect.poll(() => menu.overlay.open).toBe(true);
+  return current;
+}
+
+function returnFocus(menu: MenuHandle, root: Document | ShadowRoot, textarea: HTMLTextAreaElement) {
+  menu.overlay.surface.querySelector<HTMLButtonElement>("[role=menuitem]")!.focus();
+  menu.overlay.request(false, "return");
+  expect(root.activeElement).toBe(textarea);
 }
 
 function caretPoint(surface: HTMLElement) {
@@ -76,10 +85,8 @@ function expectMenuHit(menu: MenuHandle) {
 
 it("positions a native menu at the measured caret and returns focus to the editor", async () => {
   const { menu, textarea } = mountCaret("hello @person");
-  anchor = createTextareaTokenAnchor(() => anchor?.close());
   textarea.focus();
-  anchor.updateNative(menu.overlay, textarea, 6);
-  await expect.poll(() => menu.overlay.open).toBe(true);
+  await openCaret(menu, textarea);
   await phase(menu.overlay.surface, "open");
   expect(menu.overlay.trigger).toBe(textarea);
   const point = caretPoint(menu.overlay.surface).getBoundingClientRect();
@@ -89,21 +96,16 @@ it("positions a native menu at the measured caret and returns focus to the edito
   expect(point.top).toBeGreaterThanOrEqual(editor.top);
   expect(point.bottom).toBeLessThanOrEqual(editor.bottom);
   expect(menu.overlay.surface.style.getPropertyValue("position-anchor")).not.toBe("");
-  expect(menu.overlay.surface.style.left).toBe("");
-  expect(menu.overlay.surface.style.top).toBe("");
+  expect(menu.overlay.surface.style).toMatchObject({ left: "", top: "" });
   expectMenuHit(menu);
-  menu.overlay.surface.querySelector<HTMLButtonElement>("[role=menuitem]")!.focus();
-  menu.overlay.request(false, "return");
-  expect(document.activeElement).toBe(textarea);
+  returnFocus(menu, document, textarea);
 });
 
 it("retires the native menu when its token scrolls outside the textarea", async () => {
   const { menu, textarea } = mountCaret(
     Array.from({ length: 30 }, (_, index) => `line ${index}`).join("\n"),
   );
-  anchor = createTextareaTokenAnchor(() => anchor?.close());
-  anchor.updateNative(menu.overlay, textarea, 0);
-  await expect.poll(() => menu.overlay.open).toBe(true);
+  await openCaret(menu, textarea, 0);
   const point = caretPoint(menu.overlay.surface);
   textarea.scrollTop = textarea.scrollHeight;
   textarea.dispatchEvent(new Event("scroll"));
@@ -113,16 +115,14 @@ it("retires the native menu when its token scrolls outside the textarea", async 
 
 it("rebinds to another editor and can reopen after synchronous retirement", async () => {
   const { menu, textarea } = mountCaret("hello @person");
-  anchor = createTextareaTokenAnchor(() => anchor?.close());
-  anchor.updateNative(menu.overlay, textarea, 6);
-  await expect.poll(() => menu.overlay.open).toBe(true);
+  const current = await openCaret(menu, textarea);
   const previousPoint = caretPoint(menu.overlay.surface);
   const nextTextarea = document.createElement("textarea");
   nextTextarea.value = "next @person";
   nextTextarea.style.cssText = textarea.style.cssText;
   document.body.append(nextTextarea);
   hosts.push(nextTextarea);
-  anchor.updateNative(menu.overlay, nextTextarea, 5);
+  current.updateNative(menu.overlay, nextTextarea, 5);
   expect(previousPoint.isConnected).toBe(false);
   await expect.poll(() => menu.overlay.open).toBe(true);
   expect(menu.overlay.trigger).toBe(nextTextarea);
@@ -136,10 +136,10 @@ it("rebinds to another editor and can reopen after synchronous retirement", asyn
       }
     }),
   );
-  anchor.close();
+  current.close();
   expect(menu.overlay.open).toBe(false);
   expect(nextPoint.isConnected).toBe(false);
-  anchor.updateNative(menu.overlay, nextTextarea, 5);
+  current.updateNative(menu.overlay, nextTextarea, 5);
   await expect.poll(() => menu.overlay.open).toBe(true);
   expect(caretPoint(menu.overlay.surface).isConnected).toBe(true);
 });
@@ -154,9 +154,8 @@ it.each(["open", "closed"] as const)(
     document.body.append(host);
     hosts.push(host);
     const { menu, textarea } = mountCaret("hello @person", container);
-    anchor = createTextareaTokenAnchor(() => anchor?.close());
     textarea.focus();
-    anchor.updateNative(menu.overlay, textarea, 6);
+    const current = await openCaret(menu, textarea);
     await phase(menu.overlay.surface, "open");
     expect(menu.overlay.trigger).toBe(textarea);
     const point = caretPoint(menu.overlay.surface);
@@ -169,10 +168,8 @@ it.each(["open", "closed"] as const)(
     expect(Math.abs(menuBox.left - pointBox.left)).toBeLessThan(1);
     expect(menuBox.bottom).toBeLessThanOrEqual(pointBox.top);
     expectMenuHit(menu);
-    menu.overlay.surface.querySelector<HTMLButtonElement>("[role=menuitem]")!.focus();
-    menu.overlay.request(false, "return");
-    expect(root.activeElement).toBe(textarea);
-    anchor.close();
+    returnFocus(menu, root, textarea);
+    current.close();
     expect(point.isConnected).toBe(false);
   },
 );
