@@ -157,23 +157,107 @@ async function withGithubApiTimeoutEnv<T>(value: string, fn: () => Promise<T>): 
 }
 
 describe("release candidate checklist", () => {
-  it("namespaces default saved state by the resolved target SHA", () => {
+  it("isolates and resumes coordinator state by target SHA while preserving explicit legacy paths", async () => {
     const tag = "v2026.9.1-beta.2";
     const first = "a".repeat(40);
     const second = "b".repeat(40);
-    expect(resolveReleaseCandidateOutputDir({ outputDir: "", tag, targetSha: first })).toBe(
-      join(".artifacts", "release-candidate", tag, first),
-    );
-    expect(resolveReleaseCandidateOutputDir({ outputDir: "", tag, targetSha: second })).toBe(
-      join(".artifacts", "release-candidate", tag, second),
-    );
-    expect(
-      resolveReleaseCandidateOutputDir({
-        outputDir: "/retained/release-request",
+    const toolingSha = "c".repeat(40);
+    const source = readFileSync("scripts/release-candidate-checklist.mts", "utf8");
+    const main = source.match(/^async function main\(\)[\s\S]*?^\}/mu)?.[0];
+
+    async function reachStateCheckpoint({
+      targetSha,
+      outputDir = "",
+      retainedState,
+    }: {
+      targetSha: string;
+      outputDir?: string;
+      retainedState?: Record<string, unknown>;
+    }) {
+      const targetRoot = tempDirs.make("candidate-state-target-");
+      const toolingRoot = tempDirs.make("candidate-state-tooling-");
+      const argv = [
+        "--tag",
         tag,
-        targetSha: second,
-      }),
-    ).toBe("/retained/release-request");
+        "--full-release-run",
+        "111",
+        "--npm-preflight-run",
+        "222",
+        "--skip-dispatch",
+        "--skip-parallels",
+        "--skip-telegram",
+        ...(outputDir ? ["--output-dir", outputDir] : []),
+      ];
+      const options = parseArgs(argv);
+      const resolvedOutputDir = resolveReleaseCandidateOutputDir({ outputDir, tag, targetSha });
+      const statePath = join(resolvedOutputDir, "release-candidate-state.json");
+      const stateFiles = new Map<string, unknown>(
+        retainedState === undefined ? [] : [[statePath, retainedState]],
+      );
+      const writeState = vi.fn((_path: string, _state: unknown) => {
+        throw new Error("coordinator state checkpoint");
+      });
+      const completion = runInNewContext(stripNodeTypeScriptTypes(`${main}\nmain();`), {
+        process: {
+          argv: ["node", "scripts/release-candidate-checklist.mts", ...argv],
+          cwd: () => targetRoot,
+          env: {},
+        },
+        TOOLING_ROOT: toolingRoot,
+        TRUSTED_TOOLING_SHA_ENV: "OPENCLAW_RELEASE_CANDIDATE_TRUSTED_TOOLING_SHA",
+        RELEASE_CANDIDATE_STATE_FILE: "release-candidate-state.json",
+        RELEASE_CANDIDATE_STATE_VERSION: 2,
+        parseArgs: () => options,
+        gitTopLevel: (root: string) => root,
+        gitRevParse: (_ref: string, root: string) => (root === targetRoot ? targetSha : toolingSha),
+        resolveReleaseCandidateOutputDir,
+        assertReleaseCandidateTag: () => {},
+        fetchTrustedWorkflowSha: () => toolingSha,
+        validateTrustedToolingPin,
+        validateCandidateCheckout,
+        gitTrackedStatus: () => "",
+        validateParallelsRegistryPackageArtifact: () => {
+          throw new Error("unexpected registry artifact");
+        },
+        buildReleaseCandidateState,
+        reconcileReleaseCandidateState,
+        existsSync: (path: string) => stateFiles.has(path),
+        readJson: (path: string) => stateFiles.get(path),
+        writeReleaseCandidateState: writeState,
+        join,
+      });
+      await expect(completion).rejects.toThrow("coordinator state checkpoint");
+      expect(writeState).toHaveBeenCalledOnce();
+      const [writtenPath, writtenState] = writeState.mock.calls[0]!;
+      return { statePath: writtenPath, state: writtenState as Record<string, unknown> };
+    }
+
+    const firstFresh = await reachStateCheckpoint({ targetSha: first });
+    const secondFresh = await reachStateCheckpoint({ targetSha: second });
+    expect(firstFresh.statePath).toBe(
+      join(".artifacts", "release-candidate", tag, first, "release-candidate-state.json"),
+    );
+    expect(secondFresh.statePath).toBe(
+      join(".artifacts", "release-candidate", tag, second, "release-candidate-state.json"),
+    );
+    expect(firstFresh.statePath).not.toBe(secondFresh.statePath);
+    expect(firstFresh.state).toMatchObject({ targetSha: first, fullReleaseRunId: "111" });
+    expect(secondFresh.state).toMatchObject({ targetSha: second, fullReleaseRunId: "111" });
+
+    const resumed = await reachStateCheckpoint({
+      targetSha: first,
+      retainedState: firstFresh.state,
+    });
+    expect(resumed).toEqual(firstFresh);
+
+    const legacyOutputDir = "/retained/release-request";
+    const legacy = await reachStateCheckpoint({
+      targetSha: second,
+      outputDir: legacyOutputDir,
+      retainedState: secondFresh.state,
+    });
+    expect(legacy.statePath).toBe(join(legacyOutputDir, "release-candidate-state.json"));
+    expect(legacy.state).toEqual(secondFresh.state);
   });
 
   it.each([
