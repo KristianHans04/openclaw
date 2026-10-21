@@ -1,6 +1,7 @@
 import type { Locator, Page } from "playwright";
 import { expect, it } from "vitest";
 import { selectChatLayoutAction } from "../test-helpers/chat-layout-menu.ts";
+import { evaluateControlUiContext } from "../test-helpers/control-ui-e2e-context.ts";
 import { waitForControlUiGatewayReady } from "../test-helpers/control-ui-e2e-readiness.ts";
 import {
   installMockGateway,
@@ -19,6 +20,18 @@ const suite = createControlUiE2eSuite({
 });
 const activePane = "openclaw-chat-pane.chat-pane-cache__pane--active";
 const composerSelector = ".agent-chat__composer-combobox textarea";
+
+async function reconnectGateway(page: Page, gateway: Gateway) {
+  await gateway.setOnline(true);
+  const remaining = await evaluateControlUiContext(page, (context) => {
+    const deadline = context.gateway.snapshot.reconnectAt;
+    return deadline === undefined ? 0 : Math.max(0, Math.ceil(deadline - Date.now()));
+  });
+  // Run the real retry timer in order with pending outbox/debounce work.
+  if (remaining > 0) {
+    await page.clock.runFor(remaining);
+  }
+}
 
 async function installQueueGateway(page: Page, names = ["original", "second"]) {
   await page.addInitScript({ content: createControlUiMockSameOriginGatewayScript() });
@@ -61,7 +74,7 @@ async function reviewStaleBuild(page: Page, gateway: Gateway, build: string) {
   await gateway.setOnline(false);
   await gateway.deferNext("connect");
   const previous = (await gateway.getRequests("connect")).length;
-  await gateway.setOnline(true);
+  await reconnectGateway(page, gateway);
   await gateway.waitForRequest("connect", { after: previous });
   await gateway.rejectDeferred("connect", {
     code: "UNAVAILABLE",
@@ -102,6 +115,7 @@ suite.define(() => {
     "protects an edit through update recovery until $resolution (split: $split, cached: $cachedSplit, narrow: $narrow, other page: $otherPage)",
     async ({ resolution, split, cachedSplit, narrow, otherPage }) => {
       const page = await newChatPage(suite);
+      await page.clock.install();
       const gateway = await installQueueGateway(page);
       await page.goto(
         `${suite.server.baseUrl}chat?session=${split ? "agent:main:original" : "main"}`,
@@ -115,7 +129,7 @@ suite.define(() => {
       page.on("domcontentloaded", () => {
         reloads += 1;
       });
-      await gateway.setOnline(true);
+      await reconnectGateway(page, gateway);
       await waitForControlUiGatewayReady(page);
       if (cachedSplit) {
         await selectChatLayoutAction(page, "Open split view");
@@ -148,7 +162,7 @@ suite.define(() => {
       }
       await gateway.setOnline(false);
       await gateway.setServerBuildId("e2e-next-queued-edit");
-      await gateway.setOnline(true);
+      await reconnectGateway(page, gateway);
       const refresh = page.getByRole("button", { name: /Server updated/u });
       await refresh.waitFor();
       await refresh.press("Enter");
@@ -210,6 +224,7 @@ suite.define(() => {
     "keeps a correction through retained-session eviction until $resolution (all pinned: $overflow)",
     async ({ resolution, overflow }) => {
       const page = await newChatPage(suite);
+      await page.clock.install();
       const gateway = await installQueueGateway(page, ["original", "second", "third"]);
       await page.goto(`${suite.server.baseUrl}chat?session=agent:main:original`);
       const { composer, edit, originalPathname } = await stageCorrection(
@@ -217,7 +232,7 @@ suite.define(() => {
         gateway,
         `${activePane} .chat-queue__edit-input`,
       );
-      await gateway.setOnline(true);
+      await reconnectGateway(page, gateway);
       for (const name of ["other", "second", "third"]) {
         await visitSession(page, name);
         await page
@@ -230,7 +245,7 @@ suite.define(() => {
           await composer.press("Enter");
           await page.locator(".chat-pane-cache__pane--active .chat-queue__item").dblclick();
           await edit.fill(`Corrected ${name}`);
-          await gateway.setOnline(true);
+          await reconnectGateway(page, gateway);
         }
       }
       const retainedPanes = page
@@ -265,6 +280,7 @@ suite.define(() => {
       viewport: { width: 2400, height: 1000 },
       permissions: ["clipboard-read", "clipboard-write"],
     });
+    await page.clock.install();
     const privateKey = "agent:main:dashboard:incognito-update-draft";
     const ordinaryKey = "agent:main:ordinary-sibling";
     const privateDraft = "QA832 private unsent draft — café 雪 🦞.";
@@ -348,6 +364,7 @@ suite.define(() => {
     "protects an unsent Incognito New Session draft during an update (in Settings: %s)",
     async (settings) => {
       const page = await newChatPage(suite);
+      await page.clock.install();
       await page.addInitScript({ content: createControlUiMockSameOriginGatewayScript() });
       const gateway = await installMockGateway(page);
       await page.goto(`${suite.server.baseUrl}new`);
