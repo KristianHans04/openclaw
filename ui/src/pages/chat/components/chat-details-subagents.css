@@ -186,7 +186,7 @@
 }
 
 .chat-details-subagents__collapsed {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   color: var(--muted);
 }
