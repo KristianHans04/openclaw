@@ -368,10 +368,11 @@ function createReadCache<Input, Output>(
             ? Promise.race([
                 poll.promise,
                 new Promise<Output>((resolve) => {
+                  // Let ordinary revision checks finish without another client retry interval.
                   timeout = setTimeout(() => {
                     timedOut = true;
                     resolve(computing());
-                  }, 200);
+                  }, 2_000);
                 }),
               ])
             : poll.promise,

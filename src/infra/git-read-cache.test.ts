@@ -373,7 +373,7 @@ describe("typed Git read ownership", () => {
       void request.then((result) => responses.push(result));
     }
     try {
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(2_000);
       expect(responses).toEqual(
         Array.from({ length: 3 }, () => ({ ...emptyDiff, computing: true })),
       );
@@ -407,9 +407,9 @@ describe("typed Git read ownership", () => {
         { poll: true },
       );
     const first = poll();
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(500);
     const second = poll();
-    await vi.advanceTimersByTimeAsync(50);
+    await vi.advanceTimersByTimeAsync(500);
     held.resolve({ ...emptyDiff, additions: 7 });
     await expect(Promise.all([first, second])).resolves.toEqual([
       { ...emptyDiff, additions: 7 },
@@ -436,7 +436,7 @@ describe("typed Git read ownership", () => {
       void request.then((result) => responses.push(result));
     }
     try {
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(2_000);
       expect(responses).toEqual(
         Array.from({ length: 33 }, () => ({ ...emptyDiff, computing: true })),
       );
@@ -451,7 +451,7 @@ describe("typed Git read ownership", () => {
       expect(gitRead).toHaveBeenCalledTimes(33);
       readRevision.mockReturnValueOnce(retiringRevision.promise);
       const retiringRead = poll(33);
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(2_000);
       await expect(retiringRead).resolves.toEqual({ ...emptyDiff, computing: true });
       const owner = vi.mocked(runGitWorkerOperation).mock.calls.at(-1)?.[1]?.signal;
       const retiring = drainGlobalSingletonLifecycleState("restart");

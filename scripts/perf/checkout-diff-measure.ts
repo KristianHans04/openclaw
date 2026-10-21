@@ -99,8 +99,11 @@ if (!values["state-dir"]) {
 if (values.boundary !== "worker" && values.boundary !== "read" && values.boundary !== "rpc") {
   throw new Error("--boundary must be worker, read, or rpc");
 }
+assert(
+  values.scope === "all" || values.scope === "uncommitted",
+  "--scope must be all or uncommitted",
+);
 const scope = values.scope;
-assert(scope === "all" || scope === "uncommitted", "--scope must be all or uncommitted");
 assert(
   !values.poll || (values.cold && values.boundary === "rpc"),
   "--poll requires --cold --boundary rpc",
