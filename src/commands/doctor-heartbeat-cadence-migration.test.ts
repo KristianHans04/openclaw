@@ -387,22 +387,31 @@ describe("heartbeat cadence Doctor cutover", () => {
   });
 
   it.each([
-    { every: "37m", perAgent: false, enabled: true },
-    { every: "37m", perAgent: true, enabled: true },
-    { every: "0m", perAgent: true, enabled: false },
+    { every: "37m", perAgent: false, generated: true, enrolled: true, enabled: true },
+    { every: "37m", perAgent: true, generated: true, enrolled: true, enabled: true },
+    { every: "0m", perAgent: true, generated: true, enrolled: true, enabled: false },
+    { every: "37m", perAgent: false, generated: false, enrolled: true, enabled: true },
+    { every: "0m", perAgent: false, generated: false, enrolled: true, enabled: false },
+    { every: "37m", perAgent: false, generated: false, enrolled: false, enabled: false },
   ])(
-    "transfers effective cadence $every before removing config (agent override: $perAgent)",
-    async ({ every, perAgent, enabled }) => {
+    "transfers effective cadence $every before removing config (agent override: $perAgent, generated: $generated, enrolled: $enrolled)",
+    async ({ every, perAgent, generated, enrolled, enabled }) => {
       const f = fixture({ every: perAgent ? "11m" : every });
+      if (!enrolled) {
+        f.cfg.agents!.defaults!.heartbeat!.agentId = "other";
+        f.cfg.agents!.list!.push({ id: "other" });
+      }
       if (perAgent) {
         f.cfg.agents!.entries = {
           main: { workspace: path.join(f.root, "workspace"), heartbeat: { every } },
         };
         delete f.cfg.agents!.list;
       }
-      const legacy = seedLegacyMonitor(f);
+      const legacy = seedLegacyMonitor(f, {
+        declarationKey: generated ? "heartbeat:main" : "custom-monitor",
+      });
       const next = await retireHeartbeatWithDoctor(f.cfg, f.env);
-      const job = readState(f)!.jobs[0]!;
+      const job = readState(f)!.jobs.find((row) => row.id === legacy.id)!;
       expect(next.agents?.defaults?.heartbeat).toBeUndefined();
       expect(next.agents?.entries?.main?.heartbeat).toBeUndefined();
       expect(job).toMatchObject({
@@ -412,8 +421,13 @@ describe("heartbeat cadence Doctor cutover", () => {
       });
       if (enabled) {
         expect(job.state.queuedAtMs).toBe(legacy.state.queuedAtMs);
-        expect(job.state.scheduleActivatedAtMs).toBe(NOW);
-        expect(job.schedule).toMatchObject({ kind: "every", everyMs: 2_220_000 });
+        if (generated) {
+          expect(job.state.scheduleActivatedAtMs).toBe(NOW);
+          expect(job.schedule).toMatchObject({ kind: "every", everyMs: 2_220_000 });
+        } else {
+          expect(job.schedule).toEqual(legacy.schedule);
+          expect(job.declarationKey).toBe("custom-monitor");
+        }
         expect(job.state.nextRunAtMs).toBeGreaterThan(NOW);
       } else {
         expect(job.schedule).toEqual(legacy.schedule);

@@ -65,10 +65,7 @@ export function planDoctorHeartbeatMonitors(
 ) {
   const configuredAgentIds = new Set(listAgentIds(cfg));
   const heartbeatAgents = resolveHeartbeatAgents(cfg);
-  const enrolledAgentIds = new Set([
-    ...heartbeatAgents.map((agent) => agent.agentId),
-    ...legacyFileAgentIds,
-  ]);
+  const enrolledAgentIds = new Set(heartbeatAgents.map((agent) => agent.agentId));
   // Implicit cadence controls existing work but alone must not provision a job.
   const agentIds = new Set([
     ...heartbeatAgents

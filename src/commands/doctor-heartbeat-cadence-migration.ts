@@ -123,6 +123,7 @@ function convertMonitor(
   nowMs: number,
   schedulerSeed: string,
   env: NodeJS.ProcessEnv,
+  enrolled: boolean,
 ): CronJob {
   const heartbeat = resolveHeartbeatConfig(cfg, agentId);
   const { model } = resolveHeartbeatAutomationModel(cfg, agentId);
@@ -183,7 +184,7 @@ function convertMonitor(
     delete job.declarationKey;
   }
   if (!previous) {
-    job.enabled = intervalMs !== null;
+    job.enabled = enrolled && intervalMs !== null;
     const everyMs = intervalMs ?? 30 * 60 * 1000;
     job.schedule = {
       kind: "every",
@@ -191,11 +192,12 @@ function convertMonitor(
       anchorMs: resolveHeartbeatPhaseMs({ schedulerSeed, agentId, intervalMs: everyMs }),
     };
     job.state.nextRunAtMs = computeJobNextRunAtMs(job, nowMs);
-  } else if (isGeneratedHeartbeatMonitor(previous)) {
+  } else {
     // Config was the generated monitor's desired state, not merely its create default.
     // Preserve independent disable state and unchanged anchors/slots at ownership transfer.
-    job.enabled = previous.enabled && intervalMs !== null;
+    job.enabled = previous.enabled && enrolled && intervalMs !== null;
     if (
+      isGeneratedHeartbeatMonitor(previous) &&
       intervalMs !== null &&
       (previous.schedule.kind !== "every" || previous.schedule.everyMs !== intervalMs)
     ) {
@@ -250,11 +252,8 @@ export async function ensureHeartbeatMonitorJobs(
       (job) => job.payload.kind === "heartbeat" && job.agentId === agentId,
     );
     const previousMonitor = selectDoctorHeartbeatMonitor(legacyJobs, agentId);
-    const job = convertMonitor(cfg, agentId, previousMonitor, nowMs, schedulerSeed, env);
-    if (!previousMonitor && !enrolledAgentIds.has(agentId)) {
-      job.enabled = false;
-      delete job.state.nextRunAtMs;
-    }
+    const enrolled = enrolledAgentIds.has(agentId);
+    const job = convertMonitor(cfg, agentId, previousMonitor, nowMs, schedulerSeed, env, enrolled);
     // Row-only jobs retain their own schedule and identity; only the generated
     // monitor receives the default receipt and imported agent scratch.
     const conversions = [{ agentId, previous: previousMonitor, job, defaultMonitor: true }];
@@ -263,7 +262,7 @@ export async function ensureHeartbeatMonitorJobs(
         conversions.push({
           agentId,
           previous,
-          job: convertMonitor(cfg, agentId, previous, nowMs, schedulerSeed, env),
+          job: convertMonitor(cfg, agentId, previous, nowMs, schedulerSeed, env, enrolled),
           defaultMonitor: false,
         });
       }
