@@ -5,6 +5,7 @@ import { afterEach, expect, it } from "vitest";
 import { PRESENTATION_CHANGED_EVENT, type PresentationBinding } from "../../lib/presentation.ts";
 import { cleanupSolid, mountSolid } from "../../test-helpers/mount-solid.ts";
 import { flush } from "../../test-helpers/solid-settle.ts";
+import type { ChatMobileHost } from "./chat-mobile-host.ts";
 import { sidebarPanelDefinitions } from "./chat-pane-embedded-panels.ts";
 import { usePanePresentation } from "./chat-pane-presentation.ts";
 import { SidebarRegionView } from "./chat-pane-sidebar-view.tsx";
@@ -12,6 +13,73 @@ import { fitSidebarLayout, openSlot, setSidebarOpen } from "./sidebar-layout.ts"
 
 // The lazy region separately owns the successful right outlet's contents.
 afterEach(cleanupSolid);
+
+it("releases each mobile details mount when its host is replaced or removed", () => {
+  const host = (): ChatMobileHost => ({
+    scopeKey: "synthetic-details",
+    open: true,
+    suspended: false,
+    mode: "dock",
+    height: undefined,
+    reservedHeight: 0,
+    destination: { area: "details" },
+    detailsMount: null,
+    setDetailsMount(element) {
+      this.detailsMount = element;
+    },
+    navigate() {},
+    reveal() {},
+    close() {},
+    back() {},
+    toggleExpanded() {},
+    resize() {},
+    keyboardVisible: false,
+    onComposerEditingChange() {},
+    onViewportChange() {},
+  });
+  const first = host();
+  const second = host();
+  // The production owner exposes bound callbacks, independent of their call site.
+  first.setDetailsMount = first.setDetailsMount.bind(first);
+  second.setDetailsMount = second.setDetailsMount.bind(second);
+  const [mobileHost, replaceHost] = createSignal<ChatMobileHost | undefined>(first);
+  const mounted = mountSolid(() => (
+    <SidebarRegionView
+      presentationId="details-mount-lifetime"
+      panelIdPrefix="chat-details-mount-lifetime"
+      availableWidth={400}
+      narrow
+      mobileHost={mobileHost()}
+      layout={{ columns: [] }}
+      panelDefinitions={sidebarPanelDefinitions()}
+      callbacks={{
+        activatePanel() {},
+        togglePanelExpanded() {},
+        setDock() {},
+        closeSlot() {},
+        openSlot() {},
+        reorderPanel() {},
+        resizePanel() {},
+        setOpen() {},
+      }}
+    />
+  ));
+  flush();
+  const details = mounted.container.querySelector(".chat-mobile-host__details");
+  expect(first.detailsMount).toBe(details);
+  replaceHost(second);
+  flush();
+  expect(first.detailsMount).toBeNull();
+  expect(second.detailsMount).toBe(details);
+  replaceHost(undefined);
+  flush();
+  expect(second.detailsMount).toBeNull();
+  replaceHost(first);
+  flush();
+  expect(first.detailsMount).toBe(details);
+  mounted.unmount();
+  expect(first.detailsMount).toBeNull();
+});
 
 it("retains loading panel contents when fitting a new layout snapshot", () => {
   const layout = openSlot({ columns: [] }, "workspace");
