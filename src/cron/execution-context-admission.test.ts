@@ -18,7 +18,11 @@ vi.mock("../config/sessions/session-delivery-generation.js", async (importOrigin
   prepareSessionGenerationFacts: (input: unknown) => prepareSessionGenerationFacts(input),
 }));
 
-const { mintCronPromptExecutionContext } = await import("./execution-context-admission.js");
+const {
+  buildScheduledParentPauseNotice,
+  mintCronPromptExecutionContext,
+  resolveScheduledParentPause,
+} = await import("./execution-context-admission.js");
 const { prepareCronRunAdmission } = await import("./run-admission.js");
 
 const PARENT_KEY = "agent:main:dashboard:parent";
@@ -135,5 +139,60 @@ describe("mintCronPromptExecutionContext", () => {
     );
     expect(minted.result).toEqual({ status: "fail", error: "worker unavailable" });
     expect(() => minted.release()).not.toThrow();
+  });
+});
+
+describe("resolveScheduledParentPause", () => {
+  const linked = job({
+    name: "Nightly ingest",
+    sourceConversation: {
+      sessionKey: PARENT_KEY,
+      sessionId: "parent-session",
+      lifecycleRevision: "rev-1",
+    },
+  });
+  const check = (stored: CronStoredJob) =>
+    resolveScheduledParentPause({
+      cfg: {},
+      job: stored,
+      agentId: "main",
+      storePath: "/tmp/store.json",
+    });
+
+  it("does not read anything for jobs without an exact parent link", async () => {
+    await expect(check(job())).resolves.toBeUndefined();
+    expect(readSessionEntryInWorker).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["removed", undefined],
+    ["archived", { sessionId: "parent-session", lifecycleRevision: "rev-1", archivedAt: 1 }],
+    ["reset", { sessionId: "parent-session", lifecycleRevision: "rev-2" }],
+  ] as const)("pauses when the parent is %s", async (reason, entry) => {
+    readSessionEntryInWorker.mockResolvedValue(entry);
+    await expect(check(linked)).resolves.toEqual({ reason, parentSessionKey: PARENT_KEY });
+  });
+
+  it("runs when the parent is current", async () => {
+    readSessionEntryInWorker.mockResolvedValue({
+      sessionId: "parent-session",
+      lifecycleRevision: "rev-1",
+    });
+    await expect(check(linked)).resolves.toBeUndefined();
+  });
+
+  it("never pauses on a failed read", async () => {
+    readSessionEntryInWorker.mockRejectedValue(new Error("worker unavailable"));
+    await expect(check(linked)).resolves.toBeUndefined();
+  });
+
+  it("names the parent and the repair in the notice", () => {
+    const text = buildScheduledParentPauseNotice({
+      job: { id: "job-1", name: "Nightly ingest" },
+      pause: { reason: "archived", parentSessionKey: PARENT_KEY },
+    });
+    expect(text).toContain(`\`${PARENT_KEY}\``);
+    expect(text).toContain("it was archived");
+    expect(text).toContain("openclaw automations enable job-1");
   });
 });

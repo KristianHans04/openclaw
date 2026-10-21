@@ -22,6 +22,10 @@ import { withSessionTurn } from "../../sessions/session-controller.admission.js"
 import { resolveCronSkillsSnapshot } from "../../skills/runtime/cron-snapshot.js";
 import { waitForAgentDatabaseWriteAdmission } from "../../state/agent-database-preparation-context.js";
 import { resolveCronJobEffectiveAgentId } from "../agent-id.js";
+import {
+  buildScheduledParentPauseNotice,
+  resolveScheduledParentPause,
+} from "../execution-context-admission.js";
 import { CronSessionLifecycleClaimError } from "../run-authority.js";
 import { createCronRunDiagnosticsFromError } from "../run-diagnostics.js";
 import { buildCronCommandBody } from "../run-prompt.js";
@@ -173,6 +177,23 @@ async function resolveCronRunPreparation(params: CronRunPreparationParams) {
       : {}),
   });
   const { agentId, agentDir } = modelOwner;
+  const parentPause = await resolveScheduledParentPause({
+    cfg: modelOwner.config,
+    job: input.job,
+    agentId,
+    storePath: resolveSessionStorePathCore(modelOwner.config.session?.store, { agentId }),
+  });
+  if (parentPause) {
+    // No session is created and nothing runs; the cron service pauses the job.
+    return {
+      ok: false as const,
+      result: {
+        status: "skipped" as const,
+        error: buildScheduledParentPauseNotice({ job: input.job, pause: parentPause }),
+        parentUnavailable: parentPause,
+      },
+    };
+  }
   const agentConfigOverride = requiredAgentId
     ? resolveAgentConfig(modelOwner.config, agentId)
     : undefined;

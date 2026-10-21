@@ -24,7 +24,7 @@ import {
   type ScheduledExecutionFacts,
 } from "./execution-context.js";
 import { resolveCronScheduledToolPolicy } from "./scheduled-tool-policy.js";
-import type { CronStoredJob } from "./types.js";
+import type { CronParentUnavailable, CronStoredJob } from "./types.js";
 
 type ScheduledExecutionContext = ScheduledExecutionFacts &
   Readonly<{
@@ -270,4 +270,65 @@ export function mintCronPromptExecutionContext(
     toolsAllow: params.agentPayload?.toolsAllow,
     operatorAuthorityRestored: params.operatorAuthority !== undefined,
   });
+}
+
+/**
+ * Pre-session parent check for jobs linked to an exact parent conversation.
+ * Returns the pause reason when the parent is removed, archived or reset, or its
+ * bound worktree is gone. Read failures never pause a job.
+ */
+export async function resolveScheduledParentPause(params: {
+  cfg: OpenClawConfig;
+  job: CronStoredJob;
+  agentId: string;
+  storePath: string;
+}): Promise<CronParentUnavailable | undefined> {
+  if (!params.job.sourceConversation && !params.job.operatorSource) {
+    return undefined;
+  }
+  const base = {
+    cfg: params.cfg,
+    job: params.job,
+    trigger: "cron" as const,
+    runId: "parent-check",
+    agentId: params.agentId,
+    runSessionKey: `agent:${params.agentId}:cron:${params.job.id}`,
+    storePath: params.storePath,
+    operatorAuthorityRestored: false,
+  };
+  let parentRow: ScheduledAdmissionFacts["parentRow"];
+  try {
+    parentRow = await readParentRow(base);
+  } catch {
+    return undefined;
+  }
+  const result = buildScheduledExecutionContext(
+    params.job,
+    assembleScheduledAdmissionFacts(base, parentRow, false),
+  );
+  return result.status === "pause"
+    ? {
+        reason: result.reason,
+        parentSessionKey: result.parentSessionKey,
+        ...(result.worktreePath ? { worktreePath: result.worktreePath } : {}),
+      }
+    : undefined;
+}
+
+/** The single notice a paused job sends; names the parent and the repair. */
+export function buildScheduledParentPauseNotice(params: {
+  job: { id: string; name?: string };
+  pause: CronParentUnavailable;
+}): string {
+  const name = (params.job.name || params.job.id).replace(/\s+/g, " ").trim().slice(0, 120);
+  const { pause } = params;
+  const cause =
+    pause.reason === "worktree-missing"
+      ? `its worktree \`${pause.worktreePath ?? "unknown"}\` no longer exists`
+      : `it was ${pause.reason}`;
+  return [
+    `⚠️ Automation "${name}" is paused because the conversation that created it, \`${pause.parentSessionKey}\`, is unavailable: ${cause}.`,
+    "Its runs used that conversation's access, and no other access is used in its place.",
+    `Restore the conversation and run \`openclaw automations enable ${params.job.id}\`, or recreate the automation from another conversation.`,
+  ].join("\n");
 }

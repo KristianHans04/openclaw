@@ -185,6 +185,15 @@ export type CronRunOutcome = {
   sessionId?: string;
   sessionKey?: string;
   diagnostics?: CronRunDiagnostics;
+  /** Transient: the run was skipped because its parent conversation is gone; pause the job. */
+  parentUnavailable?: CronParentUnavailable;
+};
+
+/** Why a parent-linked job pauses before any session is created. */
+export type CronParentUnavailable = {
+  reason: "removed" | "archived" | "reset" | "worktree-missing";
+  parentSessionKey: string;
+  worktreePath?: string;
 };
 
 export type CronRunDeliveryResult = {
