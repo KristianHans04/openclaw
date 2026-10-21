@@ -1,4 +1,3 @@
-/** Tests Telegram token inheritance in secrets runtime collection. */
 import { describe, expect, it } from "vitest";
 import "./runtime-telegram.test-support.ts";
 import {
@@ -43,14 +42,12 @@ describe("secrets runtime snapshot telegram token inheritance", () => {
           disabled: { enabled: false },
         },
       },
-      {
-        TELEGRAM_WORK_TOKEN: "telegram-work-token",
-      },
+      { TELEGRAM_WORK_TOKEN: "telegram-work-token" },
     );
 
-    expect(snapshot.config.channels?.telegram?.accounts?.work?.botToken).toBe(
-      "telegram-work-token",
-    );
+    expect(snapshot.config.channels?.telegram).toMatchObject({
+      accounts: { work: { botToken: "telegram-work-token" } },
+    });
     expect(snapshot.config.channels?.telegram?.botToken).toEqual(
       envRef("UNUSED_TELEGRAM_BASE_TOKEN"),
     );
@@ -65,48 +62,31 @@ describe("secrets runtime snapshot telegram token inheritance", () => {
         botToken: envRef("TELEGRAM_BASE_TOKEN"),
         accounts: { work: { enabled: true, botToken: "" } },
       },
-      {
-        TELEGRAM_BASE_TOKEN: "telegram-base-token",
-      },
+      { TELEGRAM_BASE_TOKEN: "telegram-base-token" },
     );
 
-    expect(snapshot.config.channels?.telegram?.botToken).toBe("telegram-base-token");
-    expect(snapshot.config.channels?.telegram?.accounts?.work?.botToken).toBe("");
+    expect(snapshot.config.channels?.telegram).toMatchObject({
+      botToken: "telegram-base-token",
+      accounts: { work: { botToken: "" } },
+    });
     expect(snapshot.warnings.map((warning) => warning.path)).not.toContain(
       "channels.telegram.botToken",
     );
   });
 
-  it("treats Telegram top-level botToken refs as inactive when tokenFile is configured", async () => {
-    const snapshot = await prepare({
-      tokenFile: "/tmp/telegram-bot-token",
-      botToken: envRef("MISSING_TELEGRAM_BOT_TOKEN"),
-    });
-
-    expect(snapshot.config.channels?.telegram?.botToken).toEqual(
-      envRef("MISSING_TELEGRAM_BOT_TOKEN"),
-    );
-    expect(snapshot.warnings.map((warning) => warning.path)).toContain(
-      "channels.telegram.botToken",
-    );
-  });
-
-  it("treats Telegram account botToken refs as inactive when account tokenFile is configured", async () => {
-    const snapshot = await prepare({
-      accounts: {
-        work: {
-          enabled: true,
-          tokenFile: "/tmp/telegram-work-bot-token",
-          botToken: envRef("MISSING_TELEGRAM_WORK_BOT_TOKEN"),
-        },
-      },
-    });
-
-    expect(snapshot.config.channels?.telegram?.accounts?.work?.botToken).toEqual(
-      envRef("MISSING_TELEGRAM_WORK_BOT_TOKEN"),
-    );
-    expect(snapshot.warnings.map((warning) => warning.path)).toContain(
-      "channels.telegram.accounts.work.botToken",
-    );
-  });
+  it.each(["channel", "account"])(
+    "ignores %s botToken refs when tokenFile is configured",
+    async (scope) => {
+      const token = { tokenFile: "/tmp/telegram-bot-token", botToken: envRef("MISSING_TOKEN") };
+      const snapshot = await prepare(
+        scope === "channel" ? token : { accounts: { work: { enabled: true, ...token } } },
+      );
+      const telegram = snapshot.config.channels?.telegram;
+      const configured = scope === "channel" ? telegram : telegram?.accounts?.work;
+      expect(configured?.botToken).toEqual(token.botToken);
+      expect(snapshot.warnings.map(({ path }) => path)).toContain(
+        `channels.telegram.${scope === "account" ? "accounts.work." : ""}botToken`,
+      );
+    },
+  );
 });

@@ -1,4 +1,3 @@
-/** Tests core secret target registry queries without plugin discovery. */
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import {
@@ -38,14 +37,8 @@ describe("secret target registry", () => {
       models: {
         providers: {
           openai: {
-            headers: {
-              "X.Trace": envRef("TRACE_HEADER"),
-            },
-            request: {
-              headers: {
-                "X.Request.Trace": envRef("REQUEST_TRACE_HEADER"),
-              },
-            },
+            headers: { "X.Trace": envRef("TRACE_HEADER") },
+            request: { headers: { "X.Request.Trace": envRef("REQUEST_TRACE_HEADER") } },
           },
         },
       },
@@ -62,25 +55,13 @@ describe("secret target registry", () => {
     ]);
   });
 
-  it("returns null when no config target path matches", () => {
-    expect(resolveConfigSecretTargetByPath(["gateway", "auth", "mode"])).toBeNull();
+  it.each([
+    ["gateway", "auth", "mode"],
+    ["memory", "search", "remote", "headers", "Authorization"],
+    ["agents", "entries", "main", "memory", "search", "remote", "headers", "Authorization"],
+  ])("rejects non-target or string-only header path %j", (...segments) => {
+    expect(resolveConfigSecretTargetByPath(segments)).toBeNull();
   });
-
-  it.each([{ prefix: [] }, { prefix: ["agents", "entries", "main"] }])(
-    "does not offer string-only memory headers as structured SecretRef apply targets ($prefix)",
-    ({ prefix }) => {
-      expect(
-        resolveConfigSecretTargetByPath([
-          ...prefix,
-          "memory",
-          "search",
-          "remote",
-          "headers",
-          "Authorization",
-        ]),
-      ).toBeNull();
-    },
-  );
 
   it("resolves plan targets by owning config document", () => {
     expect(resolvePlan("openclaw.json", ["models", "providers", "openai", "apiKey"])).toMatchObject(
