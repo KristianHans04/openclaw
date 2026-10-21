@@ -158,7 +158,7 @@ describe.skipIf(!browserAvailable)("Claws discovery and Add", () => {
     });
   }
 
-  it("shows curated Featured first and requests category results without an Official filter", async () => {
+  it("uses Plugins discovery controls and category shelves instead of Browse all", async () => {
     const context = await browser.newContext({
       locale: "en-US",
       serviceWorkers: "block",
@@ -170,9 +170,37 @@ describe.skipIf(!browserAvailable)("Claws discovery and Add", () => {
     try {
       await page.goto(`${server.baseUrl}claws`);
       await page.locator("[data-claws-featured] [data-claws-entry]").first().waitFor();
+      await page.locator('[data-claws-category="research"] [data-claws-entry]').first().waitFor();
       expect(await page.getByRole("heading", { name: "Featured" }).count()).toBe(1);
+      expect(await page.getByRole("heading", { name: "Browse all" }).count()).toBe(0);
+      expect(
+        await page.locator('.plugin-catalog-section[data-catalog-section="research"]').count(),
+      ).toBe(1);
+      expect(
+        await page.locator('.plugin-catalog-section[data-catalog-section="personal"]').count(),
+      ).toBe(1);
+      expect(await page.locator(".plugin-catalog-chips .plugin-catalog-chip").count()).toBe(14);
+      expect(
+        await page
+          .locator(".plugin-catalog-chips")
+          .evaluate((element) => getComputedStyle(element).flexWrap),
+      ).toBe("wrap");
+      const searchWidth = await page
+        .locator(".plugin-catalog-search")
+        .evaluate((element) => element.getBoundingClientRect().width);
+      const bodyWidth = await page
+        .locator(".plugin-catalog-results__body")
+        .evaluate((element) => element.getBoundingClientRect().width);
+      expect(Math.abs(searchWidth - bodyWidth)).toBeLessThan(2);
       expect(await gateway.getRequests("claws.catalog.search")).toEqual(
-        expect.arrayContaining([expect.objectContaining({ params: { featured: true } })]),
+        expect.arrayContaining([
+          expect.objectContaining({
+            params: expect.objectContaining({ featured: true, limit: 8 }),
+          }),
+          expect.objectContaining({
+            params: expect.objectContaining({ category: "research", limit: 8 }),
+          }),
+        ]),
       );
       if (proofDir) {
         await page.screenshot({ path: `${proofDir}/featured.png`, animations: "disabled" });
