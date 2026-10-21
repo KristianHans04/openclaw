@@ -377,7 +377,8 @@ function findLatestResetMessageWindow(
             // Compaction keeps the entire tail and needs no tool-pairing metadata.
             (includesBoundary
               ? transcriptEventResetNavigationSql(projection.database.db, "event")
-              : /* kysely-allow-raw: preserve JS-readable overdepth rows for existing tool-pairing validation. */
+              : // Preserve JS-readable overdepth rows for reset tool-pairing validation.
+                /* kysely-allow-raw: guarded model-navigation projection. */
                 sql<string>`CASE WHEN ${jsonValid(projection.database.db, transcriptEventNavigationSql(projection.database.db, "event"))}
                   THEN ${transcriptEventModelNavigationSql(projection.database.db, "event")}
                   ELSE ${transcriptEventNavigationSql(projection.database.db, "event")} END`
