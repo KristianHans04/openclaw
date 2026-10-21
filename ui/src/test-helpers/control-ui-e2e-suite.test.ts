@@ -588,9 +588,7 @@ beforeAll(async () => {
     `
 import { defineConfig } from "vitest/config";
 import { createVitestResolveConfig } from ${JSON.stringify(path.join(repoRoot, "test/vitest/vitest.resolve.ts"))};
-if (process.versions.bun) {
-  await import(${JSON.stringify(path.join(repoRoot, "test/vitest/vitest.sqlite-preload.mts"))});
-}
+// Synthetic lifecycle fixtures do not open SQLite databases.
 const hookTimeout = Number(process.env.UI_LIFETIME_HOOK_TIMEOUT_MS);
 export default defineConfig({
   cacheDir: ${JSON.stringify(path.join(fixtureRoot, ".vite"))},
