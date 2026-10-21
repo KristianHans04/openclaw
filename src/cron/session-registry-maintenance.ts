@@ -183,27 +183,15 @@ export async function runSessionRegistryMaintenance(params: {
         }
         eligibleTargets.push(target);
       }
-      if (
-        stores.some(
-          (store) =>
-            "skippedReason" in store &&
-            store.skippedReason !== "agent-deletion-pending" &&
-            store.skippedReason !== "agent-deletion-complete" &&
-            !deletedAgents.has(store.agentId),
-        )
-      ) {
-        // Unavailable stores can still own live children of otherwise eligible parents.
-        return {
-          retentionMs: SESSION_REGISTRY_RETENTION_MS,
-          runningCronJobs: runningCronJobs.count,
-          pruned: 0,
-          skippedStores: stores.length,
-          stores,
-          nextSweepAtMs: Date.now() + 60_000,
-          skippedReason: "session child inventory incomplete",
-        };
-      }
-      for (const target of eligibleTargets) {
+      // Unavailable stores can still own live children of otherwise eligible parents.
+      const incompleteInventory = stores.some(
+        (store) =>
+          "skippedReason" in store &&
+          store.skippedReason !== "agent-deletion-pending" &&
+          store.skippedReason !== "agent-deletion-complete" &&
+          !deletedAgents.has(store.agentId),
+      );
+      for (const target of incompleteInventory ? [] : eligibleTargets) {
         assertCurrent();
         const result = await runSessionRegistryMaintenanceForStore({
           ...target,
@@ -227,13 +215,16 @@ export async function runSessionRegistryMaintenance(params: {
           ? store.nextSweepAtMs === null
             ? []
             : [store.nextSweepAtMs]
-          : store.skippedReason === "agent-deletion-pending" ||
-              store.skippedReason === "agent-store-held"
+          : store.skippedReason === "agent-deletion-pending"
             ? [Date.now() + 60_000]
             : [],
       );
+      if (incompleteInventory) {
+        deadlines.push(Date.now() + 60_000);
+      }
       return {
         nextSweepAtMs: deadlines.length > 0 ? Math.min(...deadlines) : null,
+        ...(incompleteInventory ? { skippedReason: "session child inventory incomplete" } : {}),
         retentionMs: SESSION_REGISTRY_RETENTION_MS,
         runningCronJobs: runningCronJobs.count,
         pruned: stores.reduce((total, store) => total + ("pruned" in store ? store.pruned : 0), 0),
