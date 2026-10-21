@@ -7,9 +7,10 @@ import { SessionBackgroundLayoutScope } from "../../components/session-backgroun
 import { SessionBackgroundView } from "../../components/session-background-view.tsx";
 import { LazyViewError } from "../../components/solid/lazy-view-error.tsx";
 import { LoadingState } from "../../components/solid/loading-state.tsx";
+import { registerChatComposerEnglish } from "../../i18n/locales/en-chat-composer.ts";
 import { registerNewSessionSetupEnglish } from "../../i18n/locales/en-new-session-setup.ts";
 import { useOptionalApplication } from "../../lib/reactive/context.ts";
-import { t } from "../../lib/reactive/i18n.ts";
+import { registerEnglishCatalog, t } from "../../lib/reactive/i18n.ts";
 import { listen } from "../../lib/reactive/listener.ts";
 import { projectOwner } from "../../lib/reactive/projection.ts";
 import "../../styles/chat/composer.css";
@@ -42,6 +43,8 @@ import type { NewSessionRouteData } from "./location.ts";
 import { NewSessionPageOwner, type PageHost } from "./new-session-page-owner.ts";
 import { AgentSelect, NewSessionPlaceControls } from "./target-controls-view.tsx";
 import type { NewSessionPlaceControlsOptions } from "./target-controls.ts";
+
+registerEnglishCatalog(registerChatComposerEnglish);
 
 registerNewSessionSetupEnglish();
 

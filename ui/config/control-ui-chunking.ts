@@ -75,6 +75,9 @@ export function controlUiStableChunkName(id: string): string | undefined {
     case "ui/src/pages/chat/route-entry.ts":
       // Pending New Session previews must render while the Chat route entry waits.
       return "chat-route-entry";
+    case "ui/src/i18n/locales/en-chat-composer.ts":
+      // Shared copy must not pull either lazy rendering route into the other.
+      return "chat-composer-english";
     case "ui/src/pages/devices/devices-page.tsx":
       return "devices-page";
     case "ui/src/pages/plugins/plugins-page.tsx":
