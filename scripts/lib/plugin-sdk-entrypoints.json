@@ -348,6 +348,7 @@
   "provider-web-search-config-contract",
   "provider-web-search-contract",
   "provider-web-search",
+  "provider-web-search-tavily",
   "retry-runtime",
   "run-command",
   "param-readers",

@@ -1608,6 +1608,10 @@
     "./plugin-sdk/provider-web-search": {
       "default": "./dist/plugin-sdk/provider-web-search.js"
     },
+    "./plugin-sdk/provider-web-search-tavily": {
+      "types": "./dist/plugin-sdk/provider-web-search-tavily.d.ts",
+      "default": "./dist/plugin-sdk/provider-web-search-tavily.js"
+    },
     "./plugin-sdk/retry-runtime": {
       "default": "./dist/plugin-sdk/retry-runtime.js"
     },

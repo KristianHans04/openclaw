@@ -380,3 +380,16 @@ prevent model calls or the existing `/v1/usage` snapshot.
     OpenClaw usage and status surfaces.
   </Card>
 </CardGroup>
+
+## Tavily web search
+
+Select `clawrouter-tavily` as `tools.web.search.provider` to use the service's
+native Tavily search route. This is distinct from OpenAI hosted web search.
+It uses the existing ClawRouter model-provider credential/auth profile and
+endpoint, never `TAVILY_API_KEY`. The credential must expose an executable
+`tavily/search` model and native `tavily.search` route in its scoped catalog.
+
+Selection is explicit: this adapter is not an automatic fallback or an
+auto-detection candidate. Grant, authentication, quota, and budget failures are
+reported without trying another vendor, account, or route. Redirects are rejected.
+Private-network endpoints require the existing model-provider request opt-in.

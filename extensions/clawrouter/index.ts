@@ -50,6 +50,7 @@ import {
   resolveServiceTiers,
 } from "./provider-policy-api.js";
 import { fetchClawRouterUsage } from "./usage.js";
+import { createClawRouterTavilyWebSearchProvider } from "./web-search-provider.js";
 
 const PERPLEXITY_UNSUPPORTED_SCHEMA_KEYWORDS = new Set([
   "patternProperties",
@@ -406,6 +407,7 @@ export default defineSingleProviderPluginEntry({
   description: "Managed multi-provider model routing and quotas",
   manifest,
   register(api) {
+    api.registerWebSearchProvider(createClawRouterTavilyWebSearchProvider());
     api.registerDecisionProvider(buildClawRouterDecisionProvider());
     api.registerGatewayMethod(
       "clawrouter.pool.get",
