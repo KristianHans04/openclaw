@@ -1804,3 +1804,25 @@ starts real agent turns, and waits for success. The report must observe each
 turn's start and settlement events and each loopback inference request. Model
 and catalog traffic is reported separately and is excluded from the healthy-row
 rate comparison. The default run starts no model provider.
+
+## WebSocket event diagnostic accounting
+
+`ws-event-diagnostics-measure.ts` exercises the real recording and diagnostic
+dispatch owners with 250 batches of 1,000 synthetic accepted frames, plus wire-byte
+observations. It includes plain, presence, subscribed/roster session, and unknown
+event labels. Run on the approved benchmark host:
+
+```sh
+node --expose-gc --import ./scripts/tsx.mjs scripts/perf/ws-event-diagnostics-measure.ts
+```
+
+The JSON result separates cold and warmed sampled allocation bytes per frame,
+including collected objects, for the entire process and the recording/flush owner.
+CPU is measured in a separate unprofiled pass; the inactive-interest pass verifies
+recording is skipped. Delivered frame and histogram counts are checked. Compare
+at least five interleaved baseline/candidate samples, then confirm real transport
+behavior with `transcript-broadcast-measure.ts --scenario transcript-broadcast
+--clients 30 --allocations --diagnostics --active-work-diagnostics --trace-gc`
+and the memory-soak scenario. Compare promotion per turn, minor and major GC
+time, and event-loop and turn latency tails as well as sampled allocation;
+allocation reduction alone is insufficient.
