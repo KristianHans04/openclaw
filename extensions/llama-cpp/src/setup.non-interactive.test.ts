@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { Command } from "commander";
 import type {
-  ProviderAuthMethodNonInteractiveContext,
+  ProviderAuthMethodNonInteractiveContext as SetupContext,
   ProviderPlugin,
 } from "openclaw/plugin-sdk/plugin-entry";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
@@ -22,7 +22,7 @@ function agentMemory(modelPath: string, provider?: "local") {
   return { memory: { search: { provider, local: { modelPath } } } };
 }
 
-function serverConfig(managed: boolean): ProviderAuthMethodNonInteractiveContext["config"] {
+function serverConfig(managed: boolean): SetupContext["config"] {
   const models = managed
     ? [buildLlamaCppModel({ id: "chat", name: "Chat", source: "/models/chat.gguf" })]
     : [];
@@ -44,10 +44,10 @@ function expectEmbeddingDownload(source: string) {
   );
 }
 
-function setupContext(): ProviderAuthMethodNonInteractiveContext {
+function setupContext(config?: SetupContext["config"]): SetupContext {
   return {
     authChoice: "llama-cpp",
-    config: { memory: structuredClone(memory) },
+    config: config ?? { memory: structuredClone(memory) },
     baseConfig: {},
     opts: new Command()
       .exitOverride()
@@ -60,7 +60,7 @@ function setupContext(): ProviderAuthMethodNonInteractiveContext {
   };
 }
 
-async function setup(ctx: ProviderAuthMethodNonInteractiveContext) {
+async function setup(ctx: SetupContext) {
   const providers: ProviderPlugin[] = [];
   plugin.register(
     createTestPluginApi({ registerProvider: (provider) => providers.push(provider) }),
@@ -112,12 +112,11 @@ describe("managed llama.cpp non-interactive onboarding", () => {
   });
 
   it("uses the enabled agent's configured embedding model", async () => {
-    const ctx = setupContext();
-    ctx.config = {
+    const ctx = setupContext({
       agents: {
         entries: { research: agentMemory("/models/custom-embedding.gguf", "local") },
       },
-    };
+    });
     await setup(ctx);
     expectEmbeddingDownload("/models/custom-embedding.gguf");
   });
@@ -144,12 +143,10 @@ describe("managed llama.cpp non-interactive onboarding", () => {
       },
       "Configured agents resolve to different",
     ],
-  ] satisfies [string, ProviderAuthMethodNonInteractiveContext["config"], string][])(
+  ] satisfies [string, SetupContext["config"], string][])(
     "rejects %s before downloads",
     async (_name, config, error) => {
-      const ctx = setupContext();
-      ctx.config = config;
-      await expect(setup(ctx)).rejects.toThrow(error);
+      await expect(setup(setupContext(config))).rejects.toThrow(error);
       expectNoDownloads();
     },
   );

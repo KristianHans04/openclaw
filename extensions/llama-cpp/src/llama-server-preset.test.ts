@@ -7,7 +7,6 @@ import { buildLlamaServerPreset, type LlamaServerPresetOptions } from "./llama-s
 import { prepareManagedLlamaServer } from "./managed-server.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-afterEach(() => vi.unstubAllEnvs());
 const EMBEDDING = "[embeddinggemma-300m-qat-q8_0]";
 const CAPACITY = "parallel = 1\nctx-size = 2048\nubatch-size = 2048\n";
 const SLOT_ENV = { LLAMA_ARG_N_PARALLEL: "4" };
@@ -23,7 +22,7 @@ function refreshEmbedding(
   return buildLlamaServerPreset(existing, { ...embeddingOptions, ...options });
 }
 
-describe("managed embedding capacity defaults", () => {
+describe("managed embedding capacity", () => {
   it("keeps a preset np alias slot count without shrinking its context", () => {
     const preset = refreshEmbedding(
       `version = 1\n\n${EMBEDDING}\nmodel = /models/old.gguf\nnp = 2\nembedding = true\n`,
@@ -58,9 +57,6 @@ describe("managed embedding capacity defaults", () => {
       }
     });
   });
-});
-
-describe("managed embedding capacity through server preparation", () => {
   async function preparePreset(file: string, isolated = false, env?: Record<string, string>) {
     const runtime = await prepareManagedLlamaServer({
       ...embeddingOptions,

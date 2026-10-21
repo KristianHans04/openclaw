@@ -17,31 +17,30 @@ const mocks = vi.hoisted(() => ({
 }));
 export { mocks };
 
-vi.mock("openclaw/plugin-sdk/provider-auth-runtime", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("openclaw/plugin-sdk/provider-auth-runtime")>()),
-  removeProviderAuthProfilesWithLock: mocks.removeProfiles,
-}));
+function mockWith<T extends object>(overrides: T) {
+  return async <M>(load: () => Promise<M>) => ({ ...(await load()), ...overrides });
+}
 
-vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("openclaw/plugin-sdk/ssrf-runtime")>()),
-  fetchWithSsrFGuard: mocks.downloadFetch,
-}));
-
-vi.mock("./managed-server.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./managed-server.js")>()),
-  ensureLlamaCppModel: mocks.ensureModel,
-  prepareManagedLlamaServer: mocks.prepareServer,
-}));
-
-vi.mock("./llama-server-install.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./llama-server-install.js")>()),
-  ensureLlamaServerInstalled: mocks.ensureServerInstalled,
-}));
-
-vi.mock("./hardware.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./hardware.js")>()),
-  detectLlamaCppHardware: mocks.hardware,
-}));
+vi.mock(
+  import("openclaw/plugin-sdk/provider-auth-runtime"),
+  mockWith({ removeProviderAuthProfilesWithLock: mocks.removeProfiles }),
+);
+vi.mock(
+  import("openclaw/plugin-sdk/ssrf-runtime"),
+  mockWith({ fetchWithSsrFGuard: mocks.downloadFetch }),
+);
+vi.mock(
+  import("./managed-server.js"),
+  mockWith({
+    ensureLlamaCppModel: mocks.ensureModel,
+    prepareManagedLlamaServer: mocks.prepareServer,
+  }),
+);
+vi.mock(
+  import("./llama-server-install.js"),
+  mockWith({ ensureLlamaServerInstalled: mocks.ensureServerInstalled }),
+);
+vi.mock(import("./hardware.js"), mockWith({ detectLlamaCppHardware: mocks.hardware }));
 
 import { GIB, hardware } from "./catalog.test-support.js";
 import { LLAMA_CPP_PROVIDER_ID } from "./defaults.js";
@@ -61,6 +60,7 @@ beforeEach(async () => {
   mocks.hardware.mockImplementation(async () => hardware(os.totalmem() / GIB));
   tempRoot = await fs.realpath(tempDirs.make("llama-server-setup-"));
   modelPath = path.join(tempRoot, "model.gguf");
+  const command = path.join(tempRoot, "llama-server");
   mocks.ensureModel.mockImplementation(async ({ source, download }) => {
     if (!download) {
       throw new Error("not cached");
@@ -70,16 +70,13 @@ beforeEach(async () => {
       : path.join(tempRoot, "embedding.gguf");
   });
   mocks.prepareServer.mockResolvedValue({
-    command: path.join(tempRoot, "llama-server"),
+    command,
     baseUrl: "http://127.0.0.1:19432/v1",
     healthUrl: "http://127.0.0.1:19432/health",
     args: ["--host", "127.0.0.1", "--port", "19432"],
   });
   mocks.removeProfiles.mockResolvedValue({ version: 1, profiles: {} });
-  mocks.ensureServerInstalled.mockImplementation(async ({ asset }) => ({
-    command: path.join(tempRoot, "llama-server"),
-    asset,
-  }));
+  mocks.ensureServerInstalled.mockImplementation(async ({ asset }) => ({ command, asset }));
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -99,13 +96,10 @@ export function config(): ProviderAuthContext["config"] {
 }
 
 export function authContext(confirm: boolean): ProviderAuthContext {
-  return {
-    config: config(),
-    prompter: {
-      confirm: vi.fn(async () => confirm),
-      note: vi.fn(async () => {}),
-      progress: vi.fn(() => ({ update: mocks.progressUpdate, stop: vi.fn() })),
-    },
-    runtime: {},
-  } as unknown as ProviderAuthContext;
+  const prompter = {
+    confirm: vi.fn(async () => confirm),
+    note: vi.fn(async () => {}),
+    progress: vi.fn(() => ({ update: mocks.progressUpdate, stop: vi.fn() })),
+  };
+  return { config: config(), prompter, runtime: {} } as unknown as ProviderAuthContext;
 }

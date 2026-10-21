@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildLlamaCppModel,
   DEFAULT_LLAMA_CPP_MODEL_URI,
-  LLAMA_CPP_PROVIDER_ID,
+  LLAMA_CPP_PROVIDER_ID as PROVIDER,
 } from "./defaults.js";
 import { authContext, GIB, mocks, modelPath, provider, tempRoot } from "./setup.test-support.js";
 
@@ -21,7 +21,7 @@ function authoredChatContext(source: string, confirm = true): ProviderAuthContex
       buildLlamaCppModel({ id: "selected", name: "Selected GGUF", source }),
     ],
   });
-  ctx.config.models = { providers: { [LLAMA_CPP_PROVIDER_ID]: selectedProvider } };
+  ctx.config.models = { providers: { [PROVIDER]: selectedProvider } };
   ctx.config.agents = { defaults: { model: { primary: "llama-cpp/selected" } } };
   return ctx;
 }
@@ -44,9 +44,7 @@ describe("llama.cpp authored model setup", () => {
 
     const result = await runLlamaCppSetup(ctx);
     expect(result.defaultModel).toBe("llama-cpp/selected");
-    expect(result.configPatch?.models?.providers?.[LLAMA_CPP_PROVIDER_ID]?.models[0]?.id).toBe(
-      "selected",
-    );
+    expect(result.configPatch?.models?.providers?.[PROVIDER]?.models[0]?.id).toBe("selected");
   });
 
   it.each([
@@ -78,7 +76,7 @@ describe("llama.cpp authored model setup", () => {
         release: vi.fn(),
       };
     });
-    const selected = ctx.config.models?.providers?.[LLAMA_CPP_PROVIDER_ID]?.models[1];
+    const selected = ctx.config.models?.providers?.[PROVIDER]?.models[1];
 
     const result = await runLlamaCppSetup(ctx);
 
@@ -89,9 +87,7 @@ describe("llama.cpp authored model setup", () => {
       }),
     );
     expect(result.defaultModel).toBe("llama-cpp/selected");
-    expect(result.configPatch?.models?.providers?.[LLAMA_CPP_PROVIDER_ID]?.models[0]).toEqual(
-      selected,
-    );
+    expect(result.configPatch?.models?.providers?.[PROVIDER]?.models[0]).toEqual(selected);
     expect(mocks.ensureModel).toHaveBeenCalledWith(
       expect.objectContaining({ source, download: true }),
     );
