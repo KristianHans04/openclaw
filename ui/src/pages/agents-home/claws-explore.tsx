@@ -38,7 +38,7 @@ const clawCategories = [
   ["product", "clawsCatalog.categoryProduct", "box"],
   ["people", "clawsCatalog.categoryPeople", "users"],
   ["other", "clawsCatalog.categoryOther", "layers"],
-] as const;
+] as const satisfies readonly (readonly [string, string, IconName])[];
 const SECTION_SIZE = 8;
 type ClawCategory = (typeof clawCategories)[number];
 type ClawSection = { category: ClawCategory; entries: ClawCatalogEntry[] };
@@ -232,7 +232,7 @@ export function ClawsExplore(props: { onSelect?: (entry: ClawCatalogEntry) => vo
                   <CatalogDiscoveryChip
                     active={view.category === slug}
                     onClick={() => selectCategory(slug)}
-                    icon={<Icon name={icon as IconName} />}
+                    icon={<Icon name={icon} />}
                   >
                     {t(label)}
                   </CatalogDiscoveryChip>
