@@ -650,7 +650,8 @@ suite.define(() => {
       expect(activeMobileStopBox?.width).toBeCloseTo(32, 2);
       expect(activeMobileStopBox?.height).toBeCloseTo(32, 2);
       expect(await composerShell.locator(".agent-chat__composer-run-status").count()).toBe(0);
-      await textarea.press("Escape");
+      // This case checks the visible Stop control; Escape may dismiss a prediction first.
+      await stop.click();
       const abortRequest = await gateway.waitForRequest("chat.abort");
       expect(abortRequest.params).toMatchObject({
         runId,
