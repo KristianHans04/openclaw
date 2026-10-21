@@ -69,6 +69,7 @@ describe.skipIf(!canRunPlaywrightChromium(executablePath))(
         ],
         scope,
       };
+      const config = { gateway: { controlUi: { experimental: { claws: true } } } };
       const gateway = await installMockGateway(page, {
         featureMethods: [
           "claws.drafts.create",
@@ -77,6 +78,13 @@ describe.skipIf(!canRunPlaywrightChromium(executablePath))(
           "claws.drafts.publish",
         ],
         methodResponses: {
+          "config.get": {
+            config,
+            sourceConfig: config,
+            hash: "claws-review-config",
+            valid: true,
+            issues: [],
+          },
           "claws.drafts.read": {
             content: JSON.stringify({ name: "release-brief", scope }),
             revision: reviewed.revision,
@@ -91,7 +99,7 @@ describe.skipIf(!canRunPlaywrightChromium(executablePath))(
         },
       });
       try {
-        await page.goto(`${server.baseUrl}agents/claws?draft=${draftId}&agent=main`);
+        await page.goto(`${server.baseUrl}claws?draft=${draftId}&agent=main`);
         const dialog = page.getByRole("dialog", { name: "Review your Claw" });
         await dialog.waitFor();
         expect(await dialog.getByLabel("Name").inputValue()).toBe("release-brief");

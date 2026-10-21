@@ -129,7 +129,6 @@ describe("setup inference plugin ownership", () => {
     const result = await runSetupInferenceTurn({
       route,
       requireExecutionOwner: false,
-      deps: {},
     });
     expect(result, result.ok ? undefined : result.error).toMatchObject({
       ok: true,

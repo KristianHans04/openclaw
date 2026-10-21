@@ -60,7 +60,7 @@ it("requires a display name and submits the selected Blobster identity", () => {
 
   const name = view.container.querySelector<HTMLInputElement>('input[name="name"]')!;
   const create = view.container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
-  expect(view.container.querySelector("h2")?.textContent).toBe("Create New Agent");
+  expect(view.container.querySelector("h2")?.textContent).toBe("Create new agent");
   expect(name.placeholder).toBe("Name your agent");
   expect(
     view.container.querySelector(".agent-create-dialog__ghost .lobster-pet__svg"),

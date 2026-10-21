@@ -56,7 +56,11 @@ function writtenAgent(id = "main") {
 
 async function jsonIdentity(options: IdentityOptions) {
   await agentsSetIdentityCommand({ ...options, json: true });
-  const payload: unknown = JSON.parse(String(runtime.log.mock.calls.at(-1)?.[0] ?? "{}"));
+  const output = runtime.log.mock.calls.at(-1)?.[0];
+  if (typeof output !== "string") {
+    throw new Error("Expected JSON identity output");
+  }
+  const payload: unknown = JSON.parse(output);
   return payload;
 }
 
