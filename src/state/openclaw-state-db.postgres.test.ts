@@ -63,6 +63,8 @@ import {
   runOpenClawStateWriteTransaction,
 } from "./openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
+import { captureOpenClawStateWorkerContext } from "./openclaw-state-worker-context.js";
+import { executeOpenClawStateWorker } from "./openclaw-state-worker-store.js";
 import { statePostgresRuntime } from "./postgres-schema.generated/runtime.js";
 import { ensureUserBackgroundSchema } from "./user-background.store.js";
 
@@ -106,6 +108,60 @@ const legacyPublicationInsert = `INSERT INTO github_publication_requests
     'system-detected', 42, 'publisher', 'requested', 'topic', 1, 1)`;
 
 describe.skipIf(!connection)("PostgreSQL shared-state owner", () => {
+  it("reopens its worker after backend loss without replaying the failed write", async () => {
+    const directory = tempDirs.make("state-worker-reconnect-postgres-");
+    const pathname = path.join(directory, "state.sqlite");
+    const options = { path: pathname, env: { ...process.env, OPENCLAW_STATE_DIR: directory } };
+    const applicationName = path.basename(directory);
+    const workerConnection = new URL(connection!);
+    workerConnection.searchParams.set("application_name", applicationName);
+    installDatabaseEngineSelection({
+      effectiveEngines: resolveDatabaseFamilyEngines({ database: { engine: "postgres" } }),
+      postgres: { connection: workerConnection.href, schemaPrefix: "state_worker_reconnect" },
+    });
+    const client = new pg.Client({ connectionString: connection });
+    await client.connect();
+    let namespace: string | undefined;
+    const write = (value: string) =>
+      executeOpenClawStateWorker(captureOpenClawStateWorkerContext(options), {
+        type: "machineState.write",
+        input: { key: "reconnect.fixture", value },
+      });
+    try {
+      namespace = withEngineStoreAdmission(
+        () => getPostgresPhysicalFacts(openOpenClawStateDatabase(options).db)?.namespace,
+      );
+      expect(namespace).toBeDefined();
+      await closeOpenClawStateDatabaseAsync();
+      await write("before");
+      const killed = await client.query(
+        "SELECT pg_terminate_backend(pid) AS terminated FROM pg_stat_activity WHERE application_name = $1",
+        [applicationName],
+      );
+      expect(killed.rows).toEqual([{ terminated: true }]);
+      await expect(write("interrupted")).rejects.toThrow("PostgreSQL connection lost");
+      const read = () =>
+        client.query(
+          `SELECT value_json FROM "${namespace}".config_machine_state WHERE state_key = $1`,
+          ["reconnect.fixture"],
+        );
+      expect((await read()).rows).toEqual([{ value_json: JSON.stringify("before") }]);
+      await write("recovered");
+      expect((await read()).rows).toEqual([{ value_json: JSON.stringify("recovered") }]);
+    } finally {
+      await closeOpenClawStateDatabaseAsync();
+      retireSqliteDatabaseAdmissionForPath(pathname);
+      resetDatabaseEngineSelectionForTest();
+      try {
+        if (namespace) {
+          await client.query(`DROP SCHEMA "${namespace}" CASCADE`);
+        }
+      } finally {
+        await client.end();
+      }
+    }
+  });
+
   it("prunes worker history with bounded UTF-8 ordering and placement protection", async () => {
     const directory = tempDirs.make("state-worker-retention-postgres-");
     const pathname = path.join(directory, "state.sqlite");
