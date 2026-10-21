@@ -1165,13 +1165,13 @@ try {
         streamingInput.abort();
         await nativeInput;
       }
-      let allocations;
+      let streamingAllocations;
       const allocationProfile = values["streaming-allocations"]
         ? (await cdp.send("HeapProfiler.stopSampling")).profile
         : undefined;
       if (allocationProfile) {
         const bytes = allocationProfile.samples.reduce((sum, sample) => sum + sample.size, 0);
-        allocations = {
+        streamingAllocations = {
           measurement:
             "CDP sampled allocation estimate, including major/minor-GC collected objects; whole renderer during streaming and native input, excluding reload and report serialization. Profiling adds overhead; compare timings in separate unprofiled runs.",
           samplingInterval: 4096,
@@ -1187,7 +1187,7 @@ try {
       streaming = {
         ...(await page.evaluate(() => Reflect.get(window, "__streamingReply").finish())),
         cpu,
-        allocations,
+        allocations: streamingAllocations,
       };
       if (allocationProfile) {
         await writeFile(
