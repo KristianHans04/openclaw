@@ -49,6 +49,7 @@ import {
   resolveFastModeSupport,
   resolveServiceTiers,
 } from "./provider-policy-api.js";
+import { buildClawRouterSpeechProvider } from "./speech-provider.js";
 import { fetchClawRouterUsage } from "./usage.js";
 import { createClawRouterTavilyWebSearchProvider } from "./web-search-provider.js";
 
@@ -407,6 +408,7 @@ export default defineSingleProviderPluginEntry({
   description: "Managed multi-provider model routing and quotas",
   manifest,
   register(api) {
+    api.registerSpeechProvider(buildClawRouterSpeechProvider);
     api.registerWebSearchProvider(createClawRouterTavilyWebSearchProvider());
     api.registerDecisionProvider(buildClawRouterDecisionProvider());
     api.registerGatewayMethod(
