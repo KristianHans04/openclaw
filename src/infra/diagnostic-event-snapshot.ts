@@ -3,36 +3,56 @@ import {
   isInternalDiagnosticEventInterested,
   type InternalDiagnosticEventInterest,
 } from "./diagnostic-event-listener-presence.js";
-import type {
-  DiagnosticEventMetadata,
-  DiagnosticEventPayload,
-  DiagnosticEventPrivateData,
-} from "./diagnostic-events.js";
 
 export type DiagnosticSnapshot<T> = T extends object
   ? { readonly [K in keyof T]: DiagnosticSnapshot<T[K]> }
   : T;
 
-export type QueuedDiagnosticEvent = {
-  type: DiagnosticEventPayload["type"];
+export type DiagnosticEventMetadata = Readonly<{
+  internal?: boolean;
+  trustedTraceContext?: boolean;
+  trusted: boolean;
+}>;
+
+export type DiagnosticModelCallContent = Readonly<{
+  inputMessages?: unknown;
+  outputMessages?: unknown;
+  systemPrompt?: string;
+  toolDefinitions?: unknown;
+}>;
+
+export type DiagnosticEventPrivateData = DiagnosticSnapshot<{
+  /** Raw failure text for trusted diagnostics exporters; never part of the public event payload. */
+  errorMessage?: string;
+  modelContent?: DiagnosticModelCallContent;
+  skillUsage?: { skillFile: string };
+  toolContent?: { toolInput?: unknown; toolOutput?: unknown };
+  // Content gated by captureContent policy; never reaches untrusted onDiagnosticEvent listeners.
+  messageContent?: { userPrompt?: string; finalResponse?: string };
+  // Same gating as messageContent but for harness.run started/completed events.
+  harnessContent?: { userPrompt?: string; finalResponse?: string };
+}>;
+
+export type DiagnosticDelivery<Event extends { type: string; seq: number }> = {
+  type: Event["type"];
   seq: number;
   metadata: DiagnosticEventMetadata;
-  eventForListener: () => DiagnosticEventPayload;
+  eventForListener: () => Event;
   privateDataForListener?: () => DiagnosticEventPrivateData;
   hostPluginId?: string;
   trustedListenersOnly?: boolean;
 };
 
-export function createDiagnosticDelivery(
-  event: DiagnosticEventPayload,
+export function createDiagnosticDelivery<Event extends { type: string; seq: number }>(
+  event: Event,
   metadata: DiagnosticEventMetadata,
   trustedListeners: ReadonlyMap<
     unknown,
     (InternalDiagnosticEventInterest & { readonly includePrivateData?: boolean }) | undefined
   >,
   privateData?: DiagnosticEventPrivateData,
-): QueuedDiagnosticEvent {
-  let privateDataForListener: QueuedDiagnosticEvent["privateDataForListener"];
+): DiagnosticDelivery<Event> {
+  let privateDataForListener: (() => DiagnosticEventPrivateData) | undefined;
   if (privateData) {
     let privateSnapshot = privateData;
     for (const interest of trustedListeners.values()) {

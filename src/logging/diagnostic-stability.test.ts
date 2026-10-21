@@ -5,6 +5,7 @@ import {
   resetDiagnosticEventsForTest,
   waitForDiagnosticEventsDrained,
 } from "../infra/diagnostic-events.js";
+import type { DiagnosticMemoryUsage } from "../infra/diagnostic-process-types.js";
 import {
   getDiagnosticStabilitySnapshot,
   normalizeDiagnosticStabilityQuery,
@@ -27,8 +28,7 @@ function expectFields(value: unknown, expected: Record<string, unknown>): void {
   }
 }
 
-type Memory = NonNullable<DiagnosticStabilitySnapshot["events"][number]["memory"]>;
-function memory(overrides: Partial<Memory> = {}): Memory {
+function memory(overrides: Partial<DiagnosticMemoryUsage> = {}): DiagnosticMemoryUsage {
   return {
     rssBytes: 100,
     heapTotalBytes: 80,

@@ -97,11 +97,17 @@ function createFixtures(count: number) {
   });
 }
 
-function readOpaque(event: DiagnosticEventPayload) {
-  const value: unknown = Reflect.get(event, "opaque");
+function assertOpaque(
+  value: unknown,
+): asserts value is { map: Map<unknown, unknown>; bytes: Uint8Array } {
   assert(value && typeof value === "object");
   assert("map" in value && value.map instanceof Map);
   assert("bytes" in value && value.bytes instanceof Uint8Array);
+}
+
+function readOpaque(event: DiagnosticEventPayload) {
+  const value: unknown = Reflect.get(event, "opaque");
+  assertOpaque(value);
   return value;
 }
 

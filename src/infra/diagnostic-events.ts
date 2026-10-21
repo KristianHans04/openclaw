@@ -22,8 +22,10 @@ import {
 import {
   cloneDiagnosticValueForListener,
   createDiagnosticDelivery,
+  type DiagnosticDelivery,
+  type DiagnosticEventMetadata,
+  type DiagnosticEventPrivateData,
   type DiagnosticSnapshot,
-  type QueuedDiagnosticEvent,
 } from "./diagnostic-event-snapshot.js";
 import {
   consumeCoreModelRequestLifecycleDiagnosticEvent,
@@ -72,6 +74,11 @@ import {
 } from "./worker-diagnostic-script.js";
 
 export type { DiagnosticMemoryUsage } from "./diagnostic-process-types.js";
+export type {
+  DiagnosticEventMetadata,
+  DiagnosticEventPrivateData,
+  DiagnosticModelCallContent,
+} from "./diagnostic-event-snapshot.js";
 
 export type DiagnosticSessionState = "idle" | "processing" | "waiting";
 
@@ -872,12 +879,6 @@ type TrustedSkillUsedEventInput = Extract<DiagnosticEventInput, { type: "skill.u
 
 type DiagnosticDispatchInput = DiagnosticEventInput | Omit<DiagnosticSecurityEvent, "seq" | "ts">;
 
-export type DiagnosticEventMetadata = Readonly<{
-  internal?: boolean;
-  trustedTraceContext?: boolean;
-  trusted: boolean;
-}>;
-
 type InternalDiagnosticEventMetadata = DiagnosticEventMetadata &
   Readonly<{
     [TOOL_EXECUTION_LIVENESS_METADATA_KEY]?: DiagnosticToolExecutionLiveness;
@@ -886,29 +887,6 @@ type InternalDiagnosticEventMetadata = DiagnosticEventMetadata &
     // only the non-SDK core emitter can set this semantic authority.
     [CORE_SEMANTIC_RUN_PROGRESS_METADATA_KEY]?: CoreSemanticRunProgressProvenance;
   }>;
-
-export type DiagnosticModelCallContent = Readonly<{
-  inputMessages?: unknown;
-  outputMessages?: unknown;
-  systemPrompt?: string;
-  toolDefinitions?: unknown;
-}>;
-
-type DiagnosticToolCallContent = Readonly<{ toolInput?: unknown; toolOutput?: unknown }>;
-
-type DiagnosticSkillUsagePrivateData = Readonly<{ skillFile: string }>;
-
-export type DiagnosticEventPrivateData = DiagnosticSnapshot<{
-  /** Raw failure text for trusted diagnostics exporters; never part of the public event payload. */
-  errorMessage?: string;
-  modelContent?: DiagnosticModelCallContent;
-  skillUsage?: DiagnosticSkillUsagePrivateData;
-  toolContent?: DiagnosticToolCallContent;
-  // Content gated by captureContent policy; routed privately so it never reaches untrusted onDiagnosticEvent listeners.
-  messageContent?: { userPrompt?: string; finalResponse?: string };
-  // Same gating as messageContent but for harness.run started/completed events.
-  harnessContent?: { userPrompt?: string; finalResponse?: string };
-}>;
 
 type DiagnosticEventListener = (
   evt: DiagnosticEventPayload,
@@ -941,6 +919,8 @@ export type TrustedToolExecutionEvent = Extract<
 >;
 
 type TrustedToolExecutionEventListener = (event: TrustedToolExecutionEvent) => void;
+
+type QueuedDiagnosticEvent = DiagnosticDelivery<DiagnosticEventPayload>;
 
 type DiagnosticEventsGlobalState = {
   marker: symbol;

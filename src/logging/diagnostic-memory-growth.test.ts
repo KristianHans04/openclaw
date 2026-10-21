@@ -3,14 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   onDiagnosticEvent,
   resetDiagnosticEventsForTest,
-  type DiagnosticMemoryPressureEvent,
+  type DiagnosticEventPayload,
 } from "../infra/diagnostic-events.js";
 import { emitDiagnosticMemorySample, resetDiagnosticMemoryForTest } from "./diagnostic-memory.js";
 
 const GIB = 1024 ** 3;
 
 describe("diagnostic memory headroom", () => {
-  let pressures: DiagnosticMemoryPressureEvent[];
+  let pressures: Extract<DiagnosticEventPayload, { type: "diagnostic.memory.pressure" }>[];
   let stop: () => void;
   const retire = vi.fn();
   const critical = channel("openclaw.memory.critical");
