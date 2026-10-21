@@ -26,7 +26,8 @@ it("releases each mobile details mount when its host is replaced or removed", ()
   };
   const first = host();
   const second = host();
-  const [mobileHost, replaceHost] = createSignal<ChatMobileHost | undefined>(first());
+  const firstSnapshot = first();
+  const [mobileHost, replaceHost] = createSignal<ChatMobileHost | undefined>(firstSnapshot);
   const mounted = mountSolid(() => (
     <SidebarRegionView
       presentationId="details-mount-lifetime"
@@ -34,6 +35,7 @@ it("releases each mobile details mount when its host is replaced or removed", ()
       availableWidth={400}
       narrow
       mobileHost={mobileHost()}
+      regionError={undefined}
       layout={{ columns: [] }}
       panelDefinitions={sidebarPanelDefinitions()}
       callbacks={{
@@ -52,10 +54,9 @@ it("releases each mobile details mount when its host is replaced or removed", ()
   const details = mounted.container.querySelector(".chat-mobile-host__details");
   expect(details).not.toBeNull();
   expect(first().detailsMount).toBe(details);
-  const attachment = mobileHost()!.setDetailsMount;
   const nextSnapshot = first();
-  expect(nextSnapshot).not.toBe(mobileHost());
-  expect(nextSnapshot.setDetailsMount).toBe(attachment);
+  expect(nextSnapshot).not.toBe(firstSnapshot);
+  expect(nextSnapshot.setDetailsMount).toBe(firstSnapshot.setDetailsMount);
   replaceHost(nextSnapshot);
   flush();
   expect(first().detailsMount).toBe(details);
