@@ -87,3 +87,22 @@ export async function runGatewaySessionStartupMaintenance(params: {
     params.log.info(`session: rebuilt ${reconciledSessions} transcript projection(s)`);
   }
 }
+
+/** Recovery must not depend on cron incidentally opening its reader before readiness. */
+export async function prewarmGatewaySessionRecovery(
+  databases: readonly PreparedStartupSessionDatabase[],
+  signal: AbortSignal,
+  isClosing: () => boolean,
+): Promise<void> {
+  const [{ prewarmSessionHistoryWorker }, { maintenanceLane }] = await Promise.all([
+    import("../config/sessions/session-transcript-worker-runtime.js"),
+    import("../config/sessions/session-transcript-worker-resources.js"),
+  ]);
+  for (const { database, assertCurrent } of databases) {
+    if (signal.aborted || isClosing()) {
+      return;
+    }
+    assertCurrent();
+    await prewarmSessionHistoryWorker(database, maintenanceLane);
+  }
+}

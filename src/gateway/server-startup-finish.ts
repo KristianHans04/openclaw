@@ -253,6 +253,21 @@ export async function finishGatewayStartup(params: {
     const operation = Promise.resolve().then(() => run(runtime.connectionWork.signal));
     return runtime.connectionWork.track(() => operation);
   };
+  if (!minimalTestGateway && !opts.updateCanary && runtime.startupSessionDatabases.length > 0) {
+    void trackStartupWork(async (signal) => {
+      const { prewarmGatewaySessionRecovery } =
+        await import("./server-startup-session-migration.js");
+      await prewarmGatewaySessionRecovery(
+        runtime.startupSessionDatabases,
+        signal,
+        () => lifecycle.closePreludeStarted,
+      );
+    }).catch((error: unknown) => {
+      if (!lifecycle.closePreludeStarted) {
+        log.debug(`Session recovery reader preparation failed: ${String(error)}`);
+      }
+    });
+  }
   const postAttachHandles = await trackStartupWork(() =>
     startupTrace.measure("runtime.post-attach", () =>
       import("./server-startup-post-attach.js").then(({ startGatewayPostAttachRuntime }) =>

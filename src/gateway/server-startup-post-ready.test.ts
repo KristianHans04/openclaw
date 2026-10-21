@@ -1,3 +1,4 @@
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import type { GatewaySchedulerClock } from "../infra/gateway-scheduler.js";
@@ -20,6 +21,70 @@ vi.mock("../infra/gateway-scheduler.js", async (importOriginal) => {
       }
     },
   };
+});
+
+it("starts the recovery reader before readiness and retains it through close", async () => {
+  const state = await fixture.createGatewayStartupTestState("gateway-recovery-reader");
+  state.envVars.OPENCLAW_TEST_MINIMAL_GATEWAY = undefined;
+  const clock = createGatewaySchedulerClock();
+  schedulerClock.current = clock.clock;
+  const port = await getFreePort();
+  const token = "gateway-recovery-reader-token";
+  const prepared = createDeferred();
+  const readers = await import("../config/sessions/session-transcript-worker-runtime.js");
+  const { maintenanceLane } =
+    await import("../config/sessions/session-transcript-worker-resources.js");
+  const prewarm = vi
+    .spyOn(readers, "prewarmSessionHistoryWorker")
+    .mockReturnValue(prepared.promise);
+  const postAttach = await import("./server-startup-post-attach.js");
+  const startPostAttach = postAttach.startGatewayPostAttachRuntime;
+  let preparedBeforeReady = false;
+  const sidecars = vi
+    .spyOn(postAttach, "startGatewayPostAttachRuntime")
+    .mockImplementation((params) =>
+      startPostAttach({
+        ...params,
+        onSidecarsReady: () => {
+          preparedBeforeReady = prewarm.mock.calls.some(
+            ([database, lane]) => database.agentId === "main" && lane === maintenanceLane,
+          );
+          params.onSidecarsReady?.();
+        },
+      }),
+    );
+  let server: GatewayServer | undefined;
+  let close: Promise<void> | undefined;
+  try {
+    await state.writeConfig({
+      gateway: fixture.gatewayStartupTestConfig(port, token),
+      plugins: { enabled: false },
+      discovery: { mdns: { mode: "off" } },
+    });
+    state.applyEnv();
+    await state.writeAuthProfiles({ version: 1, profiles: {} });
+    const { startGatewayServerCore } = await import("./server-start.js");
+    server = await startGatewayServerCore(port, fixture.gatewayStartupTestOptions(token));
+    await server.startupSettled;
+    expect(preparedBeforeReady).toBe(true);
+    expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(200);
+    let closed = false;
+    close = server.close().then(() => {
+      closed = true;
+    });
+    await nextTurn();
+    expect(closed).toBe(false);
+    prepared.resolve();
+    await close;
+  } finally {
+    prepared.resolve();
+    await close;
+    await server?.close();
+    sidecars.mockRestore();
+    prewarm.mockRestore();
+    schedulerClock.current = undefined;
+    await state.cleanup();
+  }
 });
 
 it.each(["settles", "closes", "repair-closes"] as const)(
