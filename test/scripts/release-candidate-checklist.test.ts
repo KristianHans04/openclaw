@@ -657,6 +657,7 @@ describe("release candidate checklist", () => {
           RELEASE_CANDIDATE_STATE_FILE: "release-candidate-state.json",
           RELEASE_CANDIDATE_STATE_VERSION: 2,
           parseArgs: () => options,
+          resolveReleaseCandidateOutputDir,
           gitTopLevel: (root: string) => root,
           gitRevParse: (_ref: string, root: string) =>
             root === targetRoot ? targetSha : toolingSha,
