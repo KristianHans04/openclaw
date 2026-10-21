@@ -447,7 +447,7 @@ export type OpenClawPluginServiceContext = {
         privateData: DiagnosticEventPrivateData,
       ) => void,
       filter?: InternalDiagnosticEventInterest<DiagnosticEventPayload["type"]>,
-      /** Defaults to true; false skips private payload copies and passes a frozen empty object. */
+      /** Defaults to true; false skips private snapshot capture and passes a frozen empty object. */
       options?: { includePrivateData?: boolean },
     ) => () => void;
     registerTracePropagationBridge?: (bridge: DiagnosticTracePropagationBridge) => () => void;

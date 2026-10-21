@@ -1,5 +1,29 @@
 # Team-shaped synthetic state
 
+## Diagnostic event pipeline
+
+`diagnostic-event-pipeline-measure.ts` measures the real diagnostic dispatcher
+with synthetic model/tool captures, two trusted consumers (one marked as OTel),
+a public observer, synchronous trace preparation, and pending-terminal reads:
+
+```sh
+node --expose-gc --import ./scripts/tsx.mjs scripts/perf/diagnostic-event-pipeline-measure.ts \
+  --scenario plain --cycles 500 --warmup 50 --revision <commit> --output /path/to/result.json
+```
+
+Each cycle emits four events. Fixture construction is outside measured windows.
+Unprofiled main-thread CPU and wall time, allocation sampling including objects
+collected by minor/major GC, and `structuredClone` counts run in separate passes.
+Delivery/content counts must match; `--scenario opaque` additionally verifies
+that a public listener cannot mutate another listener's Map/typed-array data.
+`--scenario no-interest` measures the same emitters without consumers. Allocation
+bytes are sampling estimates, not retained heap size or exact counters.
+
+Run at least five interleaved baseline/candidate processes per scenario and report
+median/p95 and paired differences. A short single-process run needs no Gateway;
+whole-flow decisions still use the paired `memory-soak` workload below on the
+approved benchmark host. This microbenchmark does not measure exporter encoding.
+
 ## Workboard dashboard reads
 
 `workboard-read-measure.ts` exercises the real source Gateway and Workboard SQLite
@@ -1012,6 +1036,15 @@ node --import ./scripts/tsx.mjs scripts/perf/transcript-broadcast-measure.ts \
   --stress-tools --stress-subagents --mixed-rpc --list-interval-ms 2000 --poll-seed steady \
   --revision <measured-commit-sha> --start-at <shared-future-epoch-ms>
 ```
+
+Add `--diagnostic-content-capture` to a memory soak to enable the bundled
+OpenTelemetry plugin with content capture. Its real protobuf trace exporter
+sends only to the workload's loopback mock server. The receiver checks nonempty
+model input/output and tool input/output attributes in exported spans and fails
+the run if any is absent. `otelCapture` records request, byte, and attribute
+counts after warmup; no exported content is retained. Use the same flag on both
+sides when measuring private diagnostic payload allocation. The default soak
+does not capture model or tool content.
 
 `--stress-tools` enables Code Mode in the synthetic configuration. Each outer
 `exec` calls the real `read` and shell `exec` tools; the shell runs `pwd` in the

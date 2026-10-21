@@ -32,6 +32,7 @@ import {
   type DiagnosticEventPayload as Event,
   createQueuedDiagnosticPhaseEmitter as phaseEmitter,
 } from "./diagnostic-events.js";
+import { cloneDiagnosticContentValue } from "./diagnostic-llm-content.js";
 import { markTrustedOtelDiagnosticListener } from "./diagnostic-otel-listener-provenance.js";
 import { markHostPluginUsageDiagnosticEvent } from "./diagnostic-plugin-usage-provenance.js";
 import { resolveCoreSemanticRunProgressDiagnosticMetadata } from "./diagnostic-semantic-run-progress.js";
@@ -262,6 +263,24 @@ describe("diagnostic-events", () => {
     expect(privateDataReads).toBe(0);
   });
 
+  it("does not capture ignored events when a trace bridge rejects them", () => {
+    const readUsage = vi.fn(() => 42);
+    registerBridge({
+      shouldPrepareEvent: () => false,
+      prepareEvent: vi.fn(),
+      resolveTraceContext: (context) => context,
+    });
+    emitTrusted({
+      type: "model.usage",
+      usage: {
+        get total() {
+          return readUsage();
+        },
+      },
+    });
+    expect(readUsage).not.toHaveBeenCalled();
+  });
+
   it("does not fall back to diagnostic ids when an active propagation bridge misses", () => {
     const diagnosticTrace = createTrace(diagnosticTraceInput);
     registerBridge({
@@ -420,7 +439,7 @@ describe("diagnostic-events", () => {
       events.push(event);
       usage.total = 7;
       if (event.type === "model.usage") {
-        event.usage.total = 0;
+        (event.usage as { total: number }).total = 0;
       }
     });
     onInternal((event, metadata) => {
@@ -543,13 +562,21 @@ describe("diagnostic-events", () => {
     expect(callIds).toHaveLength(251);
   });
 
-  it("passes immutable pending diagnostic copies to queue inspectors", async () => {
+  it("shares captured diagnostics across trace preparation, queue inspection and dispatch", async () => {
     const events = collectEvents(onInternal);
+    let prepared: Event | undefined;
+    registerBridge({
+      prepareEvent(event: Event) {
+        prepared = event;
+      },
+      resolveTraceContext: (context) => context,
+    });
     emitTrusted(toolErrorEvent("run-immutable", "call-immutable"));
 
     let mutationErrors = 0;
     expect(
       hasPending((event, metadata) => {
+        expect(event).toBe(prepared);
         try {
           (event as { type: string }).type = "model.usage";
         } catch {
@@ -573,6 +600,7 @@ describe("diagnostic-events", () => {
     expect(hasPending((event) => event.type === "tool.execution.error")).toBe(false);
 
     expect(events).toMatchObject([{ type: "tool.execution.error", toolCallId: "call-immutable" }]);
+    expect(events[0]).toBe(prepared);
   });
 
   it("skips uncloneable pending diagnostics during queue inspection", async () => {
@@ -820,6 +848,41 @@ describe("diagnostic event plugin usage attribution", () => {
 });
 
 describe("private diagnostic data", () => {
+  it("shares owned private captures without aliasing live model content", async () => {
+    const source = [{ role: "user", content: [{ type: "text", text: "original" }] }];
+    const inputMessages = cloneDiagnosticContentValue(source);
+    const received: PrivateData[] = [];
+    onTrusted((_event, _metadata, data) => received.push(data));
+    onTrusted(markTrustedOtelDiagnosticListener((_event, _metadata, data) => received.push(data)));
+    emitPrivate(modelStartedEvent(), { modelContent: { inputMessages } });
+    source[0]!.content[0]!.text = "later live mutation";
+    await drain();
+
+    expect(received).toHaveLength(2);
+    expect(received[0]).toBe(received[1]);
+    expect(received[0]?.modelContent?.inputMessages).toBe(inputMessages);
+    expect(received[0]?.modelContent?.inputMessages).toEqual([
+      { role: "user", content: [{ type: "text", text: "original" }] },
+    ]);
+    expect(Object.isFrozen(received[0])).toBe(true);
+    expect(Object.isFrozen(received[0]?.modelContent)).toBe(true);
+    expect(Object.isFrozen(inputMessages)).toBe(true);
+  });
+
+  it("keeps opaque private content isolated between trusted listeners", async () => {
+    const map = new Map([["value", 42]]);
+    onTrusted((_event, _metadata, data) => {
+      const output = data.toolContent?.toolOutput;
+      expect(output).toBeInstanceOf(Map);
+      (output as Map<string, number>).set("value", 0);
+    });
+    const received = collectPrivateEvents();
+    emitPrivate(toolErrorEvent("run-opaque", "call-opaque"), { toolContent: { toolOutput: map } });
+    await drain();
+    expect(received[0]?.privateData.toolContent?.toolOutput).toEqual(new Map([["value", 42]]));
+    expect(map.get("value")).toBe(42);
+  });
+
   it("shares the frozen empty private payload with OTel listeners", () => {
     const received: PrivateData[] = [];
     onTrusted((_evt, _meta, data) => received.push(data));

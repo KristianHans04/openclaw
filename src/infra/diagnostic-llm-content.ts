@@ -1,4 +1,6 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { freezeJsonSnapshot } from "../shared/immutable-data.js";
+import { cloneDiagnosticValueForListener } from "./diagnostic-event-snapshot.js";
 
 /** Per-field policy for diagnostic traces that may include model-visible content. */
 export type DiagnosticModelContentCapturePolicy = {
@@ -32,11 +34,13 @@ const NO_MODEL_CONTENT_CAPTURE: DiagnosticModelContentCapturePolicy = Object.fre
 // objects (tool params/results, model messages) that callers keep mutating.
 export function cloneDiagnosticContentValue(value: unknown): unknown {
   try {
-    return structuredClone(value);
+    return cloneDiagnosticValueForListener(value);
   } catch {
     try {
       const serialized = JSON.stringify(value);
-      return serialized === undefined ? null : (JSON.parse(serialized) as unknown);
+      return serialized === undefined
+        ? null
+        : freezeJsonSnapshot(JSON.parse(serialized) as unknown);
     } catch {
       return String(value);
     }

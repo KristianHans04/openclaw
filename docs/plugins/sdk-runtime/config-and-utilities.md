@@ -420,9 +420,11 @@ the optional `includeTrusted` list further restricts only events marked trusted
 by the dispatcher. Omitting it preserves existing behavior, and an empty list
 accepts only untrusted events that pass `include`/`exclude`. Event payload fields
 cannot override the dispatcher's trust metadata. Accepted plain event payloads
-share one frozen snapshot across listeners in a dispatch. Payloads with mutable
-opaque values (such as Maps or Dates) and private listener data retain individual
-copies. Absent private data uses a shared frozen empty payload, including for
+share one frozen snapshot across listeners, trace preparation, and queued reads.
+Private payloads transfer ownership to the dispatcher and share frozen snapshots
+among trusted listeners; producers must not mutate them after emission. Captured
+model and tool content stays detached from live runtime values. Payloads with
+mutable opaque values (such as Maps or Dates) retain individual listener copies. Absent private data uses a shared frozen empty payload, including for
 OTel listeners without host-plugin attribution. Listener mutations remain isolated
 from other listeners and producers; filtering does not change diagnostic collection
 or queue behavior.

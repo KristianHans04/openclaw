@@ -57,6 +57,7 @@ const { values } = parseArgs({
     "state-dir": { type: "string" },
     allocations: { type: "boolean", default: false },
     diagnostics: { type: "boolean", default: false },
+    "diagnostic-content-capture": { type: "boolean", default: false },
     "prep-trace": { type: "boolean", default: false },
     "cpu-profile": { type: "boolean", default: false },
     "workload-cpu-profile": { type: "boolean", default: false },
@@ -159,6 +160,9 @@ if (values["seed-history"] && !historyTurns) {
 }
 if ((historyLastTurns || historyPayloadBytes) && !historyTurns) {
   throw new Error("--history-last-turns and --history-payload-kib require --history-turns");
+}
+if (values["diagnostic-content-capture"] && !soakScenario) {
+  throw new Error("--diagnostic-content-capture requires --scenario memory-soak");
 }
 const reasoningScenario = retentionScenario || idleScenario || soakScenario;
 if (
@@ -401,6 +405,22 @@ if (soakScenario) {
   if (values["stress-tools"]) {
     cfg.cron = { ...cfg.cron, enabled: true };
   }
+}
+if (values["diagnostic-content-capture"]) {
+  cfg.diagnostics.otel = {
+    enabled: true,
+    traces: true,
+    metrics: false,
+    logs: false,
+    captureContent: true,
+    sampleRate: 1,
+    endpoint: `http://127.0.0.1:${mockPort}`,
+    protocol: "http/protobuf",
+  };
+  if (cfg.plugins.allow?.length) {
+    cfg.plugins.allow.push("diagnostics-otel");
+  }
+  cfg.plugins.entries["diagnostics-otel"] = { enabled: true };
 }
 let reloadPluginId: string | undefined;
 if (scenario === "plugins.reload") {
@@ -799,12 +819,106 @@ let cohort:
       reject: (error: Error) => void;
     }
   | undefined;
+const otelCapture = {
+  requests: 0,
+  bytes: 0,
+  inputMessages: 0,
+  outputMessages: 0,
+  toolInput: 0,
+  toolOutput: 0,
+};
+const otelContentFields = new Map<
+  string,
+  "inputMessages" | "outputMessages" | "toolInput" | "toolOutput"
+>([
+  ["openclaw.content.input_messages", "inputMessages"],
+  ["openclaw.content.output_messages", "outputMessages"],
+  ["openclaw.content.tool_input", "toolInput"],
+  ["openclaw.content.tool_output", "toolOutput"],
+]);
+
+// Read length-delimited fields from the actual OTLP wire payload, without a protobuf dependency.
+function* otlpFields(data: Buffer, wantedField: number): Generator<Buffer, undefined> {
+  let offset = 0;
+  const varint = () => {
+    let value = 0;
+    for (let shift = 0; shift <= 63 && offset < data.length; shift += 7) {
+      const byte = data[offset++]!;
+      value += (byte & 0x7f) * 2 ** shift;
+      if (!(byte & 0x80)) {
+        return value;
+      }
+    }
+    throw new Error("Malformed OTLP varint");
+  };
+  while (offset < data.length) {
+    const tag = varint();
+    const wire = tag & 7;
+    if (wire === 0) {
+      varint();
+      continue;
+    }
+    const length = wire === 2 ? varint() : wire === 1 ? 8 : wire === 5 ? 4 : -1;
+    if (length < 0 || offset + length > data.length) {
+      throw new Error("Malformed OTLP field");
+    }
+    const start = offset;
+    offset += length;
+    if (wire === 2 && tag >>> 3 === wantedField) {
+      yield data.subarray(start, offset);
+    }
+  }
+}
+
+function recordOtelContent(body: Buffer) {
+  // ExportTraceServiceRequest.resourceSpans.scopeSpans.spans.attributes.
+  for (const resource of otlpFields(body, 1)) {
+    for (const scope of otlpFields(resource, 2)) {
+      for (const span of otlpFields(scope, 2)) {
+        for (const attribute of otlpFields(span, 9)) {
+          const key = otlpFields(attribute, 1).next().value?.toString();
+          const field = key ? otelContentFields.get(key) : undefined;
+          if (!field) {
+            continue;
+          }
+          for (const value of otlpFields(attribute, 2)) {
+            for (const text of otlpFields(value, 1)) {
+              if (text.length > 0) {
+                otelCapture[field]++;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  otelCapture.requests++;
+  otelCapture.bytes += body.length;
+}
+
 const mock = createServer((req, res) => {
   if (req.url === "/health") {
     res.end("ok");
     return;
   }
   void (async () => {
+    if (values["diagnostic-content-capture"] && req.url === "/v1/traces") {
+      if (req.method !== "POST" || req.headers["content-type"] !== "application/x-protobuf") {
+        throw new Error("Expected an OTLP protobuf trace export");
+      }
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      for await (const bodyChunk of req) {
+        if (!Buffer.isBuffer(bodyChunk) || (bytes += bodyChunk.length) > 64 * 1024 * 1024) {
+          throw new Error("Invalid or oversized OTLP trace export");
+        }
+        chunks.push(bodyChunk);
+      }
+      recordOtelContent(Buffer.concat(chunks));
+      res.writeHead(200, { "content-type": "application/x-protobuf" });
+      res.end();
+      return;
+    }
     const body: unknown = JSON.parse(await readBody(req));
     const facts = summarizeMockInferenceRequest(body);
     if (facts.purpose === "activity-recap") {
@@ -2639,6 +2753,14 @@ try {
     });
   }
   const measurementStartedAt = Date.now();
+  Object.assign(otelCapture, {
+    requests: 0,
+    bytes: 0,
+    inputMessages: 0,
+    outputMessages: 0,
+    toolInput: 0,
+    toolOutput: 0,
+  });
   const measuredGateway = gateway;
   const finishWholeSoakDiagnostics =
     soakScenario && (values.diagnostics || values.allocations || values["trace-gc"])
@@ -3355,6 +3477,13 @@ try {
   }
   // Process exit plus drained log streams makes promotion accounting independent of pipe buffering.
   await cleanup();
+  if (values["diagnostic-content-capture"]) {
+    for (const field of otelContentFields.values()) {
+      if (otelCapture[field] === 0) {
+        throw new Error(`No exported OTLP ${field} content observed during measurement`);
+      }
+    }
+  }
   let wholeSoakGc;
   if (wholeSoakDiagnostics && (values.allocations || values["trace-gc"])) {
     const trace = readGatewayGcTrace(
@@ -3401,6 +3530,7 @@ try {
     ...(values["mixed-rpc"] ? { diffEditControlVerified: true, diffEditVisibilityMs } : {}),
     pollSeed: values["poll-seed"] ?? null,
     diagnostics: values.diagnostics,
+    ...(values["diagnostic-content-capture"] ? { otelCapture } : {}),
     cpuProfile: values["cpu-profile"],
     workloadCpuProfile: values["workload-cpu-profile"],
     captureResponses: values["capture-responses"],

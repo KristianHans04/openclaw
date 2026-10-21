@@ -1,50 +1,86 @@
-export function createDiagnosticMetadataForListener<T extends object>(metadata: T): Readonly<T> {
-  return Object.freeze({ ...metadata });
-}
+import { freezeJsonSnapshot, isDeeplyFrozenPlainData } from "../shared/immutable-data.js";
+import {
+  isInternalDiagnosticEventInterested,
+  type InternalDiagnosticEventInterest,
+} from "./diagnostic-event-listener-presence.js";
+import type {
+  DiagnosticEventMetadata,
+  DiagnosticEventPayload,
+  DiagnosticEventPrivateData,
+} from "./diagnostic-events.js";
 
-export function cloneDiagnosticValueForListener<T extends object>(value: T): T {
-  return deepFreezeDiagnosticValue(structuredClone(value));
-}
+export type DiagnosticSnapshot<T> = T extends object
+  ? { readonly [K in keyof T]: DiagnosticSnapshot<T[K]> }
+  : T;
 
-/** Capture lazily so filtered listeners never read the producer's payload. */
-export function createDiagnosticValueForListeners<T extends object>(value: T): () => T {
-  let shared: T | undefined;
-  return () => {
-    if (shared) {
-      return shared;
+export type QueuedDiagnosticEvent = {
+  type: DiagnosticEventPayload["type"];
+  seq: number;
+  metadata: DiagnosticEventMetadata;
+  eventForListener: () => DiagnosticEventPayload;
+  privateDataForListener?: () => DiagnosticEventPrivateData;
+  hostPluginId?: string;
+  trustedListenersOnly?: boolean;
+};
+
+export function createDiagnosticDelivery(
+  event: DiagnosticEventPayload,
+  metadata: DiagnosticEventMetadata,
+  trustedListeners: ReadonlyMap<
+    unknown,
+    (InternalDiagnosticEventInterest & { readonly includePrivateData?: boolean }) | undefined
+  >,
+  privateData?: DiagnosticEventPrivateData,
+): QueuedDiagnosticEvent {
+  let privateDataForListener: QueuedDiagnosticEvent["privateDataForListener"];
+  if (privateData) {
+    let privateSnapshot = privateData;
+    for (const interest of trustedListeners.values()) {
+      if (
+        interest?.includePrivateData === false ||
+        !isInternalDiagnosticEventInterested(interest, event.type, metadata.trusted)
+      ) {
+        continue;
+      }
+      if (Object.hasOwn(privateData, "hostPluginId")) {
+        // Attribution is assigned by the host, never by private content.
+        privateSnapshot = { ...privateData };
+        Reflect.deleteProperty(privateSnapshot, "hostPluginId");
+      }
+      privateDataForListener = createDiagnosticValueForListeners(privateSnapshot, true);
+      break;
     }
-    const snapshot = structuredClone(value);
-    if (freezeDiagnosticValue(snapshot, new WeakSet())) {
-      shared = snapshot;
-    }
-    return snapshot;
+  }
+  return {
+    type: event.type,
+    seq: event.seq,
+    metadata: Object.freeze(metadata),
+    eventForListener: createDiagnosticValueForListeners(event),
+    privateDataForListener,
   };
 }
 
-export function deepFreezeDiagnosticValue<T>(value: T): T {
-  freezeDiagnosticValue(value, new WeakSet());
-  return value;
+export function cloneDiagnosticValueForListener<T>(value: T): T {
+  return freezeJsonSnapshot(structuredClone(value));
 }
 
-function freezeDiagnosticValue(value: unknown, seen: WeakSet<object>): boolean {
-  if (!value || typeof value !== "object" || seen.has(value)) {
-    return true;
+/** Own one capture; opaque mutable internals still need a copy for each reader. */
+export function createDiagnosticValueForListeners<T extends object>(
+  value: T,
+  owned = false,
+): () => T {
+  try {
+    const snapshot =
+      owned && isDeeplyFrozenPlainData(freezeJsonSnapshot(value))
+        ? value
+        : cloneDiagnosticValueForListener(value);
+    return isDeeplyFrozenPlainData(snapshot)
+      ? () => snapshot
+      : () => cloneDiagnosticValueForListener(snapshot);
+  } catch (error) {
+    // Keep malformed-payload failures at the existing reader boundary.
+    return () => {
+      throw error;
+    };
   }
-  // Nonempty typed arrays cannot be frozen; keep buffer views listener-local.
-  if (ArrayBuffer.isView(value)) {
-    return false;
-  }
-  seen.add(value);
-  // Cloned plain graphs are immutable after freezing; Map/Date/etc. retain
-  // mutable internals and must keep their individual listener copies.
-  const prototype = Object.getPrototypeOf(value);
-  let shareable =
-    prototype === Object.prototype || prototype === Array.prototype || prototype === null;
-  for (const nested of Object.values(value)) {
-    if (!freezeDiagnosticValue(nested, seen)) {
-      shareable = false;
-    }
-  }
-  Object.freeze(value);
-  return shareable;
 }

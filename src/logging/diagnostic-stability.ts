@@ -1,7 +1,6 @@
 import {
   onInternalDiagnosticEvent,
   type DiagnosticEventPayload,
-  type DiagnosticMemoryUsage,
 } from "../infra/diagnostic-events.js";
 import {
   DIAGNOSTIC_MEMORY_PRESSURE_METRICS,
@@ -88,7 +87,7 @@ export type DiagnosticStabilityEventRecord = DiagnosticMemoryPressureMetrics & {
     processed: number;
     errors: number;
   };
-  memory?: DiagnosticMemoryUsage;
+  memory?: Extract<DiagnosticEventPayload, { memory: unknown }>["memory"];
   usage?: {
     input?: number;
     output?: number;
@@ -114,7 +113,7 @@ export type DiagnosticStabilitySnapshot = {
   summary: {
     byType: Record<string, number>;
     memory?: {
-      latest?: DiagnosticMemoryUsage;
+      latest?: DiagnosticStabilityEventRecord["memory"];
       maxRssBytes?: number;
       maxHeapUsedBytes?: number;
       pressureCount: number;
@@ -478,7 +477,7 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
         record.responseBytes = event.responseStreamBytes;
         if (event.type === "model.call.error") {
           record.failureKind = event.failureKind;
-          record.memory = event.memory ? { ...event.memory } : undefined;
+          record.memory = event.memory;
           assignReasonCode(record, event.errorCategory);
         }
       }
@@ -491,12 +490,12 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
       assignReasonCode(record, event.reason ?? event.policy?.reason);
       break;
     case "diagnostic.memory.sample":
-      record.memory = { ...event.memory };
+      record.memory = event.memory;
       break;
     case "diagnostic.memory.pressure":
       record.level = event.level;
       assignReasonCode(record, event.reason);
-      record.memory = { ...event.memory };
+      record.memory = event.memory;
       copy(event, ...DIAGNOSTIC_MEMORY_PRESSURE_METRICS);
       break;
     case "payload.large":
@@ -620,7 +619,7 @@ function summarizeRecords(
   records: DiagnosticStabilityEventRecord[],
 ): DiagnosticStabilitySnapshot["summary"] {
   const byType: Record<string, number> = {};
-  let latestMemory: DiagnosticMemoryUsage | undefined;
+  let latestMemory: DiagnosticStabilityEventRecord["memory"];
   let maxRssBytes: number | undefined;
   let maxHeapUsedBytes: number | undefined;
   let pressureCount = 0;
