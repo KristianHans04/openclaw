@@ -52,14 +52,6 @@ import {
   writeMemoryIndexMetadata,
 } from "./manager-index-metadata.js";
 import { readMemoryIndex } from "./manager-index-read.js";
-import {
-  MemorySourcePublicationFacts,
-  memoryMetadataPostimage,
-  memorySourceHashPostimage,
-  publishMemoryFacts,
-  readPublishedMemoryFacts,
-  retainedMemoryPublicationFacts,
-} from "./manager-publication-facts.js";
 import { bindPostgresMemoryPublication } from "./manager-publication-postgres.js";
 import type {
   MemoryEmbeddingCacheEntry,
@@ -73,7 +65,7 @@ import {
   MEMORY_EMBEDDING_CACHE_WRITE_SCOPE,
   MEMORY_INDEX_WRITE_SCOPE,
 } from "./manager-publication-task.js";
-import type { MemoryDatabaseFacts } from "./manager-retrieval-read.js";
+import { readMemoryDatabaseFacts } from "./manager-retrieval-read.js";
 import { admitMemoryVectorIndex } from "./manager-search-knn.js";
 import { memoryVectorSearchSchema } from "./manager-search-schema.js";
 import {
@@ -299,12 +291,11 @@ function createPublicationBackend(
   const withFacts = <T>(
     result: MemoryPublicationResult<T>,
     includeSearchSchema = false,
-    postimage?: MemoryDatabaseFacts,
   ): MemoryPublicationResult<T> => {
     if (!result.ok) {
       return result;
     }
-    const facts = publishMemoryFacts(db, postimage);
+    const facts = readMemoryDatabaseFacts(db);
     // DDL receipts carry the admitted SQL verbatim, including sqlite-vec's exact declaration.
     const schema = includeSearchSchema && getAdmittedSqliteSchemaFacts(db)!.tableSql;
     return {
@@ -384,10 +375,8 @@ function createPublicationBackend(
             }
           : input;
       }
-      if (command.type === "index.facts") {
-        return readPublishedMemoryFacts(db);
-      }
       if (
+        command.type === "index.facts" ||
         command.type === "source.state" ||
         command.type === "source.hash" ||
         command.type === "source.chunks" ||
@@ -429,47 +418,25 @@ function createPublicationBackend(
         }
       }
       if (command.type === "index.upgradeProviderKey") {
-        const before = retainedMemoryPublicationFacts(db);
-        const result = write(
-          () => upgradeMemoryIndexProviderKey(db, command.input),
-          [MEMORY_INDEX_WRITE_SCOPE, MEMORY_EMBEDDING_CACHE_WRITE_SCOPE],
-        );
         return withFacts(
-          result,
-          false,
-          result.ok && result.value
-            ? memoryMetadataPostimage(before, {
-                ...command.input.meta,
-                providerKey: command.input.providerKey,
-              })
-            : before,
+          write(
+            () => upgradeMemoryIndexProviderKey(db, command.input),
+            [MEMORY_INDEX_WRITE_SCOPE, MEMORY_EMBEDDING_CACHE_WRITE_SCOPE],
+          ),
         );
       }
       if (command.type === "index.writeMetadata") {
-        const facts = memoryMetadataPostimage(retainedMemoryPublicationFacts(db), command.input);
-        return withFacts(
-          writeSingleStatement(() => writeMemoryIndexMetadata(db, command.input)),
-          false,
-          facts,
-        );
+        return withFacts(writeSingleStatement(() => writeMemoryIndexMetadata(db, command.input)));
       }
       if (command.type === "source.refresh") {
-        const before = retainedMemoryPublicationFacts(db);
-        const result = write(() => {
-          const changed = refreshMemorySessionSourceState(db, command.input);
-          if (changed) {
-            advanceMemoryIndexRevision(db);
-          }
-          return changed;
-        });
-        const facts =
-          result.ok && result.value
-            ? memorySourceHashPostimage(before, "sessions", command.input.hash)
-            : before;
         return withFacts(
-          result,
-          false,
-          facts && result.ok && result.value ? { ...facts, revision: facts.revision + 1 } : facts,
+          write(() => {
+            const changed = refreshMemorySessionSourceState(db, command.input);
+            if (changed) {
+              advanceMemoryIndexRevision(db);
+            }
+            return changed;
+          }),
         );
       }
       if (command.type === "stage.start" || command.type === "cache.stage.start") {
@@ -570,7 +537,7 @@ function createPublicationBackend(
         if (!Number.isSafeInteger(dimensions) || dimensions <= 0) {
           throw new Error("Memory vector dimensions must be a positive integer");
         }
-        const { meta, hasIndexedChunks, hasVectorTable } = readPublishedMemoryFacts(db);
+        const { meta, hasIndexedChunks, hasVectorTable } = readMemoryDatabaseFacts(db);
         const currentDimensions = meta ? meta.vectorDims : command.input.currentDimensions;
         if (currentDimensions === dimensions && hasVectorTable) {
           loadExtension(command.input.state.extensionPath);
@@ -629,7 +596,6 @@ function createPublicationBackend(
         );
       }
       if (command.type === "source.replace.group") {
-        const facts = new MemorySourcePublicationFacts(retainedMemoryPublicationFacts(db));
         const outcome = write(() => {
           const kernel = new MemorySourceIndexKernel(db, command.input.state);
           const inputs = command.input.sources;
@@ -643,17 +609,16 @@ function createPublicationBackend(
                   "A session was forgotten while memory indexing was running; retry the memory index.",
                 );
               }
-              yield {
-                header,
-                rows: facts.rows(header, readPublicationRows<MemorySourceIndexRow>(fragments)),
-              };
+              yield { header, rows: readPublicationRows<MemorySourceIndexRow>(fragments) };
             }
           }
           kernel.replaceGroup(sources());
           advanceMemoryIndexRevision(db);
           return true;
         });
-        return withFacts(outcome, false, facts.postimage());
+        return outcome.ok
+          ? { ...outcome, facts: readMemoryDatabaseFacts(db, command.input.state.hasVectorTable) }
+          : outcome;
       }
       let header: MemorySourceIndexHeader;
       let rows: Iterable<MemorySourceIndexRow>;
@@ -667,7 +632,7 @@ function createPublicationBackend(
         header = staged.header;
         rows = readPublicationRows<MemorySourceIndexRow>(staged.fragments);
       }
-      const facts = new MemorySourcePublicationFacts(retainedMemoryPublicationFacts(db));
+      let facts: ReturnType<typeof readMemoryDatabaseFacts> | undefined;
       const outcome = write(() => {
         if (
           header.source === "sessions" &&
@@ -677,14 +642,12 @@ function createPublicationBackend(
             "A session was forgotten while memory indexing was running; retry the memory index.",
           );
         }
-        new MemorySourceIndexKernel(db, command.input.state).replaceRows(
-          header,
-          facts.rows(header, rows),
-        );
+        new MemorySourceIndexKernel(db, command.input.state).replaceRows(header, rows);
         advanceMemoryIndexRevision(db);
+        facts = readMemoryDatabaseFacts(db, command.input.state.hasVectorTable);
         return true;
       });
-      const published = withFacts(outcome, false, facts.postimage());
+      const published = outcome.ok ? { ...outcome, facts } : outcome;
       return command.type === "source.replace.inline" ? published : finish(published);
     },
     close() {
