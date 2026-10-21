@@ -1,5 +1,5 @@
 import type { SkillsWorkshopUndoResult } from "@openclaw/gateway-protocol";
-import { createSignal, For, onCleanup, Show } from "solid-js";
+import { createSignal, For, onSettled, Show } from "solid-js";
 import type { SkillWorkshopChangeNotice } from "../../../../../src/shared/skill-workshop-change-notice.js";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { formatUiError } from "../../../lib/format-error.ts";
@@ -23,7 +23,7 @@ export function ChatSkillLearnedNotice(props: { notice?: SkillWorkshopChangeNoti
           const [undo, setUndo] = createSignal<UndoState>("idle");
           let pending = false;
           let disposed = false;
-          onCleanup(() => {
+          onSettled(() => () => {
             disposed = true;
           });
           const runUndo = () => {

@@ -6,7 +6,6 @@ import {
   createSignal,
   mapArray,
   merge,
-  onCleanup,
   onSettled,
 } from "solid-js";
 import type { useSessionMenuEntries } from "../../../components/session-menu-view.tsx";
@@ -360,9 +359,9 @@ export function createMobileHeaderSessionMenu(options: {
       // Navigation and the picker ref settle before this one entry request is armed.
       onSettled(() => {
         setFocusArmed(true);
-      });
-      onCleanup(() => {
-        focusCancelled = true;
+        return () => {
+          focusCancelled = true;
+        };
       });
     }
     return view;
