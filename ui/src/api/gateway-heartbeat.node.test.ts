@@ -128,18 +128,51 @@ describe("GatewayBrowserClient heartbeat recovery", () => {
     }
   });
 
-  it("probes after fifteen seconds of silence with a pending request on this socket", async () => {
+  it("probes fifteen seconds after a sent request even if it timed out after ten seconds", async () => {
     useNodeFakeTimers();
     const client = new GatewayBrowserClient({ url: DEFAULT_GATEWAY_URL });
     try {
       const ws = await startConnect(client);
-      void client.request("wizard.next", {}, { timeoutMs: null }).catch(() => undefined);
-      await vi.advanceTimersByTimeAsync(14_999);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const onSent = vi.fn();
+      const request = client
+        .request("sessions.list", {}, { timeoutMs: 10_000, onSent })
+        .catch((error: unknown) => error);
+      expect(onSent).toHaveBeenCalledOnce();
+      expect(JSON.parse(ws.sent.at(-1)!).method).toBe("sessions.list");
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await request).toMatchObject({
+        code: "CLIENT_TIMEOUT",
+        timeoutMs: 10_000,
+        requestSent: true,
+      });
+      await vi.advanceTimersByTimeAsync(4_999);
       expect(probes(ws)).toEqual([]);
       await vi.advanceTimersByTimeAsync(1);
       expect(probes(ws)).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(ws.lastClose).toEqual({ code: 4000, reason: "inbound silence probe timeout" });
+    } finally {
+      client.stop();
+    }
+  });
+
+  it("does not probe early after a sent request is answered quickly", async () => {
+    useNodeFakeTimers();
+    const client = new GatewayBrowserClient({ url: DEFAULT_GATEWAY_URL });
+    try {
+      const ws = await startConnect(client);
+      await vi.advanceTimersByTimeAsync(5_000);
+      const request = client.request("sessions.list", {}, { timeoutMs: 10_000 });
+      const frame = JSON.parse(ws.sent.at(-1)!) as { id: string };
+      await vi.advanceTimersByTimeAsync(1_000);
+      ws.emitMessage({ type: "res", id: frame.id, ok: true, payload: {} });
+      await expect(request).resolves.toEqual({});
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(probes(ws)).toEqual([]);
+      expect(ws.lastClose).toBeNull();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(probes(ws)).toHaveLength(1);
     } finally {
       client.stop();
     }

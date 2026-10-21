@@ -712,7 +712,7 @@ describe("GatewayBrowserClient", () => {
         });
       }
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(ws.sent).toHaveLength(3);
+      expect(ws.sent.filter((raw) => JSON.parse(raw).method !== "health")).toHaveLength(3);
     },
   );
 

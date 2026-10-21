@@ -324,8 +324,10 @@ Server retry hints remain minimum waits and can extend beyond that normal cap, w
 peers on the server, but browsers cannot observe those frames or receive a close
 over a silently dead link. A connected, visible tab checks inbound silence every
 five seconds. After two advertised heartbeat intervals (60 seconds by default),
-or 15 seconds while a request is pending, it sends one read-only `health` request
-without active integration probing. It reconnects only if no event or response
+or 15 seconds after the first request sent since the last inbound frame, it sends
+one read-only `health` request without active integration probing. Sent requests
+still count after they time out; any inbound event or response resets that clock.
+It reconnects only if no event or response
 arrives during the next 10 seconds. Any inbound traffic proves the link is alive;
 a responsive but busy Gateway is not reconnected just because application ticks
 are delayed. Hidden tabs do not probe; returning to a suspended tab uses the

@@ -50,6 +50,7 @@ import {
   type ConnectPlan,
   type GatewayBrowserConnectOptions,
 } from "./gateway-connect-plan.ts";
+import { resolveMaxInboundSilenceMs } from "./gateway-heartbeat-policy.ts";
 export type { EventFrame as GatewayEventFrame } from "@openclaw/gateway-client/browser";
 export { GatewayPayloadLimitError } from "./gateway-browser-socket.ts";
 
@@ -89,11 +90,9 @@ export type GatewayEventListener = (evt: EventFrame) => void;
 const CONNECT_FAILED_CLOSE_CODE = 4008;
 const STARTUP_RETRY_CLOSE_CODE = 4013;
 const BROWSER_WEBSOCKET_CLOSE_CODE = 1006;
-const DEFAULT_GATEWAY_TICK_INTERVAL_MS = 30_000;
-const MIN_GATEWAY_TICK_WATCH_INTERVAL_MS = 1_000;
 const INBOUND_SILENCE_CHECK_INTERVAL_MS = 5_000;
-// Pending user work needs a quicker liveness check than an idle tab.
-const PENDING_REQUEST_SILENCE_MS = 15_000;
+// Unanswered sends need a quicker liveness check even after their requests time out.
+const UNANSWERED_REQUEST_SILENCE_MS = 15_000;
 const INBOUND_SILENCE_PROBE_TIMEOUT_MS = 10_000;
 
 export class GatewayBrowserClient {
@@ -104,6 +103,7 @@ export class GatewayBrowserClient {
   private scopeUpgradeRuntime: Promise<GatewayScopeUpgrade> | null = null;
   private connectionHello: GatewayHelloOk | null = null;
   private lastInboundActivityAtMs: number | null = null;
+  private firstUnansweredRequestAtMs: number | null = null;
   private maxInboundSilenceMs: number | null = null;
   private inboundSilenceTimer: ReturnType<typeof setInterval> | null = null;
   private inboundSilenceProbe: {
@@ -255,6 +255,7 @@ export class GatewayBrowserClient {
       onGap: (info) => this.opts.onGap?.(info),
       onActivity: () => {
         this.lastInboundActivityAtMs = Date.now();
+        this.firstUnansweredRequestAtMs = null;
       },
       onRequestTiming: (timing) => this.opts.onRequestTiming?.(timing),
       onTiming: ({ phase }) => {
@@ -452,18 +453,9 @@ export class GatewayBrowserClient {
   }
 
   private initializeInboundActivity(hello: GatewayHelloOk): void {
-    const advertisedTickIntervalMs = hello.policy?.tickIntervalMs;
-    // Retain the bounded stale-tab window advertised by the Gateway.
-    const tickIntervalMs = resolveSafeTimeoutDelayMs(
-      typeof advertisedTickIntervalMs === "number" &&
-        Number.isFinite(advertisedTickIntervalMs) &&
-        advertisedTickIntervalMs > 0
-        ? advertisedTickIntervalMs
-        : DEFAULT_GATEWAY_TICK_INTERVAL_MS,
-      { minMs: MIN_GATEWAY_TICK_WATCH_INTERVAL_MS },
-    );
-    this.maxInboundSilenceMs = tickIntervalMs * 2;
+    this.maxInboundSilenceMs = resolveMaxInboundSilenceMs(hello.policy?.tickIntervalMs);
     this.lastInboundActivityAtMs = Date.now();
+    this.firstUnansweredRequestAtMs = null;
     this.inboundSilenceTimer = setInterval(
       () => this.checkInboundSilence(),
       INBOUND_SILENCE_CHECK_INTERVAL_MS,
@@ -471,11 +463,8 @@ export class GatewayBrowserClient {
   }
 
   private checkInboundSilence(): void {
-    if (
-      !this.connected ||
-      this.lastInboundActivityAtMs === null ||
-      this.maxInboundSilenceMs === null
-    ) {
+    const lastActivityAtMs = this.lastInboundActivityAtMs;
+    if (!this.connected || lastActivityAtMs === null || this.maxInboundSilenceMs === null) {
       return;
     }
     // Hidden tabs rely on page activation recovery, not throttled probe deadlines.
@@ -485,7 +474,7 @@ export class GatewayBrowserClient {
     }
     const now = Date.now();
     const probe = this.inboundSilenceProbe;
-    if (probe && this.lastInboundActivityAtMs === probe.activityAtMs) {
+    if (probe && lastActivityAtMs === probe.activityAtMs) {
       if (now >= probe.deadlineMs) {
         this.clearInboundActivity();
         this.forceReconnect("inbound silence probe timeout");
@@ -493,15 +482,16 @@ export class GatewayBrowserClient {
       return;
     }
     this.clearInboundSilenceProbe();
-    const silenceMs = this.client.hasPendingRequests
-      ? Math.min(this.maxInboundSilenceMs, PENDING_REQUEST_SILENCE_MS)
-      : this.maxInboundSilenceMs;
-    if (now - this.lastInboundActivityAtMs < silenceMs) {
+    if (
+      now - lastActivityAtMs < this.maxInboundSilenceMs &&
+      (this.firstUnansweredRequestAtMs === null ||
+        now - this.firstUnansweredRequestAtMs < UNANSWERED_REQUEST_SILENCE_MS)
+    ) {
       return;
     }
     const abort = new AbortController();
     this.inboundSilenceProbe = {
-      activityAtMs: this.lastInboundActivityAtMs,
+      activityAtMs: lastActivityAtMs,
       deadlineMs: now + INBOUND_SILENCE_PROBE_TIMEOUT_MS,
       abort,
     };
@@ -529,6 +519,7 @@ export class GatewayBrowserClient {
     }
     this.clearInboundSilenceProbe();
     this.lastInboundActivityAtMs = null;
+    this.firstUnansweredRequestAtMs = null;
     this.maxInboundSilenceMs = null;
   }
 
@@ -669,10 +660,16 @@ export class GatewayBrowserClient {
     params?: unknown,
     options?: GatewayProtocolRequestOptions,
   ): Promise<T> {
-    if (method === "talk.catalog") {
-      return this.requestTalkCatalog<T>(params, options);
-    }
-    return this.chatEvents.request<T>(this.client, method, params, options);
+    const requestOptions: GatewayProtocolRequestOptions = {
+      ...options,
+      onSent: (requestId) => {
+        this.firstUnansweredRequestAtMs ??= Date.now();
+        options?.onSent?.(requestId);
+      },
+    };
+    return method === "talk.catalog"
+      ? this.requestTalkCatalog<T>(params, requestOptions)
+      : this.chatEvents.request<T>(this.client, method, params, requestOptions);
   }
 
   private async requestTalkCatalog<T>(
