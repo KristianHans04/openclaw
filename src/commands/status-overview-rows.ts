@@ -21,6 +21,7 @@ import {
   buildStatusEventsValue,
   buildStatusPluginCompatibilityValue,
   buildStatusProbesValue,
+  buildStatusSecretDiagnostics,
   buildStatusSecretsValue,
   buildStatusSessionsOverviewValue,
   formatHostDesktopStatus,
@@ -79,11 +80,11 @@ function buildStatusDegradationRows(
           : decorate(status.message ?? "Certificate preparation unavailable"),
     });
   }
-  const secretOwners = summary.degradedSecretOwners ?? [];
+  const secretOwners = buildStatusSecretDiagnostics(summary.degradedSecretOwners ?? [], []);
   if (secretOwners.length > 0) {
     addWarning(
       "Degraded secrets",
-      `${secretOwners.length} degraded · ${secretOwners.map((owner) => `${owner.ownerKind}:${owner.ownerId}`).join(", ")}`,
+      `${secretOwners.length} degraded · ${secretOwners.slice(0, 10).join(", ")}${secretOwners.length > 10 ? `, … +${secretOwners.length - 10} more` : ""}`,
     );
   }
   const plugins = summary.degradedPlugins ?? [];
