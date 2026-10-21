@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
 import { recordLegacyAcpMigrationSources } from "../../config/sessions/session-accessor.sqlite-acp-provenance.js";
 import { readSessionEntryCache } from "../../config/sessions/session-accessor.sqlite-entry-cache.js";
@@ -23,6 +24,7 @@ import {
 } from "../../state/openclaw-agent-db.js";
 import { isPostgresSqlConnection, type EngineConnection } from "../sql-connection.js";
 import { runSqliteImmediateTransactionSync } from "../sqlite-transaction.js";
+import { createSqliteWorkerTransferCollector } from "../sqlite-worker-transfer.js";
 import { withEngineStoreAdmission } from "./admission-scope.js";
 import { mixedAgentConnection, useMixedAgentPair } from "./mixed-agent.conformance.test-support.js";
 
@@ -418,7 +420,17 @@ describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
         };
       };
       try {
+        let coldPatch: unknown;
+        const transfer = createSqliteWorkerTransferCollector("patch", (value) => {
+          coldPatch = value;
+        });
+        f.hooks.admit = (_stage, facts) => {
+          if (isRecord(facts) && "transfer" in facts) {
+            transfer.accept(facts.transfer);
+          }
+        };
         patch("coldPatch", { label: "Cold participant projection" });
+        delete f.hooks.admit;
         if (engine === "postgres") {
           // BEGIN + eager lock, hydrated entry, node/window CTE, COMMIT.
           expect(recorder.queries.coldPatch).toHaveLength(4);
@@ -430,11 +442,19 @@ describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
           { identity: { type: "profile", id: "a" } },
         ];
         const untimestampedParticipant = { identity: { type: "agent", id: "z" } };
-        expect(before.entry?.participants).toEqual(
-          engine === "sqlite"
-            ? [untimestampedParticipant, ...timestampedParticipants]
-            : [...timestampedParticipants, untimestampedParticipant],
-        );
+        expect(coldPatch).toMatchObject({
+          entry: {
+            participants:
+              engine === "sqlite"
+                ? [untimestampedParticipant, ...timestampedParticipants]
+                : [...timestampedParticipants, untimestampedParticipant],
+          },
+        });
+        // Actor hydration has always normalized NULL timestamps first on both engines.
+        expect(before.entry?.participants).toEqual([
+          untimestampedParticipant,
+          ...timestampedParticipants,
+        ]);
         const acceptedOutcome = await execute("acceptInput", {
           type: "session.actor.acceptInput",
           input: {
