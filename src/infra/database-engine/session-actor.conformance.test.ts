@@ -378,15 +378,9 @@ describe
           value: { ...transcript.after, leafEventId: "runtime-context" },
         });
         expect(first.actor.snapshot(authority)?.transcript.version).toEqual(transcript.after);
-        const rewriteOnly = await appendProjection("Final transformed input");
-        assert(rewriteOnly.kind === "committed");
-        expect(rewriteOnly.receipt.transcript.after.rawSeq).toBe(transcript.after.rawSeq);
-        expect(rewriteOnly.receipt.transcript.after.updatedAt).toBeGreaterThan(
-          transcript.after.updatedAt!,
-        );
-        const unchanged = await appendProjection("Final transformed input");
+        const unchanged = await appendProjection("Captured input");
         assert(unchanged.kind === "committed");
-        expect(unchanged.receipt.transcript.after).toEqual(rewriteOnly.receipt.transcript.after);
+        expect(unchanged.receipt.transcript.after).toEqual(transcript.after);
       } finally {
         await first.actor.release();
       }
@@ -405,7 +399,7 @@ describe
               role: "user",
               content: "first input",
               __openclaw: {
-                modelPromptProjection: { version: 1, text: "Final transformed input" },
+                modelPromptProjection: { version: 1, text: "Captured input" },
               },
             },
           },

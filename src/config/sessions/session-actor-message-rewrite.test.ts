@@ -336,15 +336,17 @@ it.each([
 
 it("commits a changed prompt with a duplicate carrier and leaves unchanged replay untouched", async () => {
   await withActor(async (f) => {
-    const { rewrite, carrier, command } = promptCarrier(f, "Original question");
+    const text = "Final transformed question";
+    const { rewrite, carrier, command } = promptCarrier(f, text);
+    assert("append" in command.input && command.input.append?.kind === "metadata");
+    const append = command.input.append;
+    const projection = append.modelPromptProjection;
+    assert(projection);
+    delete append.modelPromptProjection;
     await f.prepare(command);
     const first = f.mutate(command);
     assert(first.kind === "committed");
-    assert("append" in command.input && command.input.append?.kind === "metadata");
-    const append = command.input.append;
-    assert(append.modelPromptProjection);
-    const text = "Final transformed question";
-    append.modelPromptProjection.text = text;
+    append.modelPromptProjection = projection;
     append.input.options.expectedMutationAt = first.receipt.transcript.after.updatedAt;
     command.input.commandId = "changed-prompt-duplicate-carrier";
     await f.prepare(command);
