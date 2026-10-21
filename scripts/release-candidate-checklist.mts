@@ -478,6 +478,22 @@ function formatPluginSdkApiAcknowledgementFailure(
   );
 }
 
+export function resolveEarlyPluginSdkApiReviewPaths({
+  outputDir,
+  targetRoot,
+}: {
+  outputDir: string;
+  targetRoot: string;
+}) {
+  const reviewDir = resolvePath(targetRoot, outputDir, "plugin-sdk-api-early-review");
+  return {
+    reviewDir,
+    evidencePath: join(reviewDir, "plugin-sdk-api-release-evidence.json"),
+    reportPath: join(reviewDir, "plugin-sdk-api-release-diff.md"),
+    diffPath: join(reviewDir, "plugin-sdk-api-release-diff.json"),
+  };
+}
+
 function runEarlyPluginSdkApiReview({
   npmDistTag,
   outputDir,
@@ -522,11 +538,11 @@ function runEarlyPluginSdkApiReview({
       { cwd: TOOLING_ROOT },
     );
   }
-  const reviewDir = join(outputDir, "plugin-sdk-api-early-review");
+  const { reviewDir, evidencePath, reportPath, diffPath } = resolveEarlyPluginSdkApiReviewPaths({
+    outputDir,
+    targetRoot,
+  });
   mkdirSync(reviewDir, { recursive: true });
-  const evidencePath = join(reviewDir, "plugin-sdk-api-release-evidence.json");
-  const reportPath = join(reviewDir, "plugin-sdk-api-release-diff.md");
-  const diffPath = join(reviewDir, "plugin-sdk-api-release-diff.json");
   const args = [
     "run",
     "plugin-sdk:api:diff",

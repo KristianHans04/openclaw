@@ -54,6 +54,7 @@ import {
   preflightDependencyTarballs,
   reconcileReleaseCandidateState,
   resolveEarlyPluginSdkApiBases,
+  resolveEarlyPluginSdkApiReviewPaths,
   resolveArtifactName,
   requireRunIdFromDispatchOutput,
   run,
@@ -174,15 +175,29 @@ describe("release candidate checklist", () => {
     ).toEqual({ beta: "v2026.10.20-beta.1" });
   });
 
-  it("runs the Plugin SDK review after dispatch and before waiting for FRV", () => {
-    const source = readFileSync("scripts/release-candidate-checklist.mts", "utf8");
-    const main = source.match(/^async function main\(\)[\s\S]*?^\}/mu)?.[0] ?? "";
-    const dispatch = main.indexOf("dispatchFullReleaseUsingHelper(options, targetSha, toolingSha)");
-    const sdkReview = main.indexOf("runEarlyPluginSdkApiReview({");
-    const waitForFrv = main.indexOf("const { run: fullRun } = await waitForSuccessfulRun(");
-    expect(dispatch).toBeGreaterThanOrEqual(0);
-    expect(sdkReview).toBeGreaterThan(dispatch);
-    expect(waitForFrv).toBeGreaterThan(sdkReview);
+  it("keeps early Plugin SDK artifacts in the candidate output when tooling has another cwd", () => {
+    const candidateRoot = tempDirs.make("candidate-sdk-review-");
+    const toolingRoot = tempDirs.make("tooling-sdk-review-");
+    const outputDir = join(".artifacts", "release-candidate", "v2026.10.21", "candidate-sha");
+    const paths = resolveEarlyPluginSdkApiReviewPaths({ outputDir, targetRoot: candidateRoot });
+    const artifactPaths = [paths.evidencePath, paths.reportPath, paths.diffPath];
+
+    execFileSync(
+      process.execPath,
+      [
+        "-e",
+        "const fs = require('node:fs'); for (const file of process.argv.slice(1)) { fs.mkdirSync(require('node:path').dirname(file), { recursive: true }); fs.writeFileSync(file, file); }",
+        ...artifactPaths,
+      ],
+      { cwd: toolingRoot },
+    );
+
+    expect(paths.reviewDir).toBe(join(candidateRoot, outputDir, "plugin-sdk-api-early-review"));
+    for (const artifactPath of artifactPaths) {
+      expect(readFileSync(artifactPath, "utf8")).toBe(artifactPath);
+      expect(artifactPath.startsWith(candidateRoot)).toBe(true);
+      expect(artifactPath.startsWith(toolingRoot)).toBe(false);
+    }
   });
 
   it.each([
