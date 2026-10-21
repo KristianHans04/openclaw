@@ -342,6 +342,7 @@ suite.define(() => {
           id: "root",
           component: { Column: { children: { explicitList: ["title", "broken"] } } },
         },
+        textComponent("v0.8", "title", "A2UI board widget"),
         {
           id: "broken",
           component: { MultipleChoice: { selections: { literalArray: [] }, options: "invalid" } },
