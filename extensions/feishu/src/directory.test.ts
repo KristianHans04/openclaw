@@ -179,10 +179,9 @@ describe("feishu directory (config-backed)", () => {
     ["group", 0],
     ["group", -1],
   ] as const)("treats a nonpositive %s limit (%i) as unlimited", async (kind, limit) => {
-    const items =
-      kind === "peer"
-        ? [{ open_id: "ou_first" }, { open_id: "ou_second" }]
-        : [{ chat_id: "chat-first" }, { chat_id: "chat-second" }];
+    const items = ["first", "second"].map((suffix) =>
+      kind === "peer" ? { open_id: `ou_${suffix}` } : { chat_id: `chat-${suffix}` },
+    );
     const list = vi
       .fn()
       .mockResolvedValueOnce(page(items, "next/page+2="))
