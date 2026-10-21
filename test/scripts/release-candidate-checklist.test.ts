@@ -54,6 +54,7 @@ import {
   preflightDependencyTarballs,
   reconcileReleaseCandidateState,
   resolveArtifactName,
+  resolveReleaseCandidateOutputDir,
   requireRunIdFromDispatchOutput,
   run,
   validateCandidateChangelogProvenance,
@@ -156,6 +157,25 @@ async function withGithubApiTimeoutEnv<T>(value: string, fn: () => Promise<T>): 
 }
 
 describe("release candidate checklist", () => {
+  it("namespaces default saved state by the resolved target SHA", () => {
+    const tag = "v2026.9.1-beta.2";
+    const first = "a".repeat(40);
+    const second = "b".repeat(40);
+    expect(resolveReleaseCandidateOutputDir({ outputDir: "", tag, targetSha: first })).toBe(
+      join(".artifacts", "release-candidate", tag, first),
+    );
+    expect(resolveReleaseCandidateOutputDir({ outputDir: "", tag, targetSha: second })).toBe(
+      join(".artifacts", "release-candidate", tag, second),
+    );
+    expect(
+      resolveReleaseCandidateOutputDir({
+        outputDir: "/retained/release-request",
+        tag,
+        targetSha: second,
+      }),
+    ).toBe("/retained/release-request");
+  });
+
   it.each([
     {
       flags: [
